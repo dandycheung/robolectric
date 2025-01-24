@@ -3,7 +3,6 @@ package org.robolectric.util;
 import java.lang.annotation.Annotation;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
-import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
@@ -11,6 +10,9 @@ import java.lang.reflect.Proxy;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Optional;
+import javax.annotation.Nullable;
+import org.robolectric.annotation.ClassName;
 
 /** Collection of helper methods for calling methods and accessing fields reflectively. */
 @SuppressWarnings(value = {"unchecked", "TypeParameterUnusedInFormals", "NewApi"})
@@ -31,6 +33,14 @@ public class ReflectionHelpers {
     PRIMITIVE_RETURN_VALUES = Collections.unmodifiableMap(map);
   }
 
+  /**
+   * Create a proxy for the given class which returns default values for every method call.
+   *
+   * <p>0 will be returned for any primitive return types, otherwise null will be returned.
+   *
+   * @param clazz the class to provide a proxy instance of.
+   * @return a new "Null Proxy" instance of the given class.
+   */
   public static <T> T createNullProxy(Class<T> clazz) {
     return (T)
         Proxy.newProxyInstance(
@@ -45,9 +55,10 @@ public class ReflectionHelpers {
    * <p>The returned object will be an instance of the given class, but all methods will return
    * either the "default" value for primitives, or another deep proxy for non-primitive types.
    *
-   * <p>This should be used rarely, for cases where we need to create deep proxies in order not
-   * to crash. The inner proxies are impossible to configure, so there is no way to create
-   * meaningful behavior from a deep proxy. It serves mainly to prevent Null Pointer Exceptions.
+   * <p>This should be used rarely, for cases where we need to create deep proxies in order not to
+   * crash. The inner proxies are impossible to configure, so there is no way to create meaningful
+   * behavior from a deep proxy. It serves mainly to prevent Null Pointer Exceptions.
+   *
    * @param clazz the class to provide a proxy instance of.
    * @return a new "Deep Proxy" instance of the given class.
    */
@@ -56,52 +67,100 @@ public class ReflectionHelpers {
         Proxy.newProxyInstance(
             clazz.getClassLoader(),
             new Class[] {clazz},
-            new InvocationHandler() {
-              @Override
-              public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
-                if (PRIMITIVE_RETURN_VALUES.containsKey(method.getReturnType().getName())) {
-                  return PRIMITIVE_RETURN_VALUES.get(method.getReturnType().getName());
-                } else if (method.getReturnType().isInterface()) {
-                  return createDeepProxy(method.getReturnType());
-                } else {
-                  return null;
-                }
+            (proxy, method, args) -> {
+              if (PRIMITIVE_RETURN_VALUES.containsKey(method.getReturnType().getName())) {
+                return PRIMITIVE_RETURN_VALUES.get(method.getReturnType().getName());
+              } else if (method.getReturnType().isInterface()) {
+                return createDeepProxy(method.getReturnType());
+              } else {
+                return null;
               }
             });
   }
 
+  /**
+   * Create a proxy for the given class which can delegate method calls to another object.
+   *
+   * <p>If the delegate has no methods whose signature matches, a null (or 0 for primitive types)
+   * return value will be returned.
+   *
+   * @param clazz the class to provide a proxy instance of.
+   * @param delegate the object to delegate matching method calls to. A 'matching method' must have
+   *     exactly the same method name and parameter class names as the desired method.
+   *     The @ClassName annotation can be applied to provide a custom class name.
+   * @return a new "Delegating Proxy" instance of the given class.
+   */
   public static <T> T createDelegatingProxy(Class<T> clazz, final Object delegate) {
-    final Class delegateClass = delegate.getClass();
+    final Class<?> delegateClass = delegate.getClass();
     return (T)
         Proxy.newProxyInstance(
             clazz.getClassLoader(),
             new Class[] {clazz},
-            new InvocationHandler() {
-              @Override
-              public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
-                try {
-                  Method delegateMethod =
-                      delegateClass.getMethod(method.getName(), method.getParameterTypes());
-                  delegateMethod.setAccessible(true);
-                  return delegateMethod.invoke(delegate, args);
-                } catch (NoSuchMethodException e) {
-                  return PRIMITIVE_RETURN_VALUES.get(method.getReturnType().getName());
-                } catch (InvocationTargetException e) {
-                  // Required to propagate the correct throwable.
-                  throw e.getTargetException();
-                }
+            (proxy, method, args) -> {
+              try {
+                Method delegateMethod =
+                    findDelegateMethod(delegateClass, method.getName(), method.getParameterTypes());
+                delegateMethod.setAccessible(true);
+                return delegateMethod.invoke(delegate, args);
+              } catch (NoSuchMethodException e) {
+                return PRIMITIVE_RETURN_VALUES.get(method.getReturnType().getName());
+              } catch (InvocationTargetException e) {
+                // Required to propagate the correct throwable.
+                throw e.getTargetException();
               }
             });
   }
 
+  private static Method findDelegateMethod(
+      Class<?> delegateClass, String methodName, Class<?>[] parameterTypes)
+      throws NoSuchMethodException {
+    for (Method delegateMethod : delegateClass.getMethods()) {
+      if (delegateMethod.getName().equals(methodName)
+          && Modifier.isPublic(delegateMethod.getModifiers())
+          && parametersMatch(
+              parameterTypes,
+              delegateMethod.getParameterTypes(),
+              delegateMethod.getParameterAnnotations())) {
+        return delegateMethod;
+      }
+    }
+    throw new NoSuchMethodException();
+  }
+
+  private static boolean parametersMatch(
+      Class<?>[] parameterTypes,
+      Class<?>[] delegateParameterTypes,
+      Annotation[][] parameterAnnotations) {
+    if (parameterTypes.length != delegateParameterTypes.length) {
+      return false;
+    }
+    for (int i = 0; i < parameterTypes.length; i++) {
+      if (!parameterTypes[i].getName().equals(delegateParameterTypes[i].getName())
+          && !parameterTypes[i]
+              .getName()
+              .equals(getClassNameFromAnnotation(parameterAnnotations[i]))) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  @Nullable
+  private static String getClassNameFromAnnotation(Annotation[] parameterAnnotations) {
+    for (Annotation annotation : parameterAnnotations) {
+      if (annotation.annotationType().equals(ClassName.class)) {
+        return ((ClassName) annotation).value();
+      }
+    }
+    return null;
+  }
+
   public static <A extends Annotation> A defaultsFor(Class<A> annotation) {
     return annotation.cast(
-        Proxy.newProxyInstance(annotation.getClassLoader(), new Class[] { annotation },
-            new InvocationHandler() {
-              @Override public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
-                return method.getDefaultValue();
-              }
-            }));
+        Proxy.newProxyInstance(
+            annotation.getClassLoader(),
+            new Class[] {annotation},
+            (proxy, method, args) -> method.getDefaultValue()));
   }
 
   /**
@@ -115,14 +174,14 @@ public class ReflectionHelpers {
   @SuppressWarnings("unchecked")
   public static <R> R getField(final Object object, final String fieldName) {
     try {
-      return traverseClassHierarchy(object.getClass(), NoSuchFieldException.class, new InsideTraversal<R>() {
-        @Override
-        public R run(Class<?> traversalClass) throws Exception {
-          Field field = traversalClass.getDeclaredField(fieldName);
-          field.setAccessible(true);
-          return (R) field.get(object);
-        }
-      });
+      return traverseClassHierarchy(
+          object.getClass(),
+          NoSuchFieldException.class,
+          traversalClass -> {
+            Field field = traversalClass.getDeclaredField(fieldName);
+            field.setAccessible(true);
+            return (R) field.get(object);
+          });
     } catch (Exception e) {
       throw new RuntimeException(e);
     }
@@ -135,17 +194,19 @@ public class ReflectionHelpers {
    * @param fieldName The field name.
    * @param fieldNewValue New value.
    */
-  public static void setField(final Object object, final String fieldName, final Object fieldNewValue) {
+  public static void setField(
+      final Object object, final String fieldName, final Object fieldNewValue) {
     try {
-      traverseClassHierarchy(object.getClass(), NoSuchFieldException.class, new InsideTraversal<Void>() {
-        @Override
-        public Void run(Class<?> traversalClass) throws Exception {
-          Field field = traversalClass.getDeclaredField(fieldName);
-          field.setAccessible(true);
-          field.set(object, fieldNewValue);
-          return null;
-        }
-      });
+      traverseClassHierarchy(
+          object.getClass(),
+          NoSuchFieldException.class,
+          (InsideTraversal<Void>)
+              traversalClass -> {
+                Field field = traversalClass.getDeclaredField(fieldName);
+                field.setAccessible(true);
+                field.set(object, fieldNewValue);
+                return null;
+              });
     } catch (Exception e) {
       throw new RuntimeException(e);
     }
@@ -159,13 +220,31 @@ public class ReflectionHelpers {
    * @param fieldName The field name.
    * @param fieldNewValue New value.
    */
-  public static void setField(Class<?> type, final Object object, final String fieldName, final Object fieldNewValue) {
+  public static void setField(
+      Class<?> type, final Object object, final String fieldName, final Object fieldNewValue) {
     try {
       Field field = type.getDeclaredField(fieldName);
       field.setAccessible(true);
       field.set(object, fieldNewValue);
     } catch (Exception e) {
       throw new RuntimeException(e);
+    }
+  }
+
+  /**
+   * Reflectively check if a class has a given field (static or non static).
+   *
+   * @param clazz Target class.
+   * @param fieldName The field name.
+   * @return boolean to indicate whether the field exists or not in clazz.
+   */
+  public static boolean hasField(Class<?> clazz, String fieldName) {
+    try {
+      Field field = clazz.getDeclaredField(fieldName);
+      //noinspection ConstantValue
+      return field != null;
+    } catch (NoSuchFieldException e) {
+      return false;
     }
   }
 
@@ -179,7 +258,7 @@ public class ReflectionHelpers {
   @SuppressWarnings("unchecked")
   public static <R> R getStaticField(Field field) {
     try {
-      makeFieldVeryAccessible(field);
+      field.setAccessible(true);
       return (R) field.get(null);
     } catch (Exception e) {
       throw new RuntimeException(e);
@@ -210,7 +289,10 @@ public class ReflectionHelpers {
    */
   public static void setStaticField(Field field, Object fieldNewValue) {
     try {
-      makeFieldVeryAccessible(field);
+      if ((field.getModifiers() & Modifier.FINAL) == Modifier.FINAL) {
+        throw new IllegalArgumentException("Cannot set the value of final field " + field);
+      }
+      field.setAccessible(true);
       field.set(null, fieldNewValue);
     } catch (Exception e) {
       throw new RuntimeException(e);
@@ -251,15 +333,14 @@ public class ReflectionHelpers {
       final Class<?>[] classes = ClassParameter.getClasses(classParameters);
       final Object[] values = ClassParameter.getValues(classParameters);
 
-      return traverseClassHierarchy(instance.getClass(), NoSuchMethodException.class, new InsideTraversal<R>() {
-        @Override
-        @SuppressWarnings("unchecked")
-        public R run(Class<?> traversalClass) throws Exception {
-          Method declaredMethod = traversalClass.getDeclaredMethod(methodName, classes);
-          declaredMethod.setAccessible(true);
-          return (R) declaredMethod.invoke(instance, values);
-        }
-      });
+      return traverseClassHierarchy(
+          instance.getClass(),
+          NoSuchMethodException.class,
+          traversalClass -> {
+            Method declaredMethod = traversalClass.getDeclaredMethod(methodName, classes);
+            declaredMethod.setAccessible(true);
+            return (R) declaredMethod.invoke(instance, values);
+          });
     } catch (InvocationTargetException e) {
       if (e.getTargetException() instanceof RuntimeException) {
         throw (RuntimeException) e.getTargetException();
@@ -316,12 +397,13 @@ public class ReflectionHelpers {
   /**
    * Helper method for calling a static method using a class from a custom class loader
    *
-   * @param classLoader
-   * @param fullyQualifiedClassName
-   * @param methodName
-   * @param classParameters
-   * @param <R>
-   * @return
+   * @param classLoader The ClassLoader used to load class
+   * @param fullyQualifiedClassName The full qualified class name with package name of the
+   *     ClassLoader will load
+   * @param methodName The method name will be called
+   * @param classParameters The input parameters will be used for method calling
+   * @param <R> Return type of the method
+   * @return Return the value of the method
    */
   public static <R> R callStaticMethod(
       ClassLoader classLoader,
@@ -387,6 +469,22 @@ public class ReflectionHelpers {
   }
 
   /**
+   * Attempt to load a class.
+   *
+   * @param classLoader The class loader.
+   * @param fullyQualifiedClassName The fully qualified class name.
+   * @return The class object, or null if class is not found.
+   */
+  public static Optional<Class<?>> attemptLoadClass(
+      ClassLoader classLoader, String fullyQualifiedClassName) {
+    try {
+      return Optional.of(classLoader.loadClass(fullyQualifiedClassName));
+    } catch (ClassNotFoundException e) {
+      return Optional.empty();
+    }
+  }
+
+  /**
    * Create a new instance of a class
    *
    * @param cl The class object.
@@ -396,7 +494,9 @@ public class ReflectionHelpers {
   public static <T> T newInstance(Class<T> cl) {
     try {
       return cl.getDeclaredConstructor().newInstance();
-    } catch (InstantiationException | IllegalAccessException | NoSuchMethodException
+    } catch (InstantiationException
+        | IllegalAccessException
+        | NoSuchMethodException
         | InvocationTargetException e) {
       throw new RuntimeException(e);
     }
@@ -435,7 +535,48 @@ public class ReflectionHelpers {
     }
   }
 
-  private static <R, E extends Exception> R traverseClassHierarchy(Class<?> targetClass, Class<? extends E> exceptionClass, InsideTraversal<R> insideTraversal) throws Exception {
+  /**
+   * Reflectively check if a class has a given constructor.
+   *
+   * @param parameterTypes in order parameters of the constructor.
+   * @param clazzName Target class name.
+   * @return boolean to indicate whether the constructor exists or not on the clazz.
+   */
+  public static boolean hasConstructor(String clazzName, Class<?>... parameterTypes) {
+    Class<?> clazz =
+        ReflectionHelpers.loadClass(Thread.currentThread().getContextClassLoader(), clazzName);
+    return hasConstructor(clazz, parameterTypes);
+  }
+
+  /**
+   * Reflectively check if a class has a given constructor.
+   *
+   * @param parameterTypes in order parameters of the constructor.
+   * @param clazz Target class.
+   * @return boolean to indicate whether the constructor exists or not on the clazz.
+   */
+  public static boolean hasConstructor(Class<?> clazz, Class<?>... parameterTypes) {
+    for (Constructor<?> constructor : clazz.getDeclaredConstructors()) {
+      Class<?>[] paramTypes = constructor.getParameterTypes();
+      if (paramTypes.length == parameterTypes.length) {
+        boolean match = true;
+        for (int i = 0; i < paramTypes.length; i++) {
+          if (!paramTypes[i].isAssignableFrom(parameterTypes[i])) {
+            match = false;
+            break;
+          }
+        }
+        if (match) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  private static <R, E extends Exception> R traverseClassHierarchy(
+      Class<?> targetClass, Class<? extends E> exceptionClass, InsideTraversal<R> insideTraversal)
+      throws Exception {
     Class<?> hierarchyTraversalClass = targetClass;
     while (true) {
       try {
@@ -448,24 +589,6 @@ public class ReflectionHelpers {
         if (hierarchyTraversalClass == null) {
           throw new RuntimeException(e);
         }
-      }
-    }
-  }
-
-  private static void makeFieldVeryAccessible(Field field) {
-    field.setAccessible(true);
-    // remove 'final' modifier if present
-    if ((field.getModifiers() & Modifier.FINAL) == Modifier.FINAL) {
-      try {
-        Field modifiersField = Field.class.getDeclaredField("modifiers");
-        modifiersField.setAccessible(true);
-        try {
-          modifiersField.setInt(field, field.getModifiers() & ~Modifier.FINAL);
-        } catch (IllegalAccessException e) {
-          throw new AssertionError(e);
-        }
-      } catch (NoSuchFieldException e) {
-        // ignore missing fields
       }
     }
   }
@@ -485,15 +608,15 @@ public class ReflectionHelpers {
    */
   public static class ClassParameter<V> {
     public final Class<? extends V> clazz;
-    public final V val;
+    public final V value;
 
-    public ClassParameter(Class<? extends V> clazz, V val) {
+    public ClassParameter(Class<? extends V> clazz, V value) {
       this.clazz = clazz;
-      this.val = val;
+      this.value = value;
     }
 
-    public static <V> ClassParameter<V> from(Class<? extends V> clazz, V val) {
-      return new ClassParameter<>(clazz, val);
+    public static <V> ClassParameter<V> from(Class<? extends V> clazz, V value) {
+      return new ClassParameter<>(clazz, value);
     }
 
     public static ClassParameter<?>[] fromComponentLists(Class<?>[] classes, Object[] values) {
@@ -516,29 +639,10 @@ public class ReflectionHelpers {
     public static Object[] getValues(ClassParameter<?>... classParameters) {
       Object[] values = new Object[classParameters.length];
       for (int i = 0; i < classParameters.length; i++) {
-        Object paramValue = classParameters[i].val;
+        Object paramValue = classParameters[i].value;
         values[i] = paramValue;
       }
       return values;
-    }
-  }
-
-  /**
-   * String parameter used with reflective method calls.
-   *
-   * @param <V> The value of the method parameter.
-   */
-  public static class StringParameter<V> {
-    public final String className;
-    public final V val;
-
-    public StringParameter(String className, V val) {
-      this.className = className;
-      this.val = val;
-    }
-
-    public static <V> StringParameter<V> from(String className, V val) {
-      return new StringParameter<>(className, val);
     }
   }
 }

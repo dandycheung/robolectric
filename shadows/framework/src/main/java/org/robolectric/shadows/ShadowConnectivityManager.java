@@ -1,13 +1,12 @@
 package org.robolectric.shadows;
 
-import static android.os.Build.VERSION_CODES.KITKAT;
-import static android.os.Build.VERSION_CODES.LOLLIPOP;
 import static android.os.Build.VERSION_CODES.M;
 import static android.os.Build.VERSION_CODES.N;
 import static android.os.Build.VERSION_CODES.O;
-import static org.robolectric.RuntimeEnvironment.getApiLevel;
+import static android.os.Build.VERSION_CODES.S;
 import static org.robolectric.Shadows.shadowOf;
 
+import android.app.PendingIntent;
 import android.net.ConnectivityManager;
 import android.net.ConnectivityManager.OnNetworkActiveListener;
 import android.net.LinkProperties;
@@ -24,6 +23,7 @@ import java.util.Set;
 import org.robolectric.annotation.HiddenApi;
 import org.robolectric.annotation.Implementation;
 import org.robolectric.annotation.Implements;
+import org.robolectric.annotation.Resetter;
 import org.robolectric.shadow.api.Shadow;
 
 @Implements(ConnectivityManager.class)
@@ -33,55 +33,104 @@ public class ShadowConnectivityManager {
   static final int NET_ID_WIFI = ConnectivityManager.TYPE_WIFI;
   static final int NET_ID_MOBILE = ConnectivityManager.TYPE_MOBILE;
 
-  private NetworkInfo activeNetworkInfo;
-  private boolean backgroundDataSetting;
-  private int restrictBackgroundStatus = ConnectivityManager.RESTRICT_BACKGROUND_STATUS_DISABLED;
-  private int networkPreference = ConnectivityManager.DEFAULT_NETWORK_PREFERENCE;
-  private final Map<Integer, NetworkInfo> networkTypeToNetworkInfo = new HashMap<>();
+  private static NetworkInfo activeNetworkInfo;
+  private static boolean backgroundDataSetting;
+  private static boolean networkCallbacksEnabled = true;
+  private static int restrictBackgroundStatus =
+      ConnectivityManager.RESTRICT_BACKGROUND_STATUS_DISABLED;
+  private static int networkPreference = ConnectivityManager.DEFAULT_NETWORK_PREFERENCE;
+  private static final Map<Integer, NetworkInfo> networkTypeToNetworkInfo = new HashMap<>();
 
-  private HashSet<ConnectivityManager.NetworkCallback> networkCallbacks = new HashSet<>();
-  private final Map<Integer, Network> netIdToNetwork = new HashMap<>();
-  private final Map<Integer, NetworkInfo> netIdToNetworkInfo = new HashMap<>();
-  private Network processBoundNetwork;
-  private boolean defaultNetworkActive;
-  private HashSet<ConnectivityManager.OnNetworkActiveListener> onNetworkActiveListeners =
+  private static final HashSet<ConnectivityManager.NetworkCallback> networkCallbacks =
       new HashSet<>();
-  private Map<Network, Boolean> reportedNetworkConnectivity = new HashMap<>();
-  private Map<Network, NetworkCapabilities> networkCapabilitiesMap = new HashMap<>();
-  private String captivePortalServerUrl = "http://10.0.0.2";
-  private final Map<Network, LinkProperties> linkPropertiesMap = new HashMap<>();
-  private final Map<Network, ProxyInfo> proxyInfoMap = new HashMap<>();
+  private static final HashSet<PendingIntent> networkCallbackPendingIntents = new HashSet<>();
 
-  public ShadowConnectivityManager() {
-    NetworkInfo wifi = ShadowNetworkInfo.newInstance(NetworkInfo.DetailedState.DISCONNECTED,
-        ConnectivityManager.TYPE_WIFI, 0, true, false);
+  private static final Map<Integer, Network> netIdToNetwork = new HashMap<>();
+  private static final Map<Integer, NetworkInfo> netIdToNetworkInfo = new HashMap<>();
+  private static Network processBoundNetwork;
+  private static boolean defaultNetworkActive = true;
+  private static final HashSet<ConnectivityManager.OnNetworkActiveListener>
+      onNetworkActiveListeners = new HashSet<>();
+  private static final Map<Network, Boolean> reportedNetworkConnectivity = new HashMap<>();
+  private static final Map<Network, NetworkCapabilities> networkCapabilitiesMap = new HashMap<>();
+  private static String captivePortalServerUrl = "http://10.0.0.2";
+  private static final Map<Network, LinkProperties> linkPropertiesMap = new HashMap<>();
+  private static final Map<Network, ProxyInfo> proxyInfoMap = new HashMap<>();
+
+  static {
+    resetNetworkDefaults();
+  }
+
+  private static void resetNetworkDefaults() {
+    networkTypeToNetworkInfo.clear();
+    NetworkInfo wifi =
+        ShadowNetworkInfo.newInstance(
+            NetworkInfo.DetailedState.DISCONNECTED, ConnectivityManager.TYPE_WIFI, 0, true, false);
     networkTypeToNetworkInfo.put(ConnectivityManager.TYPE_WIFI, wifi);
 
-    NetworkInfo mobile = ShadowNetworkInfo.newInstance(NetworkInfo.DetailedState.CONNECTED,
-        ConnectivityManager.TYPE_MOBILE, ConnectivityManager.TYPE_MOBILE_MMS, true, true);
+    NetworkInfo mobile =
+        ShadowNetworkInfo.newInstance(
+            NetworkInfo.DetailedState.CONNECTED,
+            ConnectivityManager.TYPE_MOBILE,
+            ConnectivityManager.TYPE_MOBILE_MMS,
+            true,
+            true);
     networkTypeToNetworkInfo.put(ConnectivityManager.TYPE_MOBILE, mobile);
 
-    this.activeNetworkInfo = mobile;
+    activeNetworkInfo = mobile;
 
-    if (getApiLevel() >= LOLLIPOP) {
-      netIdToNetwork.put(NET_ID_WIFI, ShadowNetwork.newInstance(NET_ID_WIFI));
-      netIdToNetwork.put(NET_ID_MOBILE, ShadowNetwork.newInstance(NET_ID_MOBILE));
-      netIdToNetworkInfo.put(NET_ID_WIFI, wifi);
-      netIdToNetworkInfo.put(NET_ID_MOBILE, mobile);
+    netIdToNetwork.clear();
+    netIdToNetwork.put(NET_ID_WIFI, ShadowNetwork.newInstance(NET_ID_WIFI));
+    netIdToNetwork.put(NET_ID_MOBILE, ShadowNetwork.newInstance(NET_ID_MOBILE));
+    netIdToNetworkInfo.clear();
+    netIdToNetworkInfo.put(NET_ID_WIFI, wifi);
+    netIdToNetworkInfo.put(NET_ID_MOBILE, mobile);
 
-      NetworkCapabilities wifiNetworkCapabilities = ShadowNetworkCapabilities.newInstance();
-      shadowOf(wifiNetworkCapabilities).addTransportType(NetworkCapabilities.TRANSPORT_WIFI);
-      NetworkCapabilities mobileNetworkCapabilities = ShadowNetworkCapabilities.newInstance();
-      shadowOf(mobileNetworkCapabilities).addTransportType(NetworkCapabilities.TRANSPORT_CELLULAR);
+    NetworkCapabilities wifiNetworkCapabilities = ShadowNetworkCapabilities.newInstance();
+    shadowOf(wifiNetworkCapabilities).addTransportType(NetworkCapabilities.TRANSPORT_WIFI);
+    NetworkCapabilities mobileNetworkCapabilities = ShadowNetworkCapabilities.newInstance();
+    shadowOf(mobileNetworkCapabilities).addTransportType(NetworkCapabilities.TRANSPORT_CELLULAR);
 
-      networkCapabilitiesMap.put(netIdToNetwork.get(NET_ID_WIFI), wifiNetworkCapabilities);
-      networkCapabilitiesMap.put(netIdToNetwork.get(NET_ID_MOBILE), mobileNetworkCapabilities);
-    }
+    networkCapabilitiesMap.clear();
+    networkCapabilitiesMap.put(netIdToNetwork.get(NET_ID_WIFI), wifiNetworkCapabilities);
+    networkCapabilitiesMap.put(netIdToNetwork.get(NET_ID_MOBILE), mobileNetworkCapabilities);
+
+    backgroundDataSetting = false;
+    networkCallbacksEnabled = true;
+    restrictBackgroundStatus = ConnectivityManager.RESTRICT_BACKGROUND_STATUS_DISABLED;
+    networkPreference = ConnectivityManager.DEFAULT_NETWORK_PREFERENCE;
+
     defaultNetworkActive = true;
+
+    networkCallbacks.clear();
+    networkCallbackPendingIntents.clear();
+    onNetworkActiveListeners.clear();
+    reportedNetworkConnectivity.clear();
+    linkPropertiesMap.clear();
+    proxyInfoMap.clear();
+    processBoundNetwork = null;
+    captivePortalServerUrl = "http://10.0.0.2";
+  }
+
+  @Resetter
+  public static void reset() {
+    resetNetworkDefaults();
+  }
+
+  /**
+   * Sets whether {@link #setDefaultNetworkActive(boolean)} triggers registered any {@link
+   * ConnectivityManager.NetworkCallback}.
+   */
+  public void setNetworkCallbacksEnabled(boolean enabled) {
+    networkCallbacksEnabled = enabled;
   }
 
   public Set<ConnectivityManager.NetworkCallback> getNetworkCallbacks() {
     return networkCallbacks;
+  }
+
+  public Set<PendingIntent> getNetworkCallbackPendingIntents() {
+    return networkCallbackPendingIntents;
   }
 
   /**
@@ -92,7 +141,7 @@ public class ShadowConnectivityManager {
     return new HashMap<>(reportedNetworkConnectivity);
   }
 
-  @Implementation(minSdk = LOLLIPOP)
+  @Implementation
   protected void registerNetworkCallback(
       NetworkRequest request, ConnectivityManager.NetworkCallback networkCallback) {
     registerNetworkCallback(request, networkCallback, null);
@@ -106,7 +155,12 @@ public class ShadowConnectivityManager {
     networkCallbacks.add(networkCallback);
   }
 
-  @Implementation(minSdk = LOLLIPOP)
+  @Implementation(minSdk = M)
+  protected void registerNetworkCallback(NetworkRequest request, PendingIntent pendingIntent) {
+    networkCallbackPendingIntents.add(pendingIntent);
+  }
+
+  @Implementation
   protected void requestNetwork(
       NetworkRequest request, ConnectivityManager.NetworkCallback networkCallback) {
     registerNetworkCallback(request, networkCallback);
@@ -141,13 +195,37 @@ public class ShadowConnectivityManager {
     networkCallbacks.add(networkCallback);
   }
 
-  @Implementation(minSdk = LOLLIPOP)
+  @Implementation(minSdk = O)
+  protected void registerDefaultNetworkCallback(
+      ConnectivityManager.NetworkCallback networkCallback, Handler handler) {
+    networkCallbacks.add(networkCallback);
+  }
+
+  @Implementation(minSdk = S)
+  protected void registerBestMatchingNetworkCallback(
+      NetworkRequest request,
+      ConnectivityManager.NetworkCallback networkCallback,
+      Handler handler) {
+    networkCallbacks.add(networkCallback);
+  }
+
+  @Implementation
   protected void unregisterNetworkCallback(ConnectivityManager.NetworkCallback networkCallback) {
     if (networkCallback == null) {
       throw new IllegalArgumentException("Invalid NetworkCallback");
     }
     if (networkCallbacks.contains(networkCallback)) {
       networkCallbacks.remove(networkCallback);
+    }
+  }
+
+  @Implementation(minSdk = M)
+  protected void unregisterNetworkCallback(PendingIntent pendingIntent) {
+    if (pendingIntent == null) {
+      throw new IllegalArgumentException("Invalid NetworkCallback");
+    }
+    if (networkCallbackPendingIntents.contains(pendingIntent)) {
+      networkCallbackPendingIntents.remove(pendingIntent);
     }
   }
 
@@ -162,8 +240,8 @@ public class ShadowConnectivityManager {
    */
   @Implementation(minSdk = M)
   protected Network getActiveNetwork() {
-    if (defaultNetworkActive) {
-      return netIdToNetwork.get(getActiveNetworkInfo().getType());
+    if (defaultNetworkActive && activeNetworkInfo != null) {
+      return netIdToNetwork.get(activeNetworkInfo.getType());
     }
     return null;
   }
@@ -188,7 +266,7 @@ public class ShadowConnectivityManager {
     return networkTypeToNetworkInfo.get(networkType);
   }
 
-  @Implementation(minSdk = LOLLIPOP)
+  @Implementation
   protected NetworkInfo getNetworkInfo(Network network) {
     if (network == null) {
       return null;
@@ -197,7 +275,7 @@ public class ShadowConnectivityManager {
     return netIdToNetworkInfo.get(shadowNetwork.getNetId());
   }
 
-  @Implementation(minSdk = LOLLIPOP)
+  @Implementation
   protected Network[] getAllNetworks() {
     return netIdToNetwork.values().toArray(new Network[netIdToNetwork.size()]);
   }
@@ -249,9 +327,7 @@ public class ShadowConnectivityManager {
     networkTypeToNetworkInfo.put(networkType, networkInfo);
   }
 
-  /**
-   * Returns the captive portal URL previously set with {@link #setCaptivePortalServerUrl}.
-   */
+  /** Returns the captive portal URL previously set with {@link #setCaptivePortalServerUrl}. */
   @Implementation(minSdk = N)
   protected String getCaptivePortalServerUrl() {
     return captivePortalServerUrl;
@@ -266,29 +342,21 @@ public class ShadowConnectivityManager {
     this.captivePortalServerUrl = captivePortalServerUrl;
   }
 
-  @HiddenApi @Implementation
+  @HiddenApi
+  @Implementation
   public void setBackgroundDataSetting(boolean b) {
     backgroundDataSetting = b;
   }
 
   public void setActiveNetworkInfo(NetworkInfo info) {
-    if (getApiLevel() >= LOLLIPOP) {
-      activeNetworkInfo = info;
-      if (info != null) {
-        networkTypeToNetworkInfo.put(info.getType(), info);
-        netIdToNetwork.put(info.getType(), ShadowNetwork.newInstance(info.getType()));
-        netIdToNetworkInfo.put(info.getType(), info);
-      } else {
-        networkTypeToNetworkInfo.clear();
-        netIdToNetwork.clear();
-      }
+    activeNetworkInfo = info;
+    if (info != null) {
+      networkTypeToNetworkInfo.put(info.getType(), info);
+      netIdToNetwork.put(info.getType(), ShadowNetwork.newInstance(info.getType()));
+      netIdToNetworkInfo.put(info.getType(), info);
     } else {
-      activeNetworkInfo = info;
-      if (info != null) {
-        networkTypeToNetworkInfo.put(info.getType(), info);
-      } else {
-        networkTypeToNetworkInfo.clear();
-      }
+      networkTypeToNetworkInfo.clear();
+      netIdToNetwork.clear();
     }
   }
 
@@ -307,6 +375,7 @@ public class ShadowConnectivityManager {
 
   /**
    * Removes the {@code network} from the list of all {@link android.net.Network}s.
+   *
    * @param network The network.
    */
   public void removeNetwork(Network network) {
@@ -316,9 +385,7 @@ public class ShadowConnectivityManager {
     netIdToNetworkInfo.remove(netId);
   }
 
-  /**
-   * Clears the list of all {@link android.net.Network}s.
-   */
+  /** Clears the list of all {@link android.net.Network}s. */
   public void clearAllNetworks() {
     netIdToNetwork.clear();
     netIdToNetworkInfo.clear();
@@ -327,14 +394,18 @@ public class ShadowConnectivityManager {
   /**
    * Sets the active state of the default network.
    *
-   * By default this is true and affects the result of {@link
+   * <p>By default this is true and affects the result of {@link
    * ConnectivityManager#isActiveNetworkMetered()}, {@link
    * ConnectivityManager#isDefaultNetworkActive()}, {@link ConnectivityManager#getActiveNetwork()}
    * and {@link ConnectivityManager#getAllNetworkInfo()}.
    *
-   * Calling this method with {@code true} after any listeners have been registered with {@link
+   * <p>Calling this method with {@code true} after any listeners have been registered with {@link
    * ConnectivityManager#addDefaultNetworkActiveListener(OnNetworkActiveListener)} will result in
    * those listeners being fired.
+   *
+   * <p>Calling this method after any {@link ConnectivityManager.NetworkCallback} have been
+   * registered will result in those callbacks being called unless {@link
+   * #setNetworkCallbacksEnabled(boolean)} has been called with a false value.
    *
    * @param isActive The active state of the default network.
    */
@@ -347,23 +418,52 @@ public class ShadowConnectivityManager {
         }
       }
     }
+
+    if (!networkCallbacksEnabled) {
+      return;
+    }
+
+    NetworkInfo activeNetworkInfo = getActiveNetworkInfo();
+
+    if (activeNetworkInfo == null) {
+      return;
+    }
+
+    Network defaultNetwork = netIdToNetwork.get(activeNetworkInfo.getType());
+
+    if (defaultNetwork == null) {
+      return;
+    }
+
+    HashSet<ConnectivityManager.NetworkCallback> stableNetworkCallbacks =
+        new HashSet<>(networkCallbacks);
+    for (ConnectivityManager.NetworkCallback c : stableNetworkCallbacks) {
+      if (c != null) {
+        if (defaultNetworkActive) {
+          c.onAvailable(defaultNetwork);
+        } else {
+          c.onLost(defaultNetwork);
+        }
+      }
+    }
   }
 
   /**
-   * @return true by default, or the value specifed via {@link #setDefaultNetworkActive(boolean)}
+   * @return true by default, or the value specified via {@link #setDefaultNetworkActive(boolean)}
    * @see #setDefaultNetworkActive(boolean)
    */
-  @Implementation(minSdk = LOLLIPOP)
+  @Implementation
   protected boolean isDefaultNetworkActive() {
     return defaultNetworkActive;
   }
 
-  @Implementation(minSdk = LOLLIPOP)
-  protected void addDefaultNetworkActiveListener(final ConnectivityManager.OnNetworkActiveListener l) {
+  @Implementation
+  protected void addDefaultNetworkActiveListener(
+      final ConnectivityManager.OnNetworkActiveListener l) {
     onNetworkActiveListeners.add(l);
   }
 
-  @Implementation(minSdk = LOLLIPOP)
+  @Implementation
   protected void removeDefaultNetworkActiveListener(ConnectivityManager.OnNetworkActiveListener l) {
     if (l == null) {
       throw new IllegalArgumentException("Invalid OnNetworkActiveListener");
@@ -385,7 +485,7 @@ public class ShadowConnectivityManager {
    * @return The {@link android.net.NetworkCapabilities} for the network.
    * @see #setNetworkCapabilities(Network, NetworkCapabilities)
    */
-  @Implementation(minSdk = LOLLIPOP)
+  @Implementation
   protected NetworkCapabilities getNetworkCapabilities(Network network) {
     return networkCapabilitiesMap.get(network);
   }
@@ -406,13 +506,15 @@ public class ShadowConnectivityManager {
    *
    * @param enable new status for airplane mode
    */
-  @Implementation(minSdk = KITKAT)
+  @Implementation
   protected void setAirplaneMode(boolean enable) {
     ShadowSettings.setAirplaneMode(enable);
   }
 
-  /** @see #setLinkProperties(Network, LinkProperties) */
-  @Implementation(minSdk = LOLLIPOP)
+  /**
+   * @see #setLinkProperties(Network, LinkProperties)
+   */
+  @Implementation
   protected LinkProperties getLinkProperties(Network network) {
     return linkPropertiesMap.get(network);
   }

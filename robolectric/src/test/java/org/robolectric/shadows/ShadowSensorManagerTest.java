@@ -1,26 +1,35 @@
 package org.robolectric.shadows;
 
 import static android.hardware.Sensor.TYPE_ACCELEROMETER;
+import static android.hardware.Sensor.TYPE_ALL;
 import static android.hardware.Sensor.TYPE_GYROSCOPE;
+import static android.os.Build.VERSION_CODES.O;
 import static com.google.common.truth.Truth.assertThat;
 import static org.junit.Assert.fail;
 import static org.robolectric.Shadows.shadowOf;
 
+import android.app.Activity;
 import android.content.Context;
 import android.hardware.Sensor;
 import android.hardware.SensorDirectChannel;
 import android.hardware.SensorEvent;
 import android.hardware.SensorEventListener;
+import android.hardware.SensorEventListener2;
 import android.hardware.SensorManager;
 import android.os.Build;
+import android.os.Looper;
 import android.os.MemoryFile;
 import androidx.test.core.app.ApplicationProvider;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import com.google.common.base.Optional;
+import java.util.ArrayList;
+import java.util.List;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.robolectric.Robolectric;
+import org.robolectric.android.controller.ActivityController;
 import org.robolectric.annotation.Config;
 
 @RunWith(AndroidJUnit4.class)
@@ -127,7 +136,9 @@ public class ShadowSensorManagerTest {
 
     shadow.sendSensorEventToListeners(event);
 
-    assertThat(listener.getLatestSensorEvent().get()).isEqualTo(event);
+    Optional<SensorEvent> latestSensorEvent = listener.getLatestSensorEvent();
+    assertThat(latestSensorEvent).isPresent();
+    assertThat(latestSensorEvent).hasValue(event);
   }
 
   @Test
@@ -141,8 +152,13 @@ public class ShadowSensorManagerTest {
 
     shadow.sendSensorEventToListeners(event);
 
-    assertThat(listener1.getLatestSensorEvent().get()).isEqualTo(event);
-    assertThat(listener2.getLatestSensorEvent().get()).isEqualTo(event);
+    Optional<SensorEvent> latestSensorEvent1 = listener1.getLatestSensorEvent();
+    assertThat(latestSensorEvent1).isPresent();
+    assertThat(latestSensorEvent1).hasValue(event);
+
+    Optional<SensorEvent> latestSensorEvent2 = listener2.getLatestSensorEvent();
+    assertThat(latestSensorEvent2).isPresent();
+    assertThat(latestSensorEvent2).hasValue(event);
   }
 
   @Test
@@ -222,12 +238,87 @@ public class ShadowSensorManagerTest {
   }
 
   @Test
-  public void shouldReturnASensorList() {
-    assertThat(sensorManager.getSensorList(0)).isNotNull();
+  public void shouldReturnEmptySensorListIfNoneCreated() {
+    assertThat(sensorManager.getSensorList(0)).isEmpty();
   }
 
-  private static class TestSensorEventListener implements SensorEventListener {
+  @Test
+  public void shouldReturnAllRelevantSensorsForGivenType() {
+    ShadowSensorManager shadowSensorManager = shadowOf(sensorManager);
+    Sensor gyroscopeSensor1 = ShadowSensor.newInstance(TYPE_GYROSCOPE);
+    Sensor gyroscopeSensor2 = ShadowSensor.newInstance(TYPE_GYROSCOPE);
+    Sensor irrelevantAccelSensor1 = ShadowSensor.newInstance(TYPE_ACCELEROMETER);
+
+    shadowSensorManager.addSensor(gyroscopeSensor1);
+    shadowSensorManager.addSensor(gyroscopeSensor2);
+    shadowSensorManager.addSensor(irrelevantAccelSensor1);
+    List<Sensor> allGyroSensors = sensorManager.getSensorList(TYPE_GYROSCOPE);
+
+    assertThat(allGyroSensors).containsExactly(gyroscopeSensor1, gyroscopeSensor2);
+  }
+
+  @Test
+  public void shouldReturnAllSensorsInAList() {
+    List<Sensor> multipleShadowSensors = new ArrayList<>();
+    multipleShadowSensors.add(ShadowSensor.newInstance(TYPE_ACCELEROMETER));
+    multipleShadowSensors.add(ShadowSensor.newInstance(TYPE_GYROSCOPE));
+    shadow.addSensor(multipleShadowSensors.get(0));
+    shadow.addSensor(multipleShadowSensors.get(1));
+
+    List<Sensor> allRetrievedSensors = sensorManager.getSensorList(TYPE_ALL);
+
+    assertThat(allRetrievedSensors).containsExactlyElementsIn(multipleShadowSensors);
+  }
+
+  @Test
+  public void flush_shouldCallOnFlushCompleted() {
+    Sensor accelSensor = ShadowSensor.newInstance(TYPE_ACCELEROMETER);
+    Sensor gyroSensor = ShadowSensor.newInstance(TYPE_GYROSCOPE);
+
+    TestSensorEventListener listener1 = new TestSensorEventListener();
+    TestSensorEventListener listener2 = new TestSensorEventListener();
+    TestSensorEventListener listener3 = new TestSensorEventListener();
+
+    sensorManager.registerListener(listener1, accelSensor, SensorManager.SENSOR_DELAY_NORMAL);
+    sensorManager.registerListener(listener2, accelSensor, SensorManager.SENSOR_DELAY_NORMAL);
+    sensorManager.registerListener(listener2, gyroSensor, SensorManager.SENSOR_DELAY_NORMAL);
+
+    // Call flush with the first listener. It should return true (as the flush
+    // succeeded), and should call onFlushCompleted for all listeners registered for accelSensor.
+    assertThat(sensorManager.flush(listener1)).isTrue();
+    shadowOf(Looper.getMainLooper()).idle();
+
+    assertThat(listener1.getOnFlushCompletedCalls()).containsExactly(accelSensor);
+    assertThat(listener2.getOnFlushCompletedCalls()).containsExactly(accelSensor);
+    assertThat(listener3.getOnFlushCompletedCalls()).isEmpty();
+
+    // Call flush with the second listener. It should again return true, and should call
+    // onFlushCompleted for all listeners registered for accelSensor and gyroSensor.
+    assertThat(sensorManager.flush(listener2)).isTrue();
+    shadowOf(Looper.getMainLooper()).idle();
+
+    // From the two calls to flush, onFlushCompleted should have been called twice for accelSensor
+    // and once for gyroSensor.
+    assertThat(listener1.getOnFlushCompletedCalls()).containsExactly(accelSensor, accelSensor);
+    assertThat(listener2.getOnFlushCompletedCalls())
+        .containsExactly(accelSensor, accelSensor, gyroSensor);
+    assertThat(listener3.getOnFlushCompletedCalls()).isEmpty();
+
+    // Call flush with the third listener. This listener is not registered for any sensors, so it
+    // should return false.
+    assertThat(sensorManager.flush(listener3)).isFalse();
+    shadowOf(Looper.getMainLooper()).idle();
+
+    // There should not have been any more onFlushCompleted calls.
+    assertThat(listener1.getOnFlushCompletedCalls()).containsExactly(accelSensor, accelSensor);
+    assertThat(listener2.getOnFlushCompletedCalls())
+        .containsExactly(accelSensor, accelSensor, gyroSensor);
+    assertThat(listener3.getOnFlushCompletedCalls()).isEmpty();
+  }
+
+  private static class TestSensorEventListener implements SensorEventListener2 {
     private Optional<SensorEvent> latestSensorEvent = Optional.absent();
+    private final List<Sensor> onFlushCompletedCalls = new ArrayList<>();
 
     @Override
     public void onAccuracyChanged(Sensor sensor, int accuracy) {}
@@ -237,8 +328,54 @@ public class ShadowSensorManagerTest {
       latestSensorEvent = Optional.of(event);
     }
 
+    @Override
+    public void onFlushCompleted(Sensor sensor) {
+      onFlushCompletedCalls.add(sensor);
+    }
+
+    public List<Sensor> getOnFlushCompletedCalls() {
+      return onFlushCompletedCalls;
+    }
+
     public Optional<SensorEvent> getLatestSensorEvent() {
       return latestSensorEvent;
+    }
+  }
+
+  @Test
+  @Config(minSdk = O)
+  public void sensorManager_activityContextEnabled_retrievesSameSensors() {
+    String originalProperty = System.getProperty("robolectric.createActivityContexts", "");
+    System.setProperty("robolectric.createActivityContexts", "true");
+    try (ActivityController<Activity> controller =
+        Robolectric.buildActivity(Activity.class).setup()) {
+      SensorManager applicationSensorManager =
+          (SensorManager)
+              ApplicationProvider.getApplicationContext().getSystemService(Context.SENSOR_SERVICE);
+      Activity activity = controller.get();
+      SensorManager activitySensorManager =
+          (SensorManager) activity.getSystemService(Context.SENSOR_SERVICE);
+
+      assertThat(applicationSensorManager).isNotSameInstanceAs(activitySensorManager);
+
+      List<Sensor> applicationSensors = applicationSensorManager.getSensorList(Sensor.TYPE_ALL);
+      List<Sensor> activitySensors = activitySensorManager.getSensorList(Sensor.TYPE_ALL);
+
+      assertThat(activitySensors).hasSize(applicationSensors.size());
+
+      for (int i = 0; i < applicationSensors.size(); i++) {
+        Sensor appSensor = applicationSensors.get(i);
+        Sensor actSensor = activitySensors.get(i);
+
+        assertThat(appSensor.getName()).isEqualTo(actSensor.getName());
+        assertThat(appSensor.getType()).isEqualTo(actSensor.getType());
+        assertThat(appSensor.getMaximumRange()).isEqualTo(actSensor.getMaximumRange());
+        assertThat(appSensor.getResolution()).isEqualTo(actSensor.getResolution());
+        assertThat(appSensor.getPower()).isEqualTo(actSensor.getPower());
+        assertThat(appSensor.getMinDelay()).isEqualTo(actSensor.getMinDelay());
+      }
+    } finally {
+      System.setProperty("robolectric.createActivityContexts", originalProperty);
     }
   }
 }

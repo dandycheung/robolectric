@@ -1,9 +1,9 @@
 package org.robolectric.shadows;
 
+import static android.os.Build.VERSION_CODES.TIRAMISU;
 import static org.robolectric.util.reflector.Reflector.reflector;
 
 import android.media.MediaActionSound;
-import android.os.Build;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -15,7 +15,7 @@ import org.robolectric.util.reflector.Direct;
 import org.robolectric.util.reflector.ForType;
 
 /** A shadow implementation of {@link android.media.MediaActionSound}. */
-@Implements(value = MediaActionSound.class, minSdk = Build.VERSION_CODES.JELLY_BEAN)
+@Implements(value = MediaActionSound.class)
 public class ShadowMediaActionSound {
   @RealObject MediaActionSound realObject;
 
@@ -27,6 +27,9 @@ public class ShadowMediaActionSound {
   };
   private static final int NUM_SOUNDS = ALL_SOUNDS.length;
   private static final Map<Integer, AtomicInteger> playCount = initializePlayCountMap();
+
+  @SuppressWarnings("NonFinalStaticField")
+  private static boolean mustPlayShutterSoundInternal = false;
 
   private static final HashMap<Integer, AtomicInteger> initializePlayCountMap() {
     HashMap<Integer, AtomicInteger> playCount = new HashMap<>();
@@ -45,6 +48,11 @@ public class ShadowMediaActionSound {
     return playCount.get(soundName).get();
   }
 
+  /** Sets the value returned by {@link MediaActionSound#mustPlayShutterSound()}. */
+  public static void setMustPlayShutterSound(boolean mustPlayShutterSound) {
+    mustPlayShutterSoundInternal = mustPlayShutterSound;
+  }
+
   @Resetter
   public static void reset() {
     synchronized (playCount) {
@@ -60,6 +68,11 @@ public class ShadowMediaActionSound {
     reflector(MediaActionSoundReflector.class, realObject).play(soundName);
 
     playCount.get(soundName).incrementAndGet();
+  }
+
+  @Implementation(minSdk = TIRAMISU)
+  protected static boolean mustPlayShutterSound() {
+    return mustPlayShutterSoundInternal;
   }
 
   @ForType(MediaActionSound.class)

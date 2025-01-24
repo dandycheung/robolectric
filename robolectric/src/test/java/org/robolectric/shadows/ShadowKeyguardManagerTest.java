@@ -13,6 +13,7 @@ import static org.robolectric.Shadows.shadowOf;
 import android.app.Activity;
 import android.app.KeyguardManager;
 import android.app.KeyguardManager.KeyguardDismissCallback;
+import android.content.Context;
 import android.content.Intent;
 import androidx.test.core.app.ApplicationProvider;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
@@ -20,6 +21,7 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.robolectric.Robolectric;
+import org.robolectric.android.controller.ActivityController;
 import org.robolectric.annotation.Config;
 
 @RunWith(AndroidJUnit4.class)
@@ -50,7 +52,7 @@ public class ShadowKeyguardManagerTest {
   }
 
   @Test
-  public void testShouldBeAbleToDisableTheKeyguardLock() throws Exception {
+  public void testShouldBeAbleToDisableTheKeyguardLock() {
     KeyguardManager.KeyguardLock lock = manager.newKeyguardLock(KEYGUARD_SERVICE);
     assertThat(shadowOf(lock).isEnabled()).isTrue();
 
@@ -116,7 +118,6 @@ public class ShadowKeyguardManagerTest {
     shadowOf(manager).setIsDeviceLocked(USER_ID, false);
     assertThat(manager.isDeviceLocked(USER_ID)).isFalse();
   }
-
 
   @Test
   @Config(minSdk = O)
@@ -190,5 +191,29 @@ public class ShadowKeyguardManagerTest {
     KeyguardManager.KeyguardLock keyguardLock = manager2.newKeyguardLock("tag");
     keyguardLock.disableKeyguard();
     assertThat(shadowOf(manager.newKeyguardLock("tag")).isEnabled()).isFalse();
+  }
+
+  @Test
+  @Config(minSdk = O)
+  public void keyguardManager_activityContextEnabled_retrievesSameState() {
+    String originalProperty = System.getProperty("robolectric.createActivityContexts", "");
+    System.setProperty("robolectric.createActivityContexts", "true");
+    try (ActivityController<Activity> controller =
+        Robolectric.buildActivity(Activity.class).setup()) {
+      KeyguardManager applicationKeyguardManager =
+          (KeyguardManager)
+              ApplicationProvider.getApplicationContext()
+                  .getSystemService(Context.KEYGUARD_SERVICE);
+      Activity activity = controller.get();
+      KeyguardManager activityKeyguardManager =
+          (KeyguardManager) activity.getSystemService(Context.KEYGUARD_SERVICE);
+
+      boolean applicationIsKeyguardLocked = applicationKeyguardManager.isKeyguardLocked();
+      boolean activityIsKeyguardLocked = activityKeyguardManager.isKeyguardLocked();
+
+      assertThat(activityIsKeyguardLocked).isEqualTo(applicationIsKeyguardLocked);
+    } finally {
+      System.setProperty("robolectric.createActivityContexts", originalProperty);
+    }
   }
 }

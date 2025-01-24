@@ -7,6 +7,8 @@ import static org.robolectric.res.android.Util.isTruthy;
 import java.nio.ByteBuffer;
 import org.robolectric.res.android.ResourceTypes.ResChunk_header;
 import org.robolectric.res.android.ResourceTypes.ResStringPool_header;
+import org.robolectric.res.android.ResourceTypes.ResTableStagedAliasEntry;
+import org.robolectric.res.android.ResourceTypes.ResTableStagedAliasHeader;
 import org.robolectric.res.android.ResourceTypes.ResTable_header;
 import org.robolectric.res.android.ResourceTypes.ResTable_lib_entry;
 import org.robolectric.res.android.ResourceTypes.ResTable_lib_header;
@@ -69,7 +71,7 @@ class Chunk {
   }
 
   // private:
-  private ResChunk_header device_chunk_;
+  private final ResChunk_header device_chunk_;
 
   public ResTable_header asResTable_header() {
     if (header_size() >= ResTable_header.SIZEOF) {
@@ -119,6 +121,23 @@ class Chunk {
     }
   }
 
+  public ResTableStagedAliasHeader asResTableStagedAliasHeader() {
+    if (header_size() >= ResTableStagedAliasHeader.SIZEOF) {
+      return new ResTableStagedAliasHeader(device_chunk_.myBuf(), device_chunk_.myOffset());
+    } else {
+      return null;
+    }
+  }
+
+  public ResTableStagedAliasEntry asResTableStagedAliasEntry() {
+    if (data_size() >= ResTableStagedAliasEntry.SIZEOF) {
+      return new ResTableStagedAliasEntry(
+          device_chunk_.myBuf(), device_chunk_.myOffset() + header_size());
+    } else {
+      return null;
+    }
+  }
+
   static class Iterator {
     private ResChunk_header next_chunk_;
     private int len_;
@@ -130,15 +149,26 @@ class Chunk {
       this.len_ = itemSize;
     }
 
-    boolean HasNext() { return !HadError() && len_ != 0; };
+    boolean HasNext() {
+      return !HadError() && len_ != 0;
+    }
+
     // Returns whether there was an error and processing should stop
-    boolean HadError() { return last_error_ != null; }
-    String GetLastError() { return last_error_; }
+    boolean HadError() {
+      return last_error_ != null;
+    }
+
+    String GetLastError() {
+      return last_error_;
+    }
+
     // Returns whether there was an error and processing should stop. For legacy purposes,
     // some errors are considered "non fatal". Fatal errors stop processing new chunks and
     // throw away any chunks already processed. Non fatal errors also stop processing new
     // chunks, but, will retain and use any valid chunks already processed.
-    boolean HadFatalError() { return HadError() && last_error_was_fatal_; }
+    boolean HadFatalError() {
+      return HadError() && last_error_was_fatal_;
+    }
 
     Chunk Next() {
       assert (len_ != 0) : "called Next() after last chunk";
@@ -152,8 +182,8 @@ class Chunk {
       if (remaining <= 0) {
         next_chunk_ = null;
       } else {
-        next_chunk_ = new ResChunk_header(
-            this_chunk.myBuf(), this_chunk.myOffset() + dtohl(this_chunk.size));
+        next_chunk_ =
+            new ResChunk_header(this_chunk.myBuf(), this_chunk.myOffset() + dtohl(this_chunk.size));
       }
       len_ -= dtohl(this_chunk.size);
 

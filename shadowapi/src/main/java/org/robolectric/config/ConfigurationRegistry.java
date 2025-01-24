@@ -20,10 +20,7 @@ public class ConfigurationRegistry {
 
   public static ConfigurationRegistry instance;
 
-  /**
-   * Returns the configuration object of the specified class, computed using
-   * {@link Configurer}.
-   */
+  /** Returns the configuration object of the specified class, computed using {@link Configurer}. */
   public static <T> T get(Class<T> configClass) {
     return instance.getInSandboxClassLoader(configClass);
   }
@@ -39,6 +36,9 @@ public class ConfigurationRegistry {
 
   private <T> T getInSandboxClassLoader(Class<T> someConfigClass) {
     Object configInParentLoader = configurations.get(someConfigClass.getName());
+    if (configInParentLoader == null) {
+      return null;
+    }
     Object configInSandboxLoader = maybeReloadInSandboxClassLoader(configInParentLoader);
     return someConfigClass.cast(configInSandboxLoader);
   }

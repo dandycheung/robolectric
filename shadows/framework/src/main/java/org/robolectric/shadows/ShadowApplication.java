@@ -16,6 +16,7 @@ import android.content.ContextWrapper;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.ServiceConnection;
+import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.PowerManager;
@@ -33,7 +34,6 @@ import org.robolectric.annotation.RealObject;
 import org.robolectric.shadow.api.Shadow;
 import org.robolectric.shadows.ShadowActivityThread._ActivityThread_;
 import org.robolectric.shadows.ShadowActivityThread._AppBindData_;
-import org.robolectric.shadows.ShadowUserManager.UserManagerState;
 import org.robolectric.util.ReflectionHelpers;
 import org.robolectric.util.Scheduler;
 import org.robolectric.util.reflector.Reflector;
@@ -42,11 +42,10 @@ import org.robolectric.util.reflector.Reflector;
 public class ShadowApplication extends ShadowContextWrapper {
   @RealObject private Application realApplication;
 
-  private List<android.widget.Toast> shownToasts = new ArrayList<>();
+  private final List<android.widget.Toast> shownToasts = new ArrayList<>();
   private ShadowPopupMenu latestPopupMenu;
   private PopupWindow latestPopupWindow;
   private ListPopupWindow latestListPopupWindow;
-  private UserManagerState userManagerState;
 
   /**
    * @deprecated Use {@code shadowOf({@link ApplicationProvider#getApplicationContext()})} instead.
@@ -169,19 +168,25 @@ public class ShadowApplication extends ShadowContextWrapper {
     return getShadowInstrumentation().getUnboundServiceConnections();
   }
 
-  /** @deprecated use PackageManager.queryBroadcastReceivers instead */
+  /**
+   * @deprecated use PackageManager.queryBroadcastReceivers instead
+   */
   @Deprecated
   public boolean hasReceiverForIntent(Intent intent) {
     return getShadowInstrumentation().hasReceiverForIntent(intent);
   }
 
-  /** @deprecated use PackageManager.queryBroadcastReceivers instead */
+  /**
+   * @deprecated use PackageManager.queryBroadcastReceivers instead
+   */
   @Deprecated
   public List<BroadcastReceiver> getReceiversForIntent(Intent intent) {
     return getShadowInstrumentation().getReceiversForIntent(intent);
   }
 
-  /** @return list of {@link Wrapper}s for registered receivers */
+  /**
+   * @return list of {@link Wrapper}s for registered receivers
+   */
   public ImmutableList<Wrapper> getRegisteredReceivers() {
     return getShadowInstrumentation().getRegisteredReceivers();
   }
@@ -199,23 +204,29 @@ public class ShadowApplication extends ShadowContextWrapper {
     return (AppWidgetManager) realApplication.getSystemService(Context.APPWIDGET_SERVICE);
   }
 
-  /** @deprecated Use {@link ShadowAlertDialog#getLatestAlertDialog()} instead. */
+  /**
+   * @deprecated Use {@link ShadowAlertDialog#getLatestAlertDialog()} instead.
+   */
   @Deprecated
   public ShadowAlertDialog getLatestAlertDialog() {
     AlertDialog dialog = ShadowAlertDialog.getLatestAlertDialog();
     return dialog == null ? null : Shadow.extract(dialog);
   }
 
-  /** @deprecated Use {@link ShadowDialog#getLatestDialog()} instead. */
+  /**
+   * @deprecated Use {@link ShadowDialog#getLatestDialog()} instead.
+   */
   @Deprecated
   public ShadowDialog getLatestDialog() {
     Dialog dialog = ShadowDialog.getLatestDialog();
     return dialog == null ? null : Shadow.extract(dialog);
   }
 
-  /** @deprecated Use {@link BluetoothAdapter#getDefaultAdapter()} ()} instead. */
+  /**
+   * @deprecated Use {@link BluetoothAdapter#getDefaultAdapter()} ()} instead.
+   */
   @Deprecated
-  public final BluetoothAdapter getBluetoothAdapter() {
+  public BluetoothAdapter getBluetoothAdapter() {
     return BluetoothAdapter.getDefaultAdapter();
   }
 
@@ -231,19 +242,25 @@ public class ShadowApplication extends ShadowContextWrapper {
     getShadowInstrumentation().declareComponentUnbindable(component);
   }
 
-  /** @deprecated use ShadowPowerManager.getLatestWakeLock */
+  /**
+   * @deprecated use ShadowPowerManager.getLatestWakeLock
+   */
   @Deprecated
   public PowerManager.WakeLock getLatestWakeLock() {
     return ShadowPowerManager.getLatestWakeLock();
   }
 
-  /** @deprecated use PowerManager APIs instead */
+  /**
+   * @deprecated use PowerManager APIs instead
+   */
   @Deprecated
   public void addWakeLock(PowerManager.WakeLock wl) {
     ShadowPowerManager.addWakeLock(wl);
   }
 
-  /** @deprecated use ShadowPowerManager.clearWakeLocks */
+  /**
+   * @deprecated use ShadowPowerManager.clearWakeLocks
+   */
   @Deprecated
   public void clearWakeLocks() {
     ShadowPowerManager.clearWakeLocks();
@@ -279,7 +296,9 @@ public class ShadowApplication extends ShadowContextWrapper {
     shadowInstrumentation.checkActivities(checkActivities);
   }
 
-  /** @deprecated Use {@link ShadowPopupMenu#getLatestPopupMenu()} instead. */
+  /**
+   * @deprecated Use {@link ShadowPopupMenu#getLatestPopupMenu()} instead.
+   */
   @Deprecated
   public ShadowPopupMenu getLatestPopupMenu() {
     return latestPopupMenu;
@@ -305,14 +324,6 @@ public class ShadowApplication extends ShadowContextWrapper {
     this.latestListPopupWindow = latestListPopupWindow;
   }
 
-  UserManagerState getUserManagerState() {
-    if (userManagerState == null) {
-      userManagerState = new UserManagerState();
-    }
-
-    return userManagerState;
-  }
-
   public static final class Wrapper {
     public BroadcastReceiver broadcastReceiver;
     public IntentFilter intentFilter;
@@ -320,18 +331,21 @@ public class ShadowApplication extends ShadowContextWrapper {
     public Throwable exception;
     public String broadcastPermission;
     public Handler scheduler;
+    public int flags;
 
     public Wrapper(
         BroadcastReceiver broadcastReceiver,
         IntentFilter intentFilter,
         Context context,
         String broadcastPermission,
-        Handler scheduler) {
+        Handler scheduler,
+        int flags) {
       this.broadcastReceiver = broadcastReceiver;
       this.intentFilter = intentFilter;
       this.context = context;
       this.broadcastPermission = broadcastPermission;
       this.scheduler = scheduler;
+      this.flags = flags;
       exception = new Throwable();
     }
 
@@ -361,11 +375,26 @@ public class ShadowApplication extends ShadowContextWrapper {
 
   /**
    * @deprecated Do not depend on this method to override services as it will be removed in a future
-   *     update. The preferered method is use the shadow of the corresponding service.
+   *     update. The preferred method is use the shadow of the corresponding service.
    */
   @Deprecated
   public void setSystemService(String key, Object service) {
     ShadowContextImpl shadowContext = Shadow.extract(realApplication.getBaseContext());
     shadowContext.setSystemService(key, service);
+  }
+
+  /**
+   * Enables or disables predictive back for the current application.
+   *
+   * <p>This is the equivalent of specifying {code android:enableOnBackInvokedCallback} on the
+   * {@code <application>} tag in the Android manifest.
+   */
+  public static void setEnableOnBackInvokedCallback(boolean isEnabled) {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+      ShadowWindowOnBackInvokedDispatcher.setEnablePredictiveBack(isEnabled);
+      RuntimeEnvironment.getApplication()
+          .getApplicationInfo()
+          .setEnableOnBackInvokedCallback(isEnabled);
+    }
   }
 }

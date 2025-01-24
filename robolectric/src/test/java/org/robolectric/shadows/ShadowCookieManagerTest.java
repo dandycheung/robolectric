@@ -1,6 +1,5 @@
 package org.robolectric.shadows;
 
-import static android.os.Build.VERSION_CODES.LOLLIPOP;
 import static com.google.common.truth.Truth.assertThat;
 
 import android.webkit.CookieManager;
@@ -8,7 +7,6 @@ import androidx.test.ext.junit.runners.AndroidJUnit4;
 import com.google.common.base.Optional;
 import org.junit.Test;
 import org.junit.runner.RunWith;
-import org.robolectric.annotation.Config;
 
 @RunWith(AndroidJUnit4.class)
 public class ShadowCookieManagerTest {
@@ -36,8 +34,7 @@ public class ShadowCookieManagerTest {
   }
 
   @Test
-  @Config(minSdk = LOLLIPOP)
-  public void shouldGetCookieWhenSetAsync() {
+  public void shouldGetCookieWhenSetAsyncWithNormalCallback() {
     CookieManager cookieManager = CookieManager.getInstance();
     String url = "http://www.google.com";
     String value = "my cookie";
@@ -50,6 +47,15 @@ public class ShadowCookieManagerTest {
         });
 
     assertThat(cookiesSet).hasValue(true);
+    assertThat(cookieManager.getCookie(url)).isEqualTo(value);
+  }
+
+  @Test
+  public void shouldGetCookieWhenSetAsyncWithNullCallback() {
+    CookieManager cookieManager = CookieManager.getInstance();
+    String url = "http://www.google.com";
+    String value = "my cookie";
+    cookieManager.setCookie(url, value, null);
     assertThat(cookieManager.getCookie(url)).isEqualTo(value);
   }
 
@@ -118,12 +124,12 @@ public class ShadowCookieManagerTest {
   @Test
   public void shouldHaveCookieWhenCookieIsSet() {
     cookieManager.setCookie(url, "name=value; Expires=Wed, 09 Jun 2121 10:18:14 GMT");
-    assertThat(cookieManager.hasCookies()).isEqualTo(true);
+    assertThat(cookieManager.hasCookies()).isTrue();
   }
 
   @Test
   public void shouldNotHaveCookieWhenCookieIsNotSet() {
-    assertThat(cookieManager.hasCookies()).isEqualTo(false);
+    assertThat(cookieManager.hasCookies()).isFalse();
   }
 
   @Test
@@ -163,7 +169,7 @@ public class ShadowCookieManagerTest {
   }
 
   @Test
-  public void shouldSetCookieWithInvalidExpiesValue() {
+  public void shouldSetCookieWithInvalidExpiresValue() {
     cookieManager.setCookie(httpUrl, "name=value; Expires=3234asdfasdf10:18:14 GMT");
     assertThat(cookieManager.getCookie(url)).isEqualTo("name=value");
   }
@@ -185,7 +191,7 @@ public class ShadowCookieManagerTest {
     cookieManager.setAcceptCookie(false);
     cookieManager.setCookie(httpUrl, "name=value; Expires=3234asdfasdf10:18:14 GMT");
     assertThat(cookieManager.getCookie(url)).isEqualTo("name=value");
-    assertThat(cookieManager.acceptCookie()).isEqualTo(false);
+    assertThat(cookieManager.acceptCookie()).isFalse();
   }
 
   @Test
@@ -197,7 +203,6 @@ public class ShadowCookieManagerTest {
   }
 
   @Test
-  @Config(minSdk = LOLLIPOP)
   public void shouldRemoveAllCookiesWithCallback() {
     cookieManager.setCookie(url, "name=value; Expires=Wed, 09 Jun 2121 10:18:14 GMT");
     cookieManager.setCookie(url, "name2=value2;");
@@ -227,8 +232,7 @@ public class ShadowCookieManagerTest {
   }
 
   @Test
-  @Config(minSdk = LOLLIPOP)
-  public void shouldRemoveSessionCookies() {
+  public void shouldRemoveSessionCookiesWithNormalCallback() {
     cookieManager.setCookie(url, "name=value; Expires=Wed, 09 Jun 2121 10:18:14 GMT");
     cookieManager.setCookie(url, "name2=value2;");
 
@@ -241,7 +245,15 @@ public class ShadowCookieManagerTest {
   }
 
   @Test
-  @Config(minSdk = LOLLIPOP)
+  public void shouldRemoveSessionCookiesWithNullCallback() {
+    cookieManager.setCookie(url, "name=value; Expires=Wed, 09 Jun 2121 10:18:14 GMT");
+    cookieManager.setCookie(url, "name2=value2;");
+
+    cookieManager.removeSessionCookies(null);
+    assertThat(cookieManager.getCookie(url)).isEqualTo("name=value");
+  }
+
+  @Test
   public void shouldRemoveSessionCookiesWhenSessionCookieIsNoPresent() {
     cookieManager.setCookie(url, "name=value; Expires=Wed, 09 Jun 2121 10:18:14 GMT");
 

@@ -1,15 +1,12 @@
 package org.robolectric.shadows;
 
-import static android.os.Build.VERSION_CODES.JELLY_BEAN_MR1;
-import static android.os.Build.VERSION_CODES.KITKAT;
 import static android.os.Build.VERSION_CODES.L;
-import static android.os.Build.VERSION_CODES.LOLLIPOP;
 import static android.os.Build.VERSION_CODES.O;
 import static org.robolectric.util.reflector.Reflector.reflector;
 
-import android.annotation.Nullable;
 import android.app.PendingIntent;
 import android.app.PendingIntent.CanceledException;
+import android.appwidget.AppWidgetHostView;
 import android.appwidget.AppWidgetManager;
 import android.appwidget.AppWidgetProvider;
 import android.appwidget.AppWidgetProviderInfo;
@@ -20,7 +17,6 @@ import android.os.Build.VERSION;
 import android.os.Bundle;
 import android.os.UserHandle;
 import android.view.View;
-import android.widget.FrameLayout;
 import android.widget.RemoteViews;
 import com.android.internal.appwidget.IAppWidgetService;
 import com.google.common.collect.HashMultimap;
@@ -31,12 +27,13 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
+import javax.annotation.Nullable;
 import org.robolectric.annotation.HiddenApi;
 import org.robolectric.annotation.Implementation;
 import org.robolectric.annotation.Implements;
 import org.robolectric.annotation.RealObject;
+import org.robolectric.annotation.Resetter;
 import org.robolectric.util.ReflectionHelpers;
-import org.robolectric.util.reflector.Direct;
 import org.robolectric.util.reflector.ForType;
 
 @SuppressWarnings({"UnusedDeclaration"})
@@ -45,23 +42,31 @@ public class ShadowAppWidgetManager {
 
   @RealObject private AppWidgetManager realAppWidgetManager;
 
+  // AppWidgetProvider is enabled if at least one widget is active. `isWidgetsEnabled` should be set
+  //  to false if the last widget is removed (when removing widgets is implemented).
+  private static boolean isWidgetsEnabled = false;
+  private static int nextWidgetId = 1;
+  private static boolean alwaysRecreateViewsDuringUpdate = false;
+  private static boolean allowedToBindWidgets;
+  private static boolean requestPinAppWidgetSupported = false;
+  private static boolean validWidgetProviderComponentName = true;
+  private final ArrayList<AppWidgetProviderInfo> installedProviders = new ArrayList<>();
+  private final Multimap<UserHandle, AppWidgetProviderInfo> installedProvidersForProfile =
+      HashMultimap.create();
   private Context context;
   private final Map<Integer, WidgetInfo> widgetInfos = new HashMap<>();
-  private int nextWidgetId = 1;
-  private boolean alwaysRecreateViewsDuringUpdate = false;
-  private boolean allowedToBindWidgets;
-  private boolean requestPinAppWidgetSupported = false;
-  private boolean validWidgetProviderComponentName = true;
-  private final ArrayList<AppWidgetProviderInfo> installedProviders = new ArrayList<>();
-  private Multimap<UserHandle, AppWidgetProviderInfo> installedProvidersForProfile =
-      HashMultimap.create();
 
-  @Implementation(maxSdk = KITKAT)
-  protected void __constructor__(Context context) {
-    this.context = context;
+  @Resetter
+  public static void reset() {
+    nextWidgetId = 1;
+    alwaysRecreateViewsDuringUpdate = false;
+    allowedToBindWidgets = false;
+    requestPinAppWidgetSupported = false;
+    validWidgetProviderComponentName = true;
+    isWidgetsEnabled = false;
   }
 
-  @Implementation(minSdk = LOLLIPOP)
+  @Implementation
   protected void __constructor__(Context context, IAppWidgetService service) {
     this.context = context;
   }
@@ -85,7 +90,7 @@ public class ShadowAppWidgetManager {
     if (canReapplyRemoteViews(widgetInfo, views)) {
       views.reapply(context, widgetInfo.view);
     } else {
-      widgetInfo.view = views.apply(context, new FrameLayout(context));
+      widgetInfo.view = views.apply(context, new AppWidgetHostView(context));
       widgetInfo.layoutId = getRemoteViewsToApply(views).getLayoutId();
     }
     widgetInfo.lastRemoteViews = views;
@@ -123,7 +128,7 @@ public class ShadowAppWidgetManager {
         idList.add(id);
       }
     }
-    int ids[] = new int[idList.size()];
+    int[] ids = new int[idList.size()];
     for (int i = 0; i < idList.size(); i++) {
       ids[i] = idList.get(i);
     }
@@ -216,7 +221,7 @@ public class ShadowAppWidgetManager {
   }
 
   @HiddenApi
-  @Implementation(minSdk = JELLY_BEAN_MR1)
+  @Implementation
   protected void bindAppWidgetId(int appWidgetId, ComponentName provider, Bundle options) {
     WidgetInfo widgetInfo = new WidgetInfo(provider);
     widgetInfos.put(appWidgetId, widgetInfo);
@@ -243,7 +248,7 @@ public class ShadowAppWidgetManager {
    * Create an internal presentation of the widget locally and store the options {@link Bundle} with
    * it. This implementation doesn't trigger {@code AppWidgetProvider.onUpdate}
    */
-  @Implementation(minSdk = JELLY_BEAN_MR1)
+  @Implementation
   protected boolean bindAppWidgetIdIfAllowed(
       int appWidgetId, ComponentName provider, Bundle options) {
     if (validWidgetProviderComponentName) {
@@ -305,7 +310,16 @@ public class ShadowAppWidgetManager {
    */
   public void reconstructWidgetViewAsIfPhoneWasRotated(int appWidgetId) {
     WidgetInfo widgetInfo = widgetInfos.get(appWidgetId);
-    widgetInfo.view = widgetInfo.lastRemoteViews.apply(context, new FrameLayout(context));
+    widgetInfo.view = widgetInfo.lastRemoteViews.apply(context, new AppWidgetHostView(context));
+  }
+
+  private void enableWidgetsIfNecessary(Class<? extends AppWidgetProvider> appWidgetProviderClass) {
+    if (!isWidgetsEnabled) {
+      isWidgetsEnabled = true;
+      AppWidgetProvider appWidgetProvider =
+          ReflectionHelpers.callConstructor(appWidgetProviderClass);
+      appWidgetProvider.onReceive(context, new Intent(AppWidgetManager.ACTION_APPWIDGET_ENABLED));
+    }
   }
 
   /**
@@ -338,7 +352,7 @@ public class ShadowAppWidgetManager {
     for (int i = 0; i < howManyToCreate; i++) {
       int myWidgetId = nextWidgetId++;
       RemoteViews remoteViews = new RemoteViews(context.getPackageName(), widgetLayoutId);
-      View widgetView = remoteViews.apply(context, new FrameLayout(context));
+      View widgetView = remoteViews.apply(context, new AppWidgetHostView(context));
       WidgetInfo widgetInfo =
           new WidgetInfo(widgetView, widgetLayoutId, context, appWidgetProvider);
       widgetInfo.lastRemoteViews = remoteViews;
@@ -346,7 +360,12 @@ public class ShadowAppWidgetManager {
       newWidgetIds[i] = myWidgetId;
     }
 
-    appWidgetProvider.onUpdate(context, realAppWidgetManager, newWidgetIds);
+    // Enable widgets if we are creating the first widget.
+    enableWidgetsIfNecessary(appWidgetProviderClass);
+
+    Intent intent = new Intent(AppWidgetManager.ACTION_APPWIDGET_UPDATE);
+    intent.putExtra(AppWidgetManager.EXTRA_APPWIDGET_IDS, newWidgetIds);
+    appWidgetProvider.onReceive(context, intent);
     return newWidgetIds;
   }
 
@@ -377,7 +396,9 @@ public class ShadowAppWidgetManager {
     alwaysRecreateViewsDuringUpdate = alwaysRecreate;
   }
 
-  /** @return the state of the{@code alwaysRecreateViewsDuringUpdate} flag */
+  /**
+   * @return the state of the{@code alwaysRecreateViewsDuringUpdate} flag
+   */
   public boolean getAlwaysRecreateViewsDuringUpdate() {
     return alwaysRecreateViewsDuringUpdate;
   }
@@ -419,11 +440,8 @@ public class ShadowAppWidgetManager {
 
   @ForType(RemoteViews.class)
   interface RemoteViewsReflector {
-
-    @Direct
     RemoteViews getRemoteViewsToApply(Context context);
 
-    @Direct
     boolean hasLandscapeAndPortraitLayouts();
   }
 }

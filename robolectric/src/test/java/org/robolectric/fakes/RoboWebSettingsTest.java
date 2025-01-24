@@ -6,9 +6,7 @@ import android.webkit.WebSettings;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import org.junit.Test;
 import org.junit.runner.RunWith;
-import org.robolectric.annotation.internal.DoNotInstrument;
 
-@DoNotInstrument
 @RunWith(AndroidJUnit4.class)
 public class RoboWebSettingsTest {
   private final RoboWebSettings webSettings = new RoboWebSettings();
@@ -141,7 +139,7 @@ public class RoboWebSettingsTest {
   }
 
   @Test
-  public void testMediaPlaybackRequiresUserGesture() throws Exception {
+  public void testMediaPlaybackRequiresUserGesture() {
     for (boolean value : TRUE_AND_FALSE) {
       webSettings.setMediaPlaybackRequiresUserGesture(value);
       assertThat(webSettings.getMediaPlaybackRequiresUserGesture()).isEqualTo(value);
@@ -190,13 +188,13 @@ public class RoboWebSettingsTest {
   }
 
   @Test
-  public void testSetCacheMode() throws Exception {
+  public void testSetCacheMode() {
     webSettings.setCacheMode(7);
     assertThat(webSettings.getCacheMode()).isEqualTo(7);
   }
 
   @Test
-  public void testSetUseWideViewPort() throws Exception {
+  public void testSetUseWideViewPort() {
     for (boolean value : TRUE_AND_FALSE) {
       webSettings.setUseWideViewPort(value);
       assertThat(webSettings.getUseWideViewPort()).isEqualTo(value);
@@ -204,7 +202,7 @@ public class RoboWebSettingsTest {
   }
 
   @Test
-  public void testSetAppCacheEnabled() throws Exception {
+  public void testSetAppCacheEnabled() {
     for (boolean value : TRUE_AND_FALSE) {
       webSettings.setAppCacheEnabled(value);
       assertThat(webSettings.getAppCacheEnabled()).isEqualTo(value);
@@ -212,7 +210,7 @@ public class RoboWebSettingsTest {
   }
 
   @Test
-  public void testSetGeolocationEnabled() throws Exception {
+  public void testSetGeolocationEnabled() {
     for (boolean value : TRUE_AND_FALSE) {
       webSettings.setGeolocationEnabled(value);
       assertThat(webSettings.getGeolocationEnabled()).isEqualTo(value);
@@ -220,7 +218,7 @@ public class RoboWebSettingsTest {
   }
 
   @Test
-  public void testSetSaveFormData() throws Exception {
+  public void testSetSaveFormData() {
     for (boolean value : TRUE_AND_FALSE) {
       webSettings.setSaveFormData(value);
       assertThat(webSettings.getSaveFormData()).isEqualTo(value);
@@ -228,49 +226,49 @@ public class RoboWebSettingsTest {
   }
 
   @Test
-  public void testSetDatabasePath() throws Exception {
+  public void testSetDatabasePath() {
     webSettings.setDatabasePath("new_path");
     assertThat(webSettings.getDatabasePath()).isEqualTo("new_path");
   }
 
   @Test
-  public void testSetRenderPriority() throws Exception {
+  public void testSetRenderPriority() {
     webSettings.setRenderPriority(WebSettings.RenderPriority.HIGH);
     assertThat(webSettings.getRenderPriority()).isEqualTo(WebSettings.RenderPriority.HIGH);
   }
 
   @Test
-  public void testSetAppCachePath() throws Exception {
+  public void testSetAppCachePath() {
     webSettings.setAppCachePath("new_path");
     assertThat(webSettings.getAppCachePath()).isEqualTo("new_path");
   }
 
   @Test
-  public void testSetAppCacheMaxSize() throws Exception {
+  public void testSetAppCacheMaxSize() {
     webSettings.setAppCacheMaxSize(100);
     assertThat(webSettings.getAppCacheMaxSize()).isEqualTo(100);
   }
 
   @Test
-  public void testSetGeolocationDatabasePath() throws Exception {
+  public void testSetGeolocationDatabasePath() {
     webSettings.setGeolocationDatabasePath("new_path");
     assertThat(webSettings.getGeolocationDatabasePath()).isEqualTo("new_path");
   }
 
   @Test
-  public void testSetJavascriptCanOpenWindowsAutomaticallyIsTrue() throws Exception {
+  public void testSetJavascriptCanOpenWindowsAutomaticallyIsTrue() {
     webSettings.setJavaScriptCanOpenWindowsAutomatically(true);
     assertThat(webSettings.getJavaScriptCanOpenWindowsAutomatically()).isTrue();
   }
 
   @Test
-  public void testSetJavascriptCanOpenWindowsAutomaticallyIsFalse() throws Exception {
+  public void testSetJavascriptCanOpenWindowsAutomaticallyIsFalse() {
     webSettings.setJavaScriptCanOpenWindowsAutomatically(false);
     assertThat(webSettings.getJavaScriptCanOpenWindowsAutomatically()).isFalse();
   }
 
   @Test
-  public void testSetTextZoom() throws Exception {
+  public void testSetTextZoom() {
     webSettings.setTextZoom(50);
     assertThat(webSettings.getTextZoom()).isEqualTo(50);
   }

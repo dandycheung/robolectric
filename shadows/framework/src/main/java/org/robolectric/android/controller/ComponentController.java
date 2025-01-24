@@ -20,7 +20,6 @@ public abstract class ComponentController<C extends ComponentController<C, T>, T
 
   protected boolean attached;
 
-  @SuppressWarnings("unchecked")
   public ComponentController(T component, Intent intent) {
     this(component);
     this.intent = intent;
@@ -52,7 +51,8 @@ public abstract class ComponentController<C extends ComponentController<C, T>, T
     return intent;
   }
 
-  protected C invokeWhilePaused(final String methodName, final ClassParameter<?>... classParameters) {
+  protected C invokeWhilePaused(
+      final String methodName, final ClassParameter<?>... classParameters) {
     return invokeWhilePaused(
         () -> ReflectionHelpers.callInstanceMethod(component, methodName, classParameters));
   }

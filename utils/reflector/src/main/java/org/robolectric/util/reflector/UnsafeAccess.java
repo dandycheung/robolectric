@@ -24,6 +24,7 @@ public class UnsafeAccess {
     return DANGER.defineClass(iClass, reflectorClassName, bytecode);
   }
 
+  @SuppressWarnings("RethrowReflectiveOperationExceptionAsLinkageError")
   private static class DangerPre11 implements Danger {
     private final Unsafe unsafe;
     private final Method defineClassMethod;
@@ -48,7 +49,6 @@ public class UnsafeAccess {
     }
 
     @Override
-    @SuppressWarnings("unchecked")
     public <T> Class<?> defineClass(Class<T> iClass, String reflectorClassName, byte[] bytecode) {
       // use reflection to call since this method does not exist on JDK11
       try {
@@ -67,6 +67,7 @@ public class UnsafeAccess {
     }
   }
 
+  @SuppressWarnings("RethrowReflectiveOperationExceptionAsLinkageError")
   private static class Danger11Plus implements Danger {
     private final Method privateLookupInMethod;
     private final Method defineClassMethod;
@@ -76,8 +77,7 @@ public class UnsafeAccess {
         privateLookupInMethod =
             MethodHandles.class.getMethod(
                 "privateLookupIn", Class.class, MethodHandles.Lookup.class);
-        defineClassMethod =
-            MethodHandles.Lookup.class.getMethod("defineClass", byte[].class);
+        defineClassMethod = MethodHandles.Lookup.class.getMethod("defineClass", byte[].class);
       } catch (NoSuchMethodException e) {
         throw new AssertionError(e);
       }

@@ -12,9 +12,7 @@ import org.robolectric.shadow.api.Shadow;
 import org.robolectric.util.reflector.Direct;
 import org.robolectric.util.reflector.ForType;
 
-/**
- * Shadow of {@link android.view.accessibility.AccessibilityRecord}.
- */
+/** Shadow of {@link android.view.accessibility.AccessibilityRecord}. */
 @Implements(AccessibilityRecord.class)
 public class ShadowAccessibilityRecord {
 
@@ -25,7 +23,6 @@ public class ShadowAccessibilityRecord {
   private View sourceRoot;
   private int virtualDescendantId;
   private AccessibilityNodeInfo sourceNode;
-  private int windowId = -1;
 
   @Implementation
   protected void init(AccessibilityRecord model) {
@@ -34,7 +31,6 @@ public class ShadowAccessibilityRecord {
     sourceRoot = modelShadow.sourceRoot;
     virtualDescendantId = modelShadow.virtualDescendantId;
     sourceNode = modelShadow.sourceNode;
-    windowId = modelShadow.windowId;
 
     // Copy realRecord fields.
     reflector(AccessibilityRecordReflector.class, realRecord).init(model);
@@ -79,14 +75,9 @@ public class ShadowAccessibilityRecord {
    *
    * @param id The id to set
    */
-  public void setWindowId(int id) {
-    windowId = id;
-  }
-
-  /** Returns the id of the window from which the event comes. */
   @Implementation
-  protected int getWindowId() {
-    return windowId;
+  public void setWindowId(int id) {
+    reflector(AccessibilityRecordReflector.class, realRecord).setWindowId(id);
   }
 
   public View getSourceRoot() {
@@ -108,5 +99,8 @@ public class ShadowAccessibilityRecord {
 
     @Direct
     void init(AccessibilityRecord model);
+
+    @Direct
+    void setWindowId(int id);
   }
 }

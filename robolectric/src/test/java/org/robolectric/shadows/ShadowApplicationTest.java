@@ -1,8 +1,5 @@
 package org.robolectric.shadows;
 
-import static android.os.Build.VERSION_CODES.JELLY_BEAN_MR1;
-import static android.os.Build.VERSION_CODES.KITKAT;
-import static android.os.Build.VERSION_CODES.LOLLIPOP;
 import static android.os.Build.VERSION_CODES.LOLLIPOP_MR1;
 import static android.os.Build.VERSION_CODES.M;
 import static android.os.Build.VERSION_CODES.O;
@@ -74,7 +71,7 @@ public class ShadowApplicationTest {
   }
 
   @Test
-  public void shouldBeAContext() throws Exception {
+  public void shouldBeAContext() {
     assertThat(Robolectric.setupActivity(Activity.class).getApplication())
         .isSameInstanceAs(ApplicationProvider.getApplicationContext());
     assertThat(Robolectric.setupActivity(Activity.class).getApplication().getApplicationContext())
@@ -82,7 +79,7 @@ public class ShadowApplicationTest {
   }
 
   @Test
-  public void shouldProvideServices() throws Exception {
+  public void shouldProvideServices() {
     assertThat(context.getSystemService(Context.ACTIVITY_SERVICE))
         .isInstanceOf(android.app.ActivityManager.class);
     assertThat(context.getSystemService(Context.POWER_SERVICE))
@@ -128,49 +125,38 @@ public class ShadowApplicationTest {
   }
 
   @Test
-  @Config(minSdk = JELLY_BEAN_MR1)
-  public void shouldProvideServicesIntroducedInJellyBeanMr1() throws Exception {
+  public void shouldProvideServicesAvailableInAllSdKs() {
     assertThat(context.getSystemService(Context.DISPLAY_SERVICE))
         .isInstanceOf(android.hardware.display.DisplayManager.class);
     assertThat(context.getSystemService(Context.USER_SERVICE)).isInstanceOf(UserManager.class);
-  }
-
-  @Test
-  @Config(minSdk = KITKAT)
-  public void shouldProvideServicesIntroducedInKitKat() throws Exception {
-    assertThat(context.getSystemService(Context.PRINT_SERVICE)).isInstanceOf(PrintManager.class);
-    assertThat(context.getSystemService(Context.CAPTIONING_SERVICE))
-        .isInstanceOf(CaptioningManager.class);
-  }
-
-  @Test
-  @Config(minSdk = LOLLIPOP)
-  public void shouldProvideServicesIntroducedInLollipop() throws Exception {
     assertThat(context.getSystemService(Context.MEDIA_SESSION_SERVICE))
         .isInstanceOf(MediaSessionManager.class);
     assertThat(context.getSystemService(Context.BATTERY_SERVICE))
         .isInstanceOf(BatteryManager.class);
     assertThat(context.getSystemService(Context.RESTRICTIONS_SERVICE))
         .isInstanceOf(RestrictionsManager.class);
+    assertThat(context.getSystemService(Context.PRINT_SERVICE)).isInstanceOf(PrintManager.class);
+    assertThat(context.getSystemService(Context.CAPTIONING_SERVICE))
+        .isInstanceOf(CaptioningManager.class);
   }
 
   @Test
   @Config(minSdk = LOLLIPOP_MR1)
-  public void shouldProvideServicesIntroducedInLollipopMr1() throws Exception {
+  public void shouldProvideServicesIntroducedInLollipopMr1() {
     assertThat(context.getSystemService(Context.TELEPHONY_SUBSCRIPTION_SERVICE))
         .isInstanceOf(SubscriptionManager.class);
   }
 
   @Test
   @Config(minSdk = M)
-  public void shouldProvideServicesIntroducedMarshmallow() throws Exception {
+  public void shouldProvideServicesIntroducedMarshmallow() {
     assertThat(context.getSystemService(Context.FINGERPRINT_SERVICE))
         .isInstanceOf(FingerprintManager.class);
   }
 
   @Test
   @Config(minSdk = O)
-  public void shouldProvideServicesIntroducedOreo() throws Exception {
+  public void shouldProvideServicesIntroducedOreo() {
     // Context.AUTOFILL_MANAGER_SERVICE is marked @hide and this is the documented way to obtain
     // this service.
     AutofillManager autofillManager = context.getSystemService(AutofillManager.class);
@@ -181,14 +167,13 @@ public class ShadowApplicationTest {
   }
 
   @Test
-  public void shouldProvideLayoutInflater() throws Exception {
+  public void shouldProvideLayoutInflater() {
     Object systemService = context.getSystemService(Context.LAYOUT_INFLATER_SERVICE);
     assertThat(systemService).isInstanceOf(LayoutInflater.class);
   }
 
   @Test
-  @Config(minSdk = KITKAT)
-  public void shouldCorrectlyInstantiatedAccessibilityService() throws Exception {
+  public void shouldCorrectlyInstantiatedAccessibilityService() {
     AccessibilityManager accessibilityManager =
         (AccessibilityManager) context.getSystemService(Context.ACCESSIBILITY_SERVICE);
 
@@ -714,7 +699,7 @@ public class ShadowApplicationTest {
   }
 
   @Test
-  public void canFindAllReceiversForAnIntent() throws Exception {
+  public void canFindAllReceiversForAnIntent() {
     BroadcastReceiver expectedReceiver = new TestBroadcastReceiver();
     assertFalse(shadowOf(context).hasReceiverForIntent(new Intent("Foo")));
     context.registerReceiver(expectedReceiver, new IntentFilter("Foo"));
@@ -738,7 +723,7 @@ public class ShadowApplicationTest {
     Activity activity = Robolectric.setupActivity(Activity.class);
     activity.registerReceiver(new TestBroadcastReceiver(), new IntentFilter("Foo"));
 
-    assertThat(shadowOf(context).getRegisteredReceivers().size()).isAtLeast(1);
+    assertThat(shadowOf(context).getRegisteredReceivers()).isNotEmpty();
 
     shadowOf(context).clearRegisteredReceivers();
 
@@ -762,12 +747,36 @@ public class ShadowApplicationTest {
   }
 
   @Test
-  public void shouldRememberResourcesAfterLazilyLoading() throws Exception {
+  public void sendBroadcastWithPermission() {
+    Intent broadcastIntent = new Intent("Foo");
+    String permission = "org.robolectric.SOME_PERMISSION";
+
+    TestBroadcastReceiver receiverWithoutPermission = new TestBroadcastReceiver();
+    context.registerReceiver(receiverWithoutPermission, new IntentFilter("Foo"));
+    TestBroadcastReceiver receiverWithPermission = new TestBroadcastReceiver();
+    context.registerReceiver(
+        receiverWithPermission, new IntentFilter("Foo"), permission, /* scheduler= */ null);
+
+    context.sendBroadcast(broadcastIntent);
+    shadowMainLooper().idle();
+    assertThat(receiverWithoutPermission.intent).isEqualTo(broadcastIntent);
+    assertThat(receiverWithPermission.intent).isNull();
+    receiverWithoutPermission.intent = null;
+
+    shadowOf(context).grantPermissions(permission);
+    context.sendBroadcast(broadcastIntent);
+    shadowMainLooper().idle();
+    assertThat(receiverWithoutPermission.intent).isEqualTo(broadcastIntent);
+    assertThat(receiverWithPermission.intent).isEqualTo(broadcastIntent);
+  }
+
+  @Test
+  public void shouldRememberResourcesAfterLazilyLoading() {
     assertSame(context.getResources(), context.getResources());
   }
 
   @Test
-  public void startActivity_whenActivityCheckingEnabled_doesntFindResolveInfo() throws Exception {
+  public void startActivity_whenActivityCheckingEnabled_doesntFindResolveInfo() {
     shadowOf(context).checkActivities(true);
 
     String action = "com.does.not.exist.android.app.v2.mobile";
@@ -782,7 +791,7 @@ public class ShadowApplicationTest {
   }
 
   @Test
-  public void startActivity_whenActivityCheckingEnabled_findsResolveInfo() throws Exception {
+  public void startActivity_whenActivityCheckingEnabled_findsResolveInfo() {
     shadowOf(context).checkActivities(true);
 
     context.startActivity(
@@ -797,7 +806,7 @@ public class ShadowApplicationTest {
   public void bindServiceShouldAddServiceConnectionToListOfBoundServiceConnections() {
     final ServiceConnection expectedServiceConnection = new EmptyServiceConnection();
 
-    assertThat(Shadows.shadowOf(context).getBoundServiceConnections()).hasSize(0);
+    assertThat(Shadows.shadowOf(context).getBoundServiceConnections()).isEmpty();
     assertThat(
             context.bindService(
                 new Intent("connect").setPackage("dummy.package"), expectedServiceConnection, 0))
@@ -814,7 +823,7 @@ public class ShadowApplicationTest {
     final String unboundableAction = "refuse";
     final Intent serviceIntent = new Intent(unboundableAction).setPackage("dummy.package");
     Shadows.shadowOf(context).declareActionUnbindable(unboundableAction);
-    assertThat(Shadows.shadowOf(context).getBoundServiceConnections()).hasSize(0);
+    assertThat(Shadows.shadowOf(context).getBoundServiceConnections()).isEmpty();
     assertThat(context.bindService(serviceIntent, expectedServiceConnection, 0)).isFalse();
     assertThat(Shadows.shadowOf(context).getBoundServiceConnections()).hasSize(1);
     assertThat(Shadows.shadowOf(context).getBoundServiceConnections().get(0))
@@ -830,9 +839,9 @@ public class ShadowApplicationTest {
                 new Intent("connect").setPackage("dummy.package"), expectedServiceConnection, 0))
         .isTrue();
     assertThat(Shadows.shadowOf(context).getBoundServiceConnections()).hasSize(1);
-    assertThat(Shadows.shadowOf(context).getUnboundServiceConnections()).hasSize(0);
+    assertThat(Shadows.shadowOf(context).getUnboundServiceConnections()).isEmpty();
     context.unbindService(expectedServiceConnection);
-    assertThat(Shadows.shadowOf(context).getBoundServiceConnections()).hasSize(0);
+    assertThat(Shadows.shadowOf(context).getBoundServiceConnections()).isEmpty();
     assertThat(Shadows.shadowOf(context).getUnboundServiceConnections()).hasSize(1);
     assertThat(Shadows.shadowOf(context).getUnboundServiceConnections().get(0))
         .isSameInstanceAs(expectedServiceConnection);

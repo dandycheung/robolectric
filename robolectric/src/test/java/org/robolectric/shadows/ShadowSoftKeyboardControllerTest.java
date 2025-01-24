@@ -9,6 +9,7 @@ import android.accessibilityservice.AccessibilityService.SoftKeyboardController;
 import android.os.Looper;
 import android.view.accessibility.AccessibilityEvent;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
+import javax.annotation.Nonnull;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -20,12 +21,11 @@ import org.robolectric.annotation.Config;
 @Config(minSdk = N)
 public final class ShadowSoftKeyboardControllerTest {
 
-  private MyService myService;
   private SoftKeyboardController softKeyboardController;
 
   @Before
   public void setUp() {
-    myService = Robolectric.setupService(MyService.class);
+    MyService myService = Robolectric.setupService(MyService.class);
     softKeyboardController = myService.getSoftKeyboardController();
   }
 
@@ -92,7 +92,7 @@ public final class ShadowSoftKeyboardControllerTest {
     private int showMode = -1;
 
     @Override
-    public void onShowModeChanged(SoftKeyboardController controller, int showMode) {
+    public void onShowModeChanged(@Nonnull SoftKeyboardController controller, int showMode) {
       this.invoked = true;
       this.showMode = showMode;
     }

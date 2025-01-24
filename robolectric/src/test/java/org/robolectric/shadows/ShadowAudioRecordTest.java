@@ -1,6 +1,6 @@
 package org.robolectric.shadows;
 
-import static android.os.Build.VERSION_CODES.LOLLIPOP;
+import static android.media.AudioPort.ROLE_SOURCE;
 import static android.os.Build.VERSION_CODES.M;
 import static com.google.common.truth.Truth.assertThat;
 import static java.lang.Math.min;
@@ -9,21 +9,23 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
 
+import android.media.AudioDeviceInfo;
 import android.media.AudioFormat;
 import android.media.AudioRecord;
 import android.media.MediaRecorder.AudioSource;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
+import java.lang.reflect.Field;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.Mockito;
 import org.robolectric.annotation.Config;
+import org.robolectric.shadow.api.Shadow;
 import org.robolectric.shadows.ShadowAudioRecord.AudioRecordSource;
 
 /** Tests for {@link ShadowAudioRecord}. */
 @RunWith(AndroidJUnit4.class)
-@Config(minSdk = LOLLIPOP)
 public class ShadowAudioRecordTest {
 
   @Test
@@ -133,7 +135,7 @@ public class ShadowAudioRecordTest {
 
     audioRecord.read(new byte[100], 0, 100);
 
-    verify(source).readInByteArray(any(byte[].class), eq(0), eq(100), /* isBlocking=*/ eq(true));
+    verify(source).readInByteArray(any(byte[].class), eq(0), eq(100), /* isBlocking= */ eq(true));
     verifyNoMoreInteractions(source);
   }
 
@@ -147,7 +149,7 @@ public class ShadowAudioRecordTest {
 
     audioRecord.read(new byte[100], 0, 100, AudioRecord.READ_BLOCKING);
 
-    verify(source).readInByteArray(any(byte[].class), eq(0), eq(100), /* isBlocking=*/ eq(true));
+    verify(source).readInByteArray(any(byte[].class), eq(0), eq(100), /* isBlocking= */ eq(true));
     verifyNoMoreInteractions(source);
   }
 
@@ -161,7 +163,7 @@ public class ShadowAudioRecordTest {
 
     audioRecord.read(new byte[100], 0, 100, AudioRecord.READ_NON_BLOCKING);
 
-    verify(source).readInByteArray(any(byte[].class), eq(0), eq(100), /* isBlocking=*/ eq(false));
+    verify(source).readInByteArray(any(byte[].class), eq(0), eq(100), /* isBlocking= */ eq(false));
     verifyNoMoreInteractions(source);
   }
 
@@ -191,7 +193,7 @@ public class ShadowAudioRecordTest {
 
     audioRecord.read(new short[100], 0, 100);
 
-    verify(source).readInShortArray(any(short[].class), eq(0), eq(100), /* isBlocking=*/ eq(true));
+    verify(source).readInShortArray(any(short[].class), eq(0), eq(100), /* isBlocking= */ eq(true));
     verifyNoMoreInteractions(source);
   }
 
@@ -205,7 +207,7 @@ public class ShadowAudioRecordTest {
 
     audioRecord.read(new short[100], 0, 100, AudioRecord.READ_BLOCKING);
 
-    verify(source).readInShortArray(any(short[].class), eq(0), eq(100), /* isBlocking=*/ eq(true));
+    verify(source).readInShortArray(any(short[].class), eq(0), eq(100), /* isBlocking= */ eq(true));
     verifyNoMoreInteractions(source);
   }
 
@@ -219,7 +221,8 @@ public class ShadowAudioRecordTest {
 
     audioRecord.read(new short[100], 0, 100, AudioRecord.READ_NON_BLOCKING);
 
-    verify(source).readInShortArray(any(short[].class), eq(0), eq(100), /* isBlocking=*/ eq(false));
+    verify(source)
+        .readInShortArray(any(short[].class), eq(0), eq(100), /* isBlocking= */ eq(false));
     verifyNoMoreInteractions(source);
   }
 
@@ -254,7 +257,7 @@ public class ShadowAudioRecordTest {
 
     audioRecord.read(new float[100], 0, 100, AudioRecord.READ_BLOCKING);
 
-    verify(source).readInFloatArray(any(float[].class), eq(0), eq(100), /* isBlocking=*/ eq(true));
+    verify(source).readInFloatArray(any(float[].class), eq(0), eq(100), /* isBlocking= */ eq(true));
     verifyNoMoreInteractions(source);
   }
 
@@ -274,7 +277,8 @@ public class ShadowAudioRecordTest {
 
     audioRecord.read(new float[100], 0, 100, AudioRecord.READ_NON_BLOCKING);
 
-    verify(source).readInFloatArray(any(float[].class), eq(0), eq(100), /* isBlocking=*/ eq(false));
+    verify(source)
+        .readInFloatArray(any(float[].class), eq(0), eq(100), /* isBlocking= */ eq(false));
     verifyNoMoreInteractions(source);
   }
 
@@ -305,7 +309,7 @@ public class ShadowAudioRecordTest {
 
     audioRecord.read(ByteBuffer.allocate(100), 100);
 
-    verify(source).readInDirectBuffer(any(ByteBuffer.class), eq(100), /* isBlocking=*/ eq(true));
+    verify(source).readInDirectBuffer(any(ByteBuffer.class), eq(100), /* isBlocking= */ eq(true));
     verifyNoMoreInteractions(source);
   }
 
@@ -319,7 +323,7 @@ public class ShadowAudioRecordTest {
 
     audioRecord.read(ByteBuffer.allocate(100), 100, AudioRecord.READ_BLOCKING);
 
-    verify(source).readInDirectBuffer(any(ByteBuffer.class), eq(100), /* isBlocking=*/ eq(true));
+    verify(source).readInDirectBuffer(any(ByteBuffer.class), eq(100), /* isBlocking= */ eq(true));
     verifyNoMoreInteractions(source);
   }
 
@@ -333,8 +337,17 @@ public class ShadowAudioRecordTest {
 
     audioRecord.read(ByteBuffer.allocate(100), 100, AudioRecord.READ_NON_BLOCKING);
 
-    verify(source).readInDirectBuffer(any(ByteBuffer.class), eq(100), /* isBlocking=*/ eq(false));
+    verify(source).readInDirectBuffer(any(ByteBuffer.class), eq(100), /* isBlocking= */ eq(false));
     verifyNoMoreInteractions(source);
+  }
+
+  @Test
+  @Config(minSdk = M)
+  public void nativeSetInputDevice_setPreferredDevice_succeeds() {
+    // native_setInputDevice is a private method used by the public setPreferredDevice()
+    AudioRecord audioRecord = createAudioRecord();
+    AudioDeviceInfo info = createAudioDeviceInfo(ROLE_SOURCE);
+    assertThat(audioRecord.setPreferredDevice(info)).isTrue();
   }
 
   private static AudioRecord createAudioRecord() {
@@ -358,5 +371,31 @@ public class ShadowAudioRecordTest {
         return availableBytesToBeRead;
       }
     };
+  }
+
+  private static AudioDeviceInfo createAudioDeviceInfo(int role) {
+    AudioDeviceInfo info = Shadow.newInstanceOf(AudioDeviceInfo.class);
+    try {
+      Field portField = AudioDeviceInfo.class.getDeclaredField("mPort");
+      portField.setAccessible(true);
+      Object port = Shadow.newInstanceOf("android.media.AudioDevicePort");
+      portField.set(info, port);
+
+      Field roleField = port.getClass().getSuperclass().getDeclaredField("mRole");
+      roleField.setAccessible(true);
+      roleField.set(port, role);
+
+      Field handleField = port.getClass().getSuperclass().getDeclaredField("mHandle");
+      handleField.setAccessible(true);
+      Object handle = Shadow.newInstanceOf("android.media.AudioHandle");
+      handleField.set(port, handle);
+
+      Field idField = handle.getClass().getDeclaredField("mId");
+      idField.setAccessible(true);
+      idField.setInt(handle, /* id= */ 1);
+    } catch (ReflectiveOperationException e) {
+      throw new AssertionError(e);
+    }
+    return info;
   }
 }

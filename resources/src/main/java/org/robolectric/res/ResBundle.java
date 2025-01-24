@@ -29,21 +29,25 @@ public class ResBundle {
 
     public TypedResource pick(ResName resName, ResTable_config toMatch) {
       List<TypedResource> values = map.get(resName);
-      if (values == null || values.size() == 0) return null;
+      if (values == null || values.isEmpty()) return null;
 
       TypedResource bestMatchSoFar = null;
       for (TypedResource candidate : values) {
         ResTable_config candidateConfig = candidate.getConfig();
         if (candidateConfig.match(toMatch)) {
-          if (bestMatchSoFar == null || candidateConfig.isBetterThan(bestMatchSoFar.getConfig(), toMatch)) {
+          if (bestMatchSoFar == null
+              || candidateConfig.isBetterThan(bestMatchSoFar.getConfig(), toMatch)) {
             bestMatchSoFar = candidate;
           }
         }
       }
 
       if (Logger.loggingEnabled()) {
-        Logger.debug("Picked '%s' for %s for qualifiers '%s' (%d candidates)",
-            bestMatchSoFar == null ? "<none>" : bestMatchSoFar.getXmlContext().getQualifiers().toString(),
+        Logger.debug(
+            "Picked '%s' for %s for qualifiers '%s' (%d candidates)",
+            bestMatchSoFar == null
+                ? "<none>"
+                : bestMatchSoFar.getXmlContext().getQualifiers().toString(),
             resName.getFullyQualifiedName(),
             toMatch,
             values.size());

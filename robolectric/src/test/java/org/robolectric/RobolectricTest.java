@@ -2,6 +2,7 @@ package org.robolectric;
 
 import static com.google.common.truth.Truth.assertThat;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -20,6 +21,7 @@ import android.view.View.OnClickListener;
 import android.view.ViewParent;
 import androidx.test.core.app.ApplicationProvider;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
+import java.util.concurrent.TimeUnit;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.robolectric.annotation.Config;
@@ -34,25 +36,25 @@ import org.robolectric.util.ReflectionHelpers;
 @RunWith(AndroidJUnit4.class)
 public class RobolectricTest {
 
-  private Application context = ApplicationProvider.getApplicationContext();
+  private final Application context = ApplicationProvider.getApplicationContext();
 
-  @Test(expected = RuntimeException.class)
-  public void clickOn_shouldThrowIfViewIsDisabled() throws Exception {
+  @Test
+  public void clickOn_shouldThrowIfViewIsDisabled() {
     View view = new View(context);
     view.setEnabled(false);
-    ShadowView.clickOn(view);
+    assertThrows(RuntimeException.class, () -> ShadowView.clickOn(view));
   }
 
   @Test
   @LooperMode(LEGACY)
-  public void shouldResetBackgroundSchedulerBeforeTests() throws Exception {
+  public void shouldResetBackgroundSchedulerBeforeTests() {
     assertThat(Robolectric.getBackgroundThreadScheduler().isPaused()).isFalse();
     Robolectric.getBackgroundThreadScheduler().pause();
   }
 
   @Test
   @LooperMode(LEGACY)
-  public void shouldResetBackgroundSchedulerAfterTests() throws Exception {
+  public void shouldResetBackgroundSchedulerAfterTests() {
     assertThat(Robolectric.getBackgroundThreadScheduler().isPaused()).isFalse();
     Robolectric.getBackgroundThreadScheduler().pause();
   }
@@ -63,14 +65,14 @@ public class RobolectricTest {
     new Handler().postDelayed(() -> wasRun[0] = true, 2000);
 
     assertFalse(wasRun[0]);
-    ShadowLooper.idleMainLooper(1999);
+    ShadowLooper.idleMainLooper(1999, TimeUnit.MILLISECONDS);
     assertFalse(wasRun[0]);
-    ShadowLooper.idleMainLooper(1);
+    ShadowLooper.idleMainLooper(1, TimeUnit.MILLISECONDS);
     assertTrue(wasRun[0]);
   }
 
   @Test
-  public void clickOn_shouldCallClickListener() throws Exception {
+  public void clickOn_shouldCallClickListener() {
     View view = new View(context);
     shadowOf(view).setMyParent(ReflectionHelpers.createNullProxy(ViewParent.class));
     OnClickListener testOnClickListener = mock(OnClickListener.class);
@@ -80,16 +82,19 @@ public class RobolectricTest {
     verify(testOnClickListener).onClick(view);
   }
 
-  @Test(expected = ActivityNotFoundException.class)
-  public void checkActivities_shouldSetValueOnShadowApplication() throws Exception {
+  @Test
+  public void checkActivities_shouldSetValueOnShadowApplication() {
     ShadowApplication.getInstance().checkActivities(true);
-    context.startActivity(
-        new Intent("i.dont.exist.activity").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+    assertThrows(
+        ActivityNotFoundException.class,
+        () ->
+            context.startActivity(
+                new Intent("i.dont.exist.activity").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)));
   }
 
   @Test
-  @Config(sdk = 16)
-  public void setupActivity_returnsAVisibleActivity() throws Exception {
+  @Config(sdk = Config.NEWEST_SDK)
+  public void setupActivity_returnsAVisibleActivity() {
     LifeCycleActivity activity = Robolectric.setupActivity(LifeCycleActivity.class);
 
     assertThat(activity.isCreated()).isTrue();

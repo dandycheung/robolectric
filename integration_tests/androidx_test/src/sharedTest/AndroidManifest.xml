@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+          xmlns:tools="http://schemas.android.com/tools">
+
+  <application
+      android:appComponentFactory="org.robolectric.integrationtests.axt.ActivityScenarioTest$CustomAppComponentFactory"
+      tools:replace="android:appComponentFactory">
+    <activity
+        android:name="org.robolectric.integrationtests.axt.ActivityTestRuleTest$TranscriptActivity"
+        android:exported="true"/>
+    <activity
+        android:name="org.robolectric.integrationtests.axt.EspressoActivity"
+        android:exported="true"/>
+    <activity
+        android:name="org.robolectric.integrationtests.axt.NoActionBarEspressoActivity"
+        android:exported="true"/>
+    <activity
+        android:name="org.robolectric.integrationtests.axt.EspressoScrollingActivity"
+        android:theme="@style/Theme.AppCompat.NoActionBar"
+        android:exported="true"/>
+
+    <activity
+        android:name="org.robolectric.integrationtests.axt.ActivityScenarioTest$LifecycleOwnerActivity"
+        android:exported="true"/>
+    <activity
+        android:name="org.robolectric.integrationtests.axt.ActivityScenarioTest$TranscriptActivity"
+        android:exported = "true"/>
+    <activity
+        android:name="org.robolectric.integrationtests.axt.ActivityScenarioTest$ActivityWithCustomConstructor"
+        android:exported = "true"/>
+    <activity-alias
+        android:name="org.robolectric.integrationtests.axt.ActivityScenarioTestAlias"
+        android:targetActivity="org.robolectric.integrationtests.axt.ActivityScenarioTest$TranscriptActivity" />
+    <activity
+        android:name="org.robolectric.integrationtests.axt.IntentsTest$ResultCapturingActivity"
+        android:exported = "true"/>
+  </application>
+
+  <instrumentation
+      android:name="androidx.test.runner.AndroidJUnitRunner"
+      android:targetPackage="org.robolectric.integrationtests.axt"/>
+
+</manifest>

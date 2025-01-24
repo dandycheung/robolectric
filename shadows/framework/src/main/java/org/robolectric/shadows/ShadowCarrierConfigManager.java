@@ -1,28 +1,101 @@
 package org.robolectric.shadows;
 
 import static android.os.Build.VERSION_CODES.M;
+import static android.os.Build.VERSION_CODES.Q;
 
 import android.os.PersistableBundle;
 import android.telephony.CarrierConfigManager;
+import com.google.common.annotations.VisibleForTesting;
+import com.google.common.collect.ImmutableSet;
 import java.util.HashMap;
+import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
+import org.robolectric.annotation.HiddenApi;
 import org.robolectric.annotation.Implementation;
 import org.robolectric.annotation.Implements;
+import org.robolectric.annotation.Resetter;
+import org.robolectric.versioning.AndroidVersions.U;
 
 @Implements(value = CarrierConfigManager.class, minSdk = M)
 public class ShadowCarrierConfigManager {
 
-  private final HashMap<Integer, PersistableBundle> bundles = new HashMap<>();
+  private static final HashMap<Integer, PersistableBundle> bundles = new HashMap<>();
+  private static final HashMap<Integer, PersistableBundle> overrideBundles = new HashMap<>();
+  private static boolean readPhoneStatePermission = true;
+
+  @Resetter
+  public static void reset() {
+    bundles.clear();
+    overrideBundles.clear();
+    readPhoneStatePermission = true;
+  }
+
+  @VisibleForTesting static final PersistableBundle BASE;
+
+  static {
+    BASE = new PersistableBundle();
+    BASE.putString(CarrierConfigManager.KEY_CARRIER_CONFIG_VERSION_STRING, "version");
+    BASE.putBoolean(CarrierConfigManager.KEY_CARRIER_CONFIG_APPLIED_BOOL, false);
+  }
 
   /**
-   * Returns {@link android.os.PersistableBundle} previously set by {@link #setConfigForSubId(int)},
-   * or default values for an invalid {@code subId}.
+   * Returns {@link android.os.PersistableBundle} previously set by {@link #overrideConfig} or
+   * {@link #setConfigForSubId(int, PersistableBundle)}, or default values for an invalid {@code
+   * subId}.
    */
   @Implementation
-  protected PersistableBundle getConfigForSubId(int subId) {
+  public PersistableBundle getConfigForSubId(int subId) {
+    checkReadPhoneStatePermission();
+    if (overrideBundles.containsKey(subId) && overrideBundles.get(subId) != null) {
+      return overrideBundles.get(subId) != null
+          ? new PersistableBundle(overrideBundles.get(subId))
+          : null;
+    }
     if (bundles.containsKey(subId)) {
-      return bundles.get(subId);
+      return bundles.get(subId) != null ? new PersistableBundle(bundles.get(subId)) : null;
     }
     return new PersistableBundle();
+  }
+
+  /**
+   * Returns {@link android.os.PersistableBundle} containing the specified keys for a particular
+   * subscription. {@link #setConfigForSubId(int, PersistableBundle)}, or default values for an
+   * invalid {@code subId}.
+   */
+  @Implementation(minSdk = U.SDK_INT)
+  @Nonnull
+  public PersistableBundle getConfigForSubId(int subId, @Nonnull String... keys) {
+    checkReadPhoneStatePermission();
+
+    PersistableBundle bundle = getConfigForSubId(subId);
+    PersistableBundle result = new PersistableBundle(BASE);
+
+    if (bundle == null) {
+      return result;
+    }
+
+    result.putAll(bundle);
+
+    if (keys.length == 0) {
+      return result;
+    }
+
+    ImmutableSet<String> requiredKeys =
+        ImmutableSet.<String>builder()
+            .addAll(BASE.keySet())
+            .addAll(ImmutableSet.copyOf(keys))
+            .build();
+    for (String key : bundle.keySet()) {
+      if (!requiredKeys.contains(key)) {
+        result.remove(key);
+      }
+    }
+
+    return result;
+  }
+
+  public void setReadPhoneStatePermission(boolean readPhoneStatePermission) {
+    this.readPhoneStatePermission = readPhoneStatePermission;
   }
 
   /**
@@ -31,5 +104,23 @@ public class ShadowCarrierConfigManager {
    */
   public void setConfigForSubId(int subId, PersistableBundle config) {
     bundles.put(subId, config);
+  }
+
+  /**
+   * Overrides the carrier config of the provided subscription ID with the provided values.
+   *
+   * <p>This method will NOT check if {@code overrideValues} contains valid values for specified
+   * config keys.
+   */
+  @Implementation(minSdk = Q)
+  @HiddenApi
+  protected void overrideConfig(int subId, @Nullable PersistableBundle config) {
+    overrideBundles.put(subId, config);
+  }
+
+  private void checkReadPhoneStatePermission() {
+    if (!readPhoneStatePermission) {
+      throw new SecurityException();
+    }
   }
 }

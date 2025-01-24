@@ -1,6 +1,5 @@
 package org.robolectric.shadows;
 
-import static android.os.Build.VERSION_CODES.JELLY_BEAN_MR1;
 import static android.os.Build.VERSION_CODES.P;
 import static com.google.common.truth.Truth.assertThat;
 import static org.junit.Assert.assertFalse;
@@ -56,7 +55,7 @@ public class ShadowLegacySystemClockTest {
     assertThat(SystemClock.elapsedRealtime()).isEqualTo(1034);
   }
 
-  @Test @Config(minSdk = JELLY_BEAN_MR1)
+  @Test
   public void testElapsedRealtimeNanos() {
     Robolectric.getForegroundThreadScheduler().advanceTo(1000);
     assertThat(SystemClock.elapsedRealtimeNanos()).isEqualTo(1000000000);
@@ -67,11 +66,14 @@ public class ShadowLegacySystemClockTest {
   @Test
   public void shouldInterceptSystemTimeCalls() throws Throwable {
     ShadowSystemClock.setNanoTime(3141592L);
-    long systemNanoTime = (Long) RobolectricInternals.intercept(
-        "java/lang/System/nanoTime()J", null, null, getClass());
+    long systemNanoTime =
+        (Long)
+            RobolectricInternals.intercept("java/lang/System/nanoTime()J", null, null, getClass());
     assertThat(systemNanoTime).isEqualTo(3141592L);
-    long systemMilliTime = (Long) RobolectricInternals.intercept(
-        "java/lang/System/currentTimeMillis()J", null, null, getClass());
+    long systemMilliTime =
+        (Long)
+            RobolectricInternals.intercept(
+                "java/lang/System/currentTimeMillis()J", null, null, getClass());
     assertThat(systemMilliTime).isEqualTo(3L);
   }
 

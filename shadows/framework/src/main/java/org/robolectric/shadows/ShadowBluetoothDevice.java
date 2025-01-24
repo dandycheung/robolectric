@@ -1,25 +1,38 @@
 package org.robolectric.shadows;
 
+import static android.bluetooth.BluetoothDevice.BOND_BONDING;
 import static android.bluetooth.BluetoothDevice.BOND_NONE;
-import static android.os.Build.VERSION_CODES.JELLY_BEAN_MR2;
+import static android.content.pm.PackageManager.PERMISSION_GRANTED;
 import static android.os.Build.VERSION_CODES.M;
 import static android.os.Build.VERSION_CODES.O;
+import static android.os.Build.VERSION_CODES.O_MR1;
 import static android.os.Build.VERSION_CODES.Q;
+import static android.os.Build.VERSION_CODES.R;
+import static android.os.Build.VERSION_CODES.S;
+import static android.os.Build.VERSION_CODES.UPSIDE_DOWN_CAKE;
 import static org.robolectric.util.reflector.Reflector.reflector;
 
+import android.annotation.IntRange;
+import android.app.ActivityThread;
 import android.bluetooth.BluetoothClass;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothGatt;
 import android.bluetooth.BluetoothGattCallback;
 import android.bluetooth.BluetoothSocket;
+import android.bluetooth.BluetoothStatusCodes;
 import android.bluetooth.IBluetooth;
 import android.content.Context;
+import android.os.Build.VERSION;
 import android.os.Handler;
 import android.os.ParcelUuid;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import javax.annotation.Nullable;
+import org.robolectric.RuntimeEnvironment;
 import org.robolectric.annotation.Implementation;
 import org.robolectric.annotation.Implements;
 import org.robolectric.annotation.RealObject;
@@ -30,8 +43,19 @@ import org.robolectric.util.reflector.Direct;
 import org.robolectric.util.reflector.ForType;
 import org.robolectric.util.reflector.Static;
 
-@Implements(BluetoothDevice.class)
+/** Shadow for {@link BluetoothDevice}. */
+@Implements(value = BluetoothDevice.class)
 public class ShadowBluetoothDevice {
+  /**
+   * Interceptor interface for {@link BluetoothGatt} objects. Tests that require configuration of
+   * their ShadowBluetoothGatt's may inject an interceptor, which will be called with the newly
+   * constructed BluetoothGatt before {@link ShadowBluetoothGatt#connectGatt} returns.
+   */
+  public static interface BluetoothGattConnectionInterceptor {
+    public void onNewGattConnection(BluetoothGatt gatt);
+  }
+
+  @Deprecated // Prefer {@link android.bluetooth.BluetoothAdapter#getRemoteDevice}
   public static BluetoothDevice newInstance(String address) {
     return ReflectionHelpers.callConstructor(
         BluetoothDevice.class, ReflectionHelpers.ClassParameter.from(String.class, address));
@@ -58,6 +82,13 @@ public class ShadowBluetoothDevice {
   private String alias;
   private boolean shouldThrowOnGetAliasName = false;
   private BluetoothClass bluetoothClass = null;
+  private boolean shouldThrowSecurityExceptions = false;
+  private final Map<Integer, byte[]> metadataMap = new HashMap<>();
+  private int batteryLevel = BluetoothDevice.BATTERY_LEVEL_BLUETOOTH_OFF;
+  private boolean isInSilenceMode = false;
+  private boolean isConnected = false;
+  @Nullable private BluetoothGattConnectionInterceptor bluetoothGattConnectionInterceptor = null;
+  private final Map<Integer, Integer> connectionHandlesByTransportType = new HashMap<>();
 
   /**
    * Implements getService() in the same way the original method does, but ignores any Exceptions
@@ -81,6 +112,21 @@ public class ShadowBluetoothDevice {
   }
 
   /**
+   * Set the alias for bluetooth device.
+   *
+   * @param alias The alias name that set to bluetooth device.
+   * @return If API is larger than or equals to S, it returns [BluetoothStatusCodes] code, otherwise
+   *     it returns boolean.
+   */
+  public Object setAlias(String alias) {
+    if (RuntimeEnvironment.getApiLevel() >= S) {
+      return setAliasS(alias);
+    } else {
+      return setAliasBeforeS(alias);
+    }
+  }
+
+  /**
    * Sets the alias name of the device.
    *
    * <p>Alias is the locally modified name of a remote device.
@@ -89,8 +135,25 @@ public class ShadowBluetoothDevice {
    *
    * @param alias alias name.
    */
-  public void setAlias(String alias) {
+  @Implementation(maxSdk = R, methodName = "setAlias")
+  protected boolean setAliasBeforeS(String alias) {
     this.alias = alias;
+    return true;
+  }
+
+  /**
+   * Sets the alias name of the device for API >= 31.
+   *
+   * <p>Alias is the locally modified name of a remote device.
+   *
+   * <p>Alias Name is not part of the supported SDK, and accessed via reflection.
+   *
+   * @param alias alias name.
+   */
+  @Implementation(minSdk = S, methodName = "setAlias")
+  protected int setAliasS(String alias) {
+    this.alias = alias;
+    return BluetoothStatusCodes.SUCCESS;
   }
 
   /**
@@ -108,13 +171,28 @@ public class ShadowBluetoothDevice {
     shouldThrowOnGetAliasName = shouldThrow;
   }
 
+  /**
+   * Sets if a runtime exception is thrown when bluetooth methods with BLUETOOTH_CONNECT permission
+   * pre-requisites are accessed.
+   *
+   * <p>Intended to replicate what may happen if user has not enabled nearby device permissions.
+   *
+   * @param shouldThrow if methods should throw SecurityExceptions without enabled permissions when
+   *     called.
+   */
+  public void setShouldThrowSecurityExceptions(boolean shouldThrow) {
+    shouldThrowSecurityExceptions = shouldThrow;
+  }
+
   @Implementation
   protected String getName() {
+    checkForBluetoothConnectPermission();
     return name;
   }
 
   @Implementation
   protected String getAlias() {
+    checkForBluetoothConnectPermission();
     return alias;
   }
 
@@ -141,8 +219,9 @@ public class ShadowBluetoothDevice {
    * @return Value set by calling {@link ShadowBluetoothDevice#setType}. If setType has not
    *     previously been called, will return BluetoothDevice.DEVICE_TYPE_UNKNOWN.
    */
-  @Implementation(minSdk = JELLY_BEAN_MR2)
+  @Implementation
   protected int getType() {
+    checkForBluetoothConnectPermission();
     return type;
   }
 
@@ -159,6 +238,7 @@ public class ShadowBluetoothDevice {
    */
   @Implementation
   protected ParcelUuid[] getUuids() {
+    checkForBluetoothConnectPermission();
     return uuids;
   }
 
@@ -167,15 +247,25 @@ public class ShadowBluetoothDevice {
     this.bondState = bondState;
   }
 
+  @Implementation
+  protected boolean cancelBondProcess() {
+    if (bondState == BOND_BONDING) {
+      setBondState(BOND_NONE);
+      return true;
+    }
+    return false;
+  }
+
   /**
    * Overrides behavior of {@link BluetoothDevice#getBondState} to return pre-set result.
    *
-   * @returns Value set by calling {@link ShadowBluetoothDevice#setBondState}. If setBondState has
+   * @return Value set by calling {@link ShadowBluetoothDevice#setBondState}. If setBondState has
    *     not previously been called, will return {@link BluetoothDevice#BOND_NONE} to indicate the
    *     device is not bonded.
    */
   @Implementation
   protected int getBondState() {
+    checkForBluetoothConnectPermission();
     return bondState;
   }
 
@@ -187,11 +277,26 @@ public class ShadowBluetoothDevice {
   /** Returns whether this device has been bonded with. */
   @Implementation
   protected boolean createBond() {
+    checkForBluetoothConnectPermission();
     return createdBond;
+  }
+
+  @Implementation(minSdk = Q)
+  protected BluetoothSocket createInsecureL2capChannel(int psm) throws IOException {
+    checkForBluetoothConnectPermission();
+    return reflector(BluetoothDeviceReflector.class, realBluetoothDevice)
+        .createInsecureL2capChannel(psm);
+  }
+
+  @Implementation(minSdk = Q)
+  protected BluetoothSocket createL2capChannel(int psm) throws IOException {
+    checkForBluetoothConnectPermission();
+    return reflector(BluetoothDeviceReflector.class, realBluetoothDevice).createL2capChannel(psm);
   }
 
   @Implementation
   protected boolean removeBond() {
+    checkForBluetoothConnectPermission();
     boolean result = createdBond;
     createdBond = false;
     return result;
@@ -199,6 +304,7 @@ public class ShadowBluetoothDevice {
 
   @Implementation
   protected boolean setPin(byte[] pin) {
+    checkForBluetoothConnectPermission();
     this.pin = pin;
     return true;
   }
@@ -213,6 +319,7 @@ public class ShadowBluetoothDevice {
 
   @Implementation
   public boolean setPairingConfirmation(boolean confirm) {
+    checkForBluetoothConnectPermission();
     this.pairingConfirmation = confirm;
     return true;
   }
@@ -227,6 +334,7 @@ public class ShadowBluetoothDevice {
 
   @Implementation
   protected BluetoothSocket createRfcommSocketToServiceRecord(UUID uuid) throws IOException {
+    checkForBluetoothConnectPermission();
     synchronized (ShadowBluetoothDevice.class) {
       if (bluetoothSocket == null) {
         bluetoothSocket = Shadow.newInstanceOf(BluetoothSocket.class);
@@ -244,11 +352,12 @@ public class ShadowBluetoothDevice {
    * Overrides behavior of {@link BluetoothDevice#fetchUuidsWithSdp}. This method updates the
    * counter which counts the number of invocations of this method.
    *
-   * @returns Value set by calling {@link ShadowBluetoothDevice#setFetchUuidsWithSdpResult}. If not
+   * @return Value set by calling {@link ShadowBluetoothDevice#setFetchUuidsWithSdpResult}. If not
    *     previously set, will return false by default.
    */
   @Implementation
   protected boolean fetchUuidsWithSdp() {
+    checkForBluetoothConnectPermission();
     fetchUuidsWithSdpCount++;
     return fetchUuidsWithSdpResult;
   }
@@ -258,15 +367,17 @@ public class ShadowBluetoothDevice {
     return fetchUuidsWithSdpCount;
   }
 
-  @Implementation(minSdk = JELLY_BEAN_MR2)
+  @Implementation
   protected BluetoothGatt connectGatt(
       Context context, boolean autoConnect, BluetoothGattCallback callback) {
+    checkForBluetoothConnectPermission();
     return connectGatt(callback);
   }
 
   @Implementation(minSdk = M)
   protected BluetoothGatt connectGatt(
       Context context, boolean autoConnect, BluetoothGattCallback callback, int transport) {
+    checkForBluetoothConnectPermission();
     return connectGatt(callback);
   }
 
@@ -278,6 +389,7 @@ public class ShadowBluetoothDevice {
       int transport,
       int phy,
       Handler handler) {
+    checkForBluetoothConnectPermission();
     return connectGatt(callback);
   }
 
@@ -286,6 +398,11 @@ public class ShadowBluetoothDevice {
     bluetoothGatts.add(bluetoothGatt);
     ShadowBluetoothGatt shadowBluetoothGatt = Shadow.extract(bluetoothGatt);
     shadowBluetoothGatt.setGattCallback(callback);
+
+    if (bluetoothGattConnectionInterceptor != null) {
+      bluetoothGattConnectionInterceptor.onNewGattConnection(bluetoothGatt);
+    }
+
     return bluetoothGatt;
   }
 
@@ -318,6 +435,7 @@ public class ShadowBluetoothDevice {
    */
   @Implementation
   public BluetoothClass getBluetoothClass() {
+    checkForBluetoothConnectPermission();
     return bluetoothClass;
   }
 
@@ -326,11 +444,102 @@ public class ShadowBluetoothDevice {
     this.bluetoothClass = bluetoothClass;
   }
 
+  @Implementation(minSdk = Q)
+  protected boolean setMetadata(int key, byte[] value) {
+    checkForBluetoothConnectPermission();
+    metadataMap.put(key, value);
+    return true;
+  }
+
+  @Implementation(minSdk = Q)
+  protected byte[] getMetadata(int key) {
+    checkForBluetoothConnectPermission();
+    return metadataMap.get(key);
+  }
+
+  public void setBatteryLevel(@IntRange(from = -100, to = 100) int batteryLevel) {
+    this.batteryLevel = batteryLevel;
+  }
+
+  @Implementation(minSdk = O_MR1)
+  protected int getBatteryLevel() {
+    checkForBluetoothConnectPermission();
+    return batteryLevel;
+  }
+
+  @Implementation(minSdk = Q)
+  public boolean setSilenceMode(boolean isInSilenceMode) {
+    checkForBluetoothConnectPermission();
+    this.isInSilenceMode = isInSilenceMode;
+    return true;
+  }
+
+  @Implementation
+  protected boolean isConnected() {
+    return isConnected;
+  }
+
+  public void setConnected(boolean isConnected) {
+    this.isConnected = isConnected;
+  }
+
+  @Implementation(minSdk = UPSIDE_DOWN_CAKE)
+  protected int getConnectionHandle(int transport) {
+    if (!connectionHandlesByTransportType.containsKey(transport)) {
+      return 0;
+    }
+    return connectionHandlesByTransportType.get(transport);
+  }
+
+  public void setConnectionHandle(int transport, int connectionHandle) {
+    connectionHandlesByTransportType.put(transport, connectionHandle);
+  }
+
+  @Implementation(minSdk = Q)
+  protected boolean isInSilenceMode() {
+    checkForBluetoothConnectPermission();
+    return isInSilenceMode;
+  }
+
+  /**
+   * Allows tests to intercept the {@link BluetoothDevice.connectGatt} method and set state on both
+   * BluetoothDevice and BluetoothGatt objects. This is useful for e2e testing situations where the
+   * fine-grained execution of Bluetooth connection logic is onerous.
+   */
+  public void setGattConnectionInterceptor(BluetoothGattConnectionInterceptor interceptor) {
+    bluetoothGattConnectionInterceptor = interceptor;
+  }
+
   @ForType(BluetoothDevice.class)
   interface BluetoothDeviceReflector {
 
     @Static
     @Direct
     IBluetooth getService();
+
+    @Direct
+    BluetoothSocket createInsecureL2capChannel(int psm);
+
+    @Direct
+    BluetoothSocket createL2capChannel(int psm);
+  }
+
+  static ShadowInstrumentation getShadowInstrumentation() {
+    ActivityThread activityThread = (ActivityThread) RuntimeEnvironment.getActivityThread();
+    return Shadow.extract(activityThread.getInstrumentation());
+  }
+
+  private void checkForBluetoothConnectPermission() {
+    if (shouldThrowSecurityExceptions
+        && VERSION.SDK_INT >= S
+        && !checkPermission(android.Manifest.permission.BLUETOOTH_CONNECT)) {
+      throw new SecurityException("Bluetooth connect permission required.");
+    }
+  }
+
+  static boolean checkPermission(String permission) {
+    return getShadowInstrumentation()
+            .checkPermission(permission, android.os.Process.myPid(), android.os.Process.myUid())
+        == PERMISSION_GRANTED;
   }
 }

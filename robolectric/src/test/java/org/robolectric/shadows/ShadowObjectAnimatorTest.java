@@ -9,35 +9,37 @@ import androidx.test.ext.junit.runners.AndroidJUnit4;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import javax.annotation.Nonnull;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
 @RunWith(AndroidJUnit4.class)
 public class ShadowObjectAnimatorTest {
   private final AnimatorTarget target = new AnimatorTarget();
-  private List<String> listenerEvents = new ArrayList<>();
+  private final List<String> listenerEvents = new ArrayList<>();
 
-  private final Animator.AnimatorListener listener = new Animator.AnimatorListener() {
-    @Override
-    public void onAnimationStart(Animator animation) {
-      listenerEvents.add("started");
-    }
+  private final Animator.AnimatorListener listener =
+      new Animator.AnimatorListener() {
+        @Override
+        public void onAnimationStart(@Nonnull Animator animation) {
+          listenerEvents.add("started");
+        }
 
-    @Override
-    public void onAnimationEnd(Animator animation) {
-      listenerEvents.add("ended");
-    }
+        @Override
+        public void onAnimationEnd(@Nonnull Animator animation) {
+          listenerEvents.add("ended");
+        }
 
-    @Override
-    public void onAnimationCancel(Animator animation) {
-      listenerEvents.add("cancelled");
-    }
+        @Override
+        public void onAnimationCancel(@Nonnull Animator animation) {
+          listenerEvents.add("cancelled");
+        }
 
-    @Override
-    public void onAnimationRepeat(Animator animation) {
-      listenerEvents.add("repeated");
-    }
-  };
+        @Override
+        public void onAnimationRepeat(@Nonnull Animator animation) {
+          listenerEvents.add("repeated");
+        }
+      };
 
   @Test
   public void start_shouldRunAnimation() {

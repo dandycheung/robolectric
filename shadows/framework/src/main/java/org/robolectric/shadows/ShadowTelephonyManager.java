@@ -1,8 +1,6 @@
 package org.robolectric.shadows;
 
-import static android.os.Build.VERSION_CODES.JELLY_BEAN_MR1;
-import static android.os.Build.VERSION_CODES.JELLY_BEAN_MR2;
-import static android.os.Build.VERSION_CODES.LOLLIPOP;
+import static android.content.pm.PackageManager.PERMISSION_GRANTED;
 import static android.os.Build.VERSION_CODES.LOLLIPOP_MR1;
 import static android.os.Build.VERSION_CODES.M;
 import static android.os.Build.VERSION_CODES.N;
@@ -11,6 +9,7 @@ import static android.os.Build.VERSION_CODES.P;
 import static android.os.Build.VERSION_CODES.Q;
 import static android.os.Build.VERSION_CODES.R;
 import static android.os.Build.VERSION_CODES.S;
+import static android.os.Build.VERSION_CODES.TIRAMISU;
 import static android.telephony.PhoneStateListener.LISTEN_CALL_STATE;
 import static android.telephony.PhoneStateListener.LISTEN_CELL_INFO;
 import static android.telephony.PhoneStateListener.LISTEN_CELL_LOCATION;
@@ -19,7 +18,10 @@ import static android.telephony.PhoneStateListener.LISTEN_SERVICE_STATE;
 import static android.telephony.TelephonyManager.CALL_STATE_IDLE;
 import static android.telephony.TelephonyManager.CALL_STATE_RINGING;
 
+import android.Manifest.permission;
 import android.annotation.CallSuper;
+import android.app.ActivityThread;
+import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
@@ -30,104 +32,158 @@ import android.os.SystemProperties;
 import android.telecom.PhoneAccountHandle;
 import android.telephony.Annotation.NetworkType;
 import android.telephony.Annotation.OverrideNetworkType;
+import android.telephony.CarrierRestrictionRules;
 import android.telephony.CellInfo;
 import android.telephony.CellLocation;
 import android.telephony.PhoneStateListener;
 import android.telephony.ServiceState;
 import android.telephony.SignalStrength;
 import android.telephony.SubscriptionManager;
+import android.telephony.TelephonyCallback;
+import android.telephony.TelephonyCallback.CallStateListener;
+import android.telephony.TelephonyCallback.CellInfoListener;
+import android.telephony.TelephonyCallback.CellLocationListener;
+import android.telephony.TelephonyCallback.DisplayInfoListener;
+import android.telephony.TelephonyCallback.ServiceStateListener;
+import android.telephony.TelephonyCallback.SignalStrengthsListener;
 import android.telephony.TelephonyDisplayInfo;
 import android.telephony.TelephonyManager;
 import android.telephony.TelephonyManager.CellInfoCallback;
+import android.telephony.VisualVoicemailSmsFilterSettings;
+import android.telephony.emergency.EmergencyNumber;
 import android.text.TextUtils;
-import android.util.SparseArray;
-import android.util.SparseIntArray;
+import com.google.common.base.Ascii;
 import com.google.common.base.Preconditions;
-import com.google.common.base.Predicate;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.Executor;
+import java.util.concurrent.atomic.AtomicInteger;
+import org.robolectric.RuntimeEnvironment;
+import org.robolectric.annotation.ClassName;
 import org.robolectric.annotation.HiddenApi;
 import org.robolectric.annotation.Implementation;
 import org.robolectric.annotation.Implements;
 import org.robolectric.annotation.RealObject;
 import org.robolectric.annotation.Resetter;
+import org.robolectric.shadow.api.Shadow;
 import org.robolectric.util.ReflectionHelpers;
+import org.robolectric.versioning.AndroidVersions.U;
+import org.robolectric.versioning.AndroidVersions.V;
 
-@Implements(value = TelephonyManager.class, looseSignatures = true)
+/** Shadow for {@link TelephonyManager}. */
+@Implements(value = TelephonyManager.class)
 public class ShadowTelephonyManager {
 
   @RealObject protected TelephonyManager realTelephonyManager;
 
-  private final Map<PhoneStateListener, Integer> phoneStateRegistrations = new HashMap<>();
-  private final Map<Integer, String> slotIndexToDeviceId = new HashMap<>();
-  private final Map<Integer, String> slotIndexToImei = new HashMap<>();
-  private final Map<Integer, String> slotIndexToMeid = new HashMap<>();
-  private final Map<PhoneAccountHandle, Boolean> voicemailVibrationEnabledMap = new HashMap<>();
-  private final Map<PhoneAccountHandle, Uri> voicemailRingtoneUriMap = new HashMap<>();
-  private final Map<PhoneAccountHandle, TelephonyManager> phoneAccountToTelephonyManagers =
-      new HashMap<>();
+  private final Map<PhoneStateListener, Integer> phoneStateRegistrations =
+      Collections.synchronizedMap(new LinkedHashMap<>());
+  private final /*List<TelephonyCallback>*/ List<Object> telephonyCallbackRegistrations =
+      new ArrayList<>();
+  private static final Map<Integer, String> slotIndexToDeviceId =
+      Collections.synchronizedMap(new LinkedHashMap<>());
+  private static final Map<Integer, String> slotIndexToImei =
+      Collections.synchronizedMap(new LinkedHashMap<>());
+  private static final Map<Integer, String> slotIndexToMeid =
+      Collections.synchronizedMap(new LinkedHashMap<>());
+  private static final Map<PhoneAccountHandle, Boolean> voicemailVibrationEnabledMap =
+      Collections.synchronizedMap(new LinkedHashMap<>());
+  private static final Map<PhoneAccountHandle, Uri> voicemailRingtoneUriMap =
+      Collections.synchronizedMap(new LinkedHashMap<>());
+  private static final Map<PhoneAccountHandle, TelephonyManager> phoneAccountToTelephonyManagers =
+      Collections.synchronizedMap(new LinkedHashMap<>());
+  private static final Map<PhoneAccountHandle, Integer> phoneAccountHandleSubscriptionId =
+      Collections.synchronizedMap(new LinkedHashMap<>());
 
   private PhoneStateListener lastListener;
+  private /*TelephonyCallback*/ Object lastTelephonyCallback;
   private int lastEventFlags;
 
   private String deviceId;
+  private String deviceSoftwareVersion;
   private String imei;
   private String meid;
   private String groupIdLevel1;
   private String networkOperatorName = "";
   private String networkCountryIso;
   private String networkOperator = "";
+  private String networkSpecifier = "";
   private Locale simLocale;
-  private String simOperator;
+  private String simOperator = "";
   private String simOperatorName;
   private String simSerialNumber;
-  private boolean readPhoneStatePermission = true;
+  private static volatile boolean readPhoneStatePermission = true;
   private int phoneType = TelephonyManager.PHONE_TYPE_GSM;
   private String line1Number;
   private int networkType;
   private int dataNetworkType = TelephonyManager.NETWORK_TYPE_UNKNOWN;
   private int voiceNetworkType = TelephonyManager.NETWORK_TYPE_UNKNOWN;
-  private List<CellInfo> allCellInfo = Collections.emptyList();
-  private List<CellInfo> callbackCellInfos = null;
-  private CellLocation cellLocation = null;
+  private static volatile List<CellInfo> allCellInfo = Collections.emptyList();
+  private static volatile List<CellInfo> callbackCellInfos = null;
+  private static volatile CellLocation cellLocation = null;
   private int callState = CALL_STATE_IDLE;
   private int dataState = TelephonyManager.DATA_DISCONNECTED;
+  private int dataActivity = TelephonyManager.DATA_ACTIVITY_NONE;
   private String incomingPhoneNumber = null;
-  private boolean isSmsCapable = true;
-  private boolean voiceCapable = true;
+  private static volatile boolean isSmsCapable = true;
+  private static volatile boolean voiceCapable = true;
   private String voiceMailNumber;
   private String voiceMailAlphaTag;
-  private int phoneCount = 1;
-  private Map<Integer, TelephonyManager> subscriptionIdsToTelephonyManagers = new HashMap<>();
+  private static volatile int phoneCount = 1;
+  private static volatile int activeModemCount = 1;
+  private static final Map<Integer, TelephonyManager> subscriptionIdsToTelephonyManagers =
+      Collections.synchronizedMap(new LinkedHashMap<>());
   private PersistableBundle carrierConfig;
   private ServiceState serviceState;
   private boolean isNetworkRoaming;
-  private final SparseIntArray simStates = new SparseIntArray();
-  private final SparseIntArray currentPhoneTypes = new SparseIntArray();
-  private final SparseArray<List<String>> carrierPackageNames = new SparseArray<>();
-  private final Map<Integer, String> simCountryIsoMap = new HashMap<>();
+  private static final Map<Integer, Integer> simStates =
+      Collections.synchronizedMap(new LinkedHashMap<>());
+  private static final Map<Integer, Integer> currentPhoneTypes =
+      Collections.synchronizedMap(new LinkedHashMap<>());
+  private static final Map<Integer, List<String>> carrierPackageNames =
+      Collections.synchronizedMap(new LinkedHashMap<>());
+  private static final Map<Integer, String> simCountryIsoMap =
+      Collections.synchronizedMap(new LinkedHashMap<>());
   private int simCarrierId;
+  private int simSpecificCarrierId;
+  private CharSequence simCarrierIdName;
   private int carrierIdFromSimMccMnc;
   private String subscriberId;
-  private /*UiccSlotInfo[]*/ Object uiccSlotInfos;
+  private static volatile /*UiccSlotInfo[]*/ Object uiccSlotInfos;
+  private static volatile /*List<UiccCardInfo>*/ Object uiccCardsInfo = new ArrayList<>();
   private String visualVoicemailPackageName = null;
   private SignalStrength signalStrength;
   private boolean dataEnabled = false;
+  private final Set<Integer> dataDisabledReasons = new HashSet<>();
   private boolean isRttSupported;
-  private final List<String> sentDialerSpecialCodes = new ArrayList<>();
-  private boolean hearingAidCompatibilitySupported = false;
+  private static volatile boolean isTtyModeSupported;
+  private static final Map<Integer, Boolean> subIdToHasCarrierPrivileges =
+      Collections.synchronizedMap(new LinkedHashMap<>());
+  private static final List<String> sentDialerSpecialCodes = new ArrayList<>();
+  private static volatile boolean hearingAidCompatibilitySupported = false;
   private int requestCellInfoUpdateErrorCode = 0;
   private Throwable requestCellInfoUpdateDetail = null;
   private Object telephonyDisplayInfo;
   private boolean isDataConnectionAllowed;
   private static int callComposerStatus = 0;
+  private VisualVoicemailSmsParams lastVisualVoicemailSmsParams;
+  private VisualVoicemailSmsFilterSettings visualVoicemailSmsFilterSettings;
+  private static volatile boolean emergencyCallbackMode;
+  private static Map<Integer, List<EmergencyNumber>> emergencyNumbersList;
+  private static volatile boolean isDataRoamingEnabled;
+  private /*CarrierRestrictionRules*/ Object carrierRestrictionRules;
+  private final AtomicInteger modemRebootCount = new AtomicInteger();
+
   /**
    * Should be {@link TelephonyManager.BootstrapAuthenticationCallback} but this object was
    * introduced in Android S, so we are using Object to avoid breaking other SDKs
@@ -136,17 +192,49 @@ public class ShadowTelephonyManager {
    */
   private Object callback;
 
-  {
-    resetSimStates();
-    resetSimCountryIsos();
+  private static volatile /*PhoneCapability*/ Object phoneCapability;
+
+  static {
+    resetAllSimStates();
+    resetAllSimCountryIsos();
   }
 
   @Resetter
   public static void reset() {
+    subscriptionIdsToTelephonyManagers.clear();
+    resetAllSimStates();
+    currentPhoneTypes.clear();
+    carrierPackageNames.clear();
+    resetAllSimCountryIsos();
+    slotIndexToDeviceId.clear();
+    slotIndexToImei.clear();
+    slotIndexToMeid.clear();
+    voicemailVibrationEnabledMap.clear();
+    voicemailRingtoneUriMap.clear();
+    phoneAccountToTelephonyManagers.clear();
+    phoneAccountHandleSubscriptionId.clear();
+    subIdToHasCarrierPrivileges.clear();
+    allCellInfo = Collections.emptyList();
+    cellLocation = null;
+    callbackCellInfos = null;
+    uiccSlotInfos = null;
+    uiccCardsInfo = new ArrayList<>();
     callComposerStatus = 0;
+    emergencyCallbackMode = false;
+    emergencyNumbersList = null;
+    phoneCapability = null;
+    isTtyModeSupported = false;
+    readPhoneStatePermission = true;
+    isSmsCapable = true;
+    voiceCapable = true;
+    phoneCount = 1;
+    activeModemCount = 1;
+    sentDialerSpecialCodes.clear();
+    hearingAidCompatibilitySupported = false;
   }
 
-  public static void setCallComposerStatus(int callComposerStatus) {
+  @Implementation(minSdk = S)
+  protected void setCallComposerStatus(int callComposerStatus) {
     ShadowTelephonyManager.callComposerStatus = callComposerStatus;
   }
 
@@ -163,13 +251,24 @@ public class ShadowTelephonyManager {
   @Implementation(minSdk = S)
   @HiddenApi
   public void bootstrapAuthenticationRequest(
-      Object appType,
-      Object nafId,
-      Object securityProtocol,
-      Object forceBootStrapping,
-      Object e,
-      Object callback) {
+      int appType,
+      Uri nafId,
+      @ClassName("android.telephony.gba.UaSecurityProtocolIdentifier") Object securityProtocol,
+      boolean forceBootStrapping,
+      Executor e,
+      @ClassName("android.telephony.TelephonyManager$BootstrapAuthenticationCallback")
+          Object callback) {
     this.callback = callback;
+  }
+
+  public void setPhoneCapability(/*PhoneCapability*/ Object phoneCapability) {
+    ShadowTelephonyManager.phoneCapability = phoneCapability;
+  }
+
+  @Implementation(minSdk = S)
+  @HiddenApi
+  public @ClassName("android.telephony.PhoneCapability") Object getPhoneCapability() {
+    return phoneCapability;
   }
 
   @Implementation
@@ -207,9 +306,45 @@ public class ShadowTelephonyManager {
     return lastEventFlags;
   }
 
+  @Implementation(minSdk = S)
+  public void registerTelephonyCallback(
+      Executor executor, @ClassName("android.telephony.TelephonyCallback") Object callback) {
+    Preconditions.checkArgument(callback instanceof TelephonyCallback);
+    lastTelephonyCallback = callback;
+    initTelephonyCallback(callback);
+    telephonyCallbackRegistrations.add(callback);
+  }
+
+  @Implementation(minSdk = TIRAMISU)
+  protected void registerTelephonyCallback(
+      int includeLocationData,
+      Executor executor,
+      @ClassName("android.telephony.TelephonyCallback") Object callback) {
+    registerTelephonyCallback(executor, callback);
+  }
+
+  @Implementation(minSdk = S)
+  public void unregisterTelephonyCallback(
+      @ClassName("android.telephony.TelephonyCallback") Object callback) {
+    telephonyCallbackRegistrations.remove(callback);
+  }
+
+  /** Returns the most recent callback passed to #registerTelephonyCallback(). */
+  public /*TelephonyCallback*/ Object getLastTelephonyCallback() {
+    return lastTelephonyCallback;
+  }
+
+  /** Call state may be specified via {@link #setCallState(int)}. */
+  @Implementation(minSdk = S)
+  protected int getCallStateForSubscription() {
+    checkReadPhoneStatePermission();
+    return callState;
+  }
+
   /** Call state may be specified via {@link #setCallState(int)}. */
   @Implementation
   protected int getCallState() {
+    checkReadPhoneStatePermission();
     return callState;
   }
 
@@ -233,6 +368,11 @@ public class ShadowTelephonyManager {
     for (PhoneStateListener listener : getListenersForFlags(LISTEN_CALL_STATE)) {
       listener.onCallStateChanged(callState, incomingPhoneNumber);
     }
+    if (VERSION.SDK_INT >= S) {
+      for (CallStateListener listener : getCallbackForListener(CallStateListener.class)) {
+        listener.onCallStateChanged(callState);
+      }
+    }
   }
 
   /**
@@ -249,6 +389,24 @@ public class ShadowTelephonyManager {
     this.dataState = dataState;
   }
 
+  /**
+   * Data activity may be specified via {@link #setDataActivity(int)}. If no override is set, this
+   * defaults to {@link TelephonyManager#DATA_ACTIVITY_NONE}.
+   */
+  @Implementation
+  protected int getDataActivity() {
+    return dataActivity;
+  }
+
+  /**
+   * Sets the value to be returned by calls to {@link #getDataActivity()}. This <b>should</b>
+   * correspond to one of the {@code DATA_ACTIVITY_*} constants defined on {@link TelephonyManager},
+   * but this is not enforced.
+   */
+  public void setDataActivity(int dataActivity) {
+    this.dataActivity = dataActivity;
+  }
+
   @Implementation
   protected String getDeviceId() {
     checkReadPhoneStatePermission();
@@ -259,11 +417,28 @@ public class ShadowTelephonyManager {
     deviceId = newDeviceId;
   }
 
+  @Implementation
+  protected String getDeviceSoftwareVersion() {
+    checkReadPhoneStatePermission();
+    return deviceSoftwareVersion;
+  }
+
+  public void setDeviceSoftwareVersion(String newDeviceSoftwareVersion) {
+    deviceSoftwareVersion = newDeviceSoftwareVersion;
+  }
+
+  @Implementation(minSdk = LOLLIPOP_MR1, maxSdk = U.SDK_INT)
   public void setNetworkOperatorName(String networkOperatorName) {
     this.networkOperatorName = networkOperatorName;
   }
 
-  @Implementation(minSdk = LOLLIPOP)
+  @Implementation(minSdk = V.SDK_INT)
+  public void setNetworkOperatorNameForPhone(
+      /* Ignored */ int phoneId, String networkOperatorName) {
+    setNetworkOperatorName(networkOperatorName);
+  }
+
+  @Implementation
   protected String getImei() {
     checkReadPhoneStatePermission();
     return imei;
@@ -312,13 +487,18 @@ public class ShadowTelephonyManager {
     return networkOperatorName;
   }
 
+  @Implementation(minSdk = LOLLIPOP_MR1, maxSdk = P)
   public void setNetworkCountryIso(String networkCountryIso) {
     this.networkCountryIso = networkCountryIso;
   }
 
+  /**
+   * Returns the SIM country lowercase. This matches the API this shadows:
+   * https://developer.android.com/reference/android/telephony/TelephonyManager#getNetworkCountryIso().
+   */
   @Implementation
   protected String getNetworkCountryIso() {
-    return networkCountryIso;
+    return networkCountryIso == null ? null : Ascii.toLowerCase(networkCountryIso);
   }
 
   /** Sets the sim locale returned by {@link #getSimLocale()}. */
@@ -341,6 +521,15 @@ public class ShadowTelephonyManager {
     return networkOperator;
   }
 
+  public void setNetworkSpecifier(String networkSpecifier) {
+    this.networkSpecifier = networkSpecifier;
+  }
+
+  @Implementation(minSdk = O)
+  protected String getNetworkSpecifier() {
+    return networkSpecifier;
+  }
+
   @Implementation
   protected String getSimOperator() {
     return simOperator;
@@ -355,8 +544,14 @@ public class ShadowTelephonyManager {
     return simOperatorName;
   }
 
+  @Implementation(minSdk = LOLLIPOP_MR1, maxSdk = U.SDK_INT)
   public void setSimOperatorName(String simOperatorName) {
     this.simOperatorName = simOperatorName;
+  }
+
+  @Implementation(minSdk = V.SDK_INT)
+  public void setSimOperatorNameForPhone(/* Ignored */ int phoneId, String name) {
+    setSimOperatorName(name);
   }
 
   @Implementation
@@ -370,9 +565,14 @@ public class ShadowTelephonyManager {
     this.simSerialNumber = simSerialNumber;
   }
 
+  /**
+   * Returns the SIM country lowercase. This matches the API it shadows:
+   * https://developer.android.com/reference/android/telephony/TelephonyManager#getSimCountryIso().
+   */
   @Implementation
   protected String getSimCountryIso() {
-    return simCountryIsoMap.get(/* subId= */ 0);
+    String simCountryIso = simCountryIsoMap.get(/* subId= */ 0);
+    return simCountryIso == null ? simCountryIso : Ascii.toLowerCase(simCountryIso);
   }
 
   @Implementation(minSdk = N, maxSdk = Q)
@@ -381,6 +581,7 @@ public class ShadowTelephonyManager {
     return simCountryIsoMap.get(subId);
   }
 
+  @Implementation(minSdk = LOLLIPOP_MR1)
   public void setSimCountryIso(String simCountryIso) {
     setSimCountryIso(/* subId= */ 0, simCountryIso);
   }
@@ -391,9 +592,19 @@ public class ShadowTelephonyManager {
   }
 
   /** Clears {@code subId} to simCountryIso mapping and resets to default state. */
-  public void resetSimCountryIsos() {
+  public static void resetAllSimCountryIsos() {
     simCountryIsoMap.clear();
     simCountryIsoMap.put(0, "");
+  }
+
+  /**
+   * Clears {@code subId} to simCountryIso mapping and resets to default state.
+   *
+   * @deprecated for resetAllSimCountryIsos
+   */
+  @Deprecated
+  public void resetSimCountryIsos() {
+    resetAllSimCountryIsos();
   }
 
   @Implementation
@@ -413,29 +624,51 @@ public class ShadowTelephonyManager {
 
   @Implementation(minSdk = O)
   protected int getSimState(int slotIndex) {
-    return simStates.get(slotIndex, TelephonyManager.SIM_STATE_UNKNOWN);
+    return simStates.getOrDefault(slotIndex, TelephonyManager.SIM_STATE_UNKNOWN);
   }
 
   /** Sets the UICC slots information returned by {@link #getUiccSlotsInfo()}. */
   public void setUiccSlotsInfo(/*UiccSlotInfo[]*/ Object uiccSlotsInfos) {
-    this.uiccSlotInfos = uiccSlotsInfos;
+    ShadowTelephonyManager.uiccSlotInfos = uiccSlotsInfos;
   }
 
   /** Returns the UICC slots information set by {@link #setUiccSlotsInfo}. */
   @Implementation(minSdk = P)
   @HiddenApi
-  protected /*UiccSlotInfo[]*/ Object getUiccSlotsInfo() {
+  protected @ClassName("android.telephony.UiccSlotInfo[]") Object getUiccSlotsInfo() {
     return uiccSlotInfos;
   }
 
+  /** Sets the UICC cards information returned by {@link #getUiccCardsInfo()}. */
+  public void setUiccCardsInfo(/*List<UiccCardInfo>*/ Object uiccCardsInfo) {
+    ShadowTelephonyManager.uiccCardsInfo = uiccCardsInfo;
+  }
+
+  /** Returns the UICC cards information set by {@link #setUiccCardsInfo}. */
+  @Implementation(minSdk = Q)
+  @HiddenApi
+  protected List</*android.telephony.UiccCardInfo*/ ?> getUiccCardsInfo() {
+    return (List<?>) uiccCardsInfo;
+  }
+
   /** Clears {@code slotIndex} to state mapping and resets to default state. */
-  public void resetSimStates() {
+  public static void resetAllSimStates() {
     simStates.clear();
     simStates.put(0, TelephonyManager.SIM_STATE_READY);
   }
 
+  /**
+   * Clears {@code slotIndex} to state mapping and resets to default state.
+   *
+   * @deprecated use resetAllSimStates()
+   */
+  @Deprecated
+  public void resetSimStates() {
+    resetAllSimStates();
+  }
+
   public void setReadPhoneStatePermission(boolean readPhoneStatePermission) {
-    this.readPhoneStatePermission = readPhoneStatePermission;
+    ShadowTelephonyManager.readPhoneStatePermission = readPhoneStatePermission;
   }
 
   private void checkReadPhoneStatePermission() {
@@ -444,17 +677,47 @@ public class ShadowTelephonyManager {
     }
   }
 
+  private void checkReadPrivilegedPhoneStatePermission() {
+    if (!checkPermission(permission.READ_PRIVILEGED_PHONE_STATE)) {
+      throw new SecurityException();
+    }
+  }
+
+  private void checkModifyPhoneStatePermission() {
+    if (!checkPermission(permission.MODIFY_PHONE_STATE)) {
+      throw new SecurityException();
+    }
+  }
+
+  static ShadowInstrumentation getShadowInstrumentation() {
+    ActivityThread activityThread = (ActivityThread) RuntimeEnvironment.getActivityThread();
+    return Shadow.extract(activityThread.getInstrumentation());
+  }
+
+  static boolean checkPermission(String permission) {
+    return getShadowInstrumentation()
+            .checkPermission(permission, android.os.Process.myPid(), android.os.Process.myUid())
+        == PERMISSION_GRANTED;
+  }
+
   @Implementation
   protected int getPhoneType() {
     return phoneType;
   }
 
+  @Implementation(minSdk = LOLLIPOP_MR1, maxSdk = U.SDK_INT)
   public void setPhoneType(int phoneType) {
     this.phoneType = phoneType;
   }
 
+  @Implementation(minSdk = V.SDK_INT)
+  public void setPhoneType(/* Ignored */ int phoneId, int type) {
+    setPhoneType(type);
+  }
+
   @Implementation
   protected String getLine1Number() {
+    checkReadPhoneStatePermission();
     return line1Number;
   }
 
@@ -464,6 +727,7 @@ public class ShadowTelephonyManager {
 
   @Implementation
   protected int getNetworkType() {
+    checkReadPhoneStatePermission();
     return networkType;
   }
 
@@ -483,6 +747,7 @@ public class ShadowTelephonyManager {
    */
   @Implementation(minSdk = N)
   protected int getDataNetworkType() {
+    checkReadPhoneStatePermission();
     return dataNetworkType;
   }
 
@@ -491,6 +756,7 @@ public class ShadowTelephonyManager {
    * correspond to one of the {@code NETWORK_TYPE_*} constants defined on {@link TelephonyManager},
    * but this is not enforced.
    */
+  @Implementation(minSdk = LOLLIPOP_MR1)
   public void setDataNetworkType(int dataNetworkType) {
     this.dataNetworkType = dataNetworkType;
   }
@@ -498,9 +764,12 @@ public class ShadowTelephonyManager {
   /**
    * Returns whatever value was set by the last call to {@link #setVoiceNetworkType}, defaulting to
    * {@link TelephonyManager#NETWORK_TYPE_UNKNOWN} if it was never called.
+   *
+   * <p>An exception will be thrown if the READ_PHONE_STATE permission has not been granted.
    */
   @Implementation(minSdk = N)
   protected int getVoiceNetworkType() {
+    checkReadPhoneStatePermission();
     return voiceNetworkType;
   }
 
@@ -513,16 +782,19 @@ public class ShadowTelephonyManager {
     this.voiceNetworkType = voiceNetworkType;
   }
 
-  @Implementation(minSdk = JELLY_BEAN_MR1)
+  @Implementation
   protected List<CellInfo> getAllCellInfo() {
     return allCellInfo;
   }
 
   public void setAllCellInfo(List<CellInfo> allCellInfo) {
-    this.allCellInfo = allCellInfo;
+    ShadowTelephonyManager.allCellInfo = allCellInfo;
 
-    if (VERSION.SDK_INT >= JELLY_BEAN_MR1) {
-      for (PhoneStateListener listener : getListenersForFlags(LISTEN_CELL_INFO)) {
+    for (PhoneStateListener listener : getListenersForFlags(LISTEN_CELL_INFO)) {
+      listener.onCellInfoChanged(allCellInfo);
+    }
+    if (VERSION.SDK_INT >= S) {
+      for (CellInfoListener listener : getCallbackForListener(CellInfoListener.class)) {
         listener.onCellInfoChanged(allCellInfo);
       }
     }
@@ -533,8 +805,10 @@ public class ShadowTelephonyManager {
    * TelephonyManager#NETWORK_TYPE_UNKNOWN} if it was never called.
    */
   @Implementation(minSdk = Q)
-  protected void requestCellInfoUpdate(Object cellInfoExecutor, Object cellInfoCallback) {
-    Executor executor = (Executor) cellInfoExecutor;
+  protected void requestCellInfoUpdate(
+      Executor executor,
+      @ClassName("android.telephony.TelephonyManager$CellInfoCallback") Object cellInfoCallback) {
+    List<CellInfo> callbackCellInfos = ShadowTelephonyManager.callbackCellInfos;
     if (callbackCellInfos == null) {
       // ignore
     } else if (requestCellInfoUpdateErrorCode != 0 || requestCellInfoUpdateDetail != null) {
@@ -564,7 +838,7 @@ public class ShadowTelephonyManager {
    * setAllCellInfo}.
    */
   public void setCallbackCellInfos(List<CellInfo> callbackCellInfos) {
-    this.callbackCellInfos = callbackCellInfos;
+    ShadowTelephonyManager.callbackCellInfos = callbackCellInfos;
   }
 
   /**
@@ -578,19 +852,24 @@ public class ShadowTelephonyManager {
 
   @Implementation
   protected CellLocation getCellLocation() {
-    return this.cellLocation;
+    return ShadowTelephonyManager.cellLocation;
   }
 
   public void setCellLocation(CellLocation cellLocation) {
-    this.cellLocation = cellLocation;
-
+    ShadowTelephonyManager.cellLocation = cellLocation;
     for (PhoneStateListener listener : getListenersForFlags(LISTEN_CELL_LOCATION)) {
       listener.onCellLocationChanged(cellLocation);
     }
+    if (VERSION.SDK_INT >= S) {
+      for (CellLocationListener listener : getCallbackForListener(CellLocationListener.class)) {
+        listener.onCellLocationChanged(cellLocation);
+      }
+    }
   }
 
-  @Implementation(minSdk = JELLY_BEAN_MR2)
+  @Implementation
   protected String getGroupIdLevel1() {
+    checkReadPhoneStatePermission();
     return this.groupIdLevel1;
   }
 
@@ -600,13 +879,18 @@ public class ShadowTelephonyManager {
 
   @CallSuper
   protected void initListener(PhoneStateListener listener, int flags) {
+    // grab the state "atomically" before doing callbacks, in case they modify the state
+    String incomingPhoneNumber = this.incomingPhoneNumber;
+    List<CellInfo> allCellInfo = ShadowTelephonyManager.allCellInfo;
+    CellLocation cellLocation = ShadowTelephonyManager.cellLocation;
+    Object telephonyDisplayInfo = this.telephonyDisplayInfo;
+    ServiceState serviceState = this.serviceState;
+
     if ((flags & LISTEN_CALL_STATE) != 0) {
       listener.onCallStateChanged(callState, incomingPhoneNumber);
     }
     if ((flags & LISTEN_CELL_INFO) != 0) {
-      if (VERSION.SDK_INT >= JELLY_BEAN_MR1) {
-        listener.onCellInfoChanged(allCellInfo);
-      }
+      listener.onCellInfoChanged(allCellInfo);
     }
     if ((flags & LISTEN_CELL_LOCATION) != 0) {
       listener.onCellLocationChanged(cellLocation);
@@ -616,21 +900,63 @@ public class ShadowTelephonyManager {
         && ((flags & PhoneStateListener.LISTEN_DISPLAY_INFO_CHANGED) != 0)) {
       listener.onDisplayInfoChanged((TelephonyDisplayInfo) telephonyDisplayInfo);
     }
+
+    if (serviceState != null && ((flags & PhoneStateListener.LISTEN_SERVICE_STATE) != 0)) {
+      listener.onServiceStateChanged(serviceState);
+    }
+  }
+
+  @CallSuper
+  protected void initTelephonyCallback(Object callback) {
+    if (VERSION.SDK_INT < S) {
+      return;
+    }
+    // grab the state "atomically" before doing callbacks, in case they modify the state
+    int callState = this.callState;
+    List<CellInfo> allCellInfo = ShadowTelephonyManager.allCellInfo;
+    CellLocation cellLocation = ShadowTelephonyManager.cellLocation;
+    Object telephonyDisplayInfo = this.telephonyDisplayInfo;
+    ServiceState serviceState = this.serviceState;
+
+    if (callback instanceof CallStateListener) {
+      ((CallStateListener) callback).onCallStateChanged(callState);
+    }
+    if (callback instanceof CellInfoListener) {
+      ((CellInfoListener) callback).onCellInfoChanged(allCellInfo);
+    }
+    if (callback instanceof CellLocationListener) {
+      ((CellLocationListener) callback).onCellLocationChanged(cellLocation);
+    }
+    if (telephonyDisplayInfo != null && callback instanceof DisplayInfoListener) {
+      ((DisplayInfoListener) callback)
+          .onDisplayInfoChanged((TelephonyDisplayInfo) telephonyDisplayInfo);
+    }
+    if (serviceState != null && callback instanceof ServiceStateListener) {
+      ((ServiceStateListener) callback).onServiceStateChanged(serviceState);
+    }
   }
 
   protected Iterable<PhoneStateListener> getListenersForFlags(int flags) {
     return Iterables.filter(
-        phoneStateRegistrations.keySet(),
-        new Predicate<PhoneStateListener>() {
-          @Override
-          public boolean apply(PhoneStateListener input) {
-            // only select PhoneStateListeners with matching flags
-            return (phoneStateRegistrations.get(input) & flags) != 0;
-          }
+        ImmutableSet.copyOf(phoneStateRegistrations.keySet()),
+        input -> {
+          // only select PhoneStateListeners with matching flags
+          return (phoneStateRegistrations.get(input) & flags) != 0;
         });
   }
 
-  /** @return true by default, or the value specified via {@link #setIsSmsCapable(boolean)} */
+  /**
+   * Returns a view of {@code telephonyCallbackRegistrations} containing all elements that are of
+   * the type {@code clazz}.
+   */
+  protected <T> Iterable<T> getCallbackForListener(Class<T> clazz) {
+    // Only selects TelephonyCallback with matching class.
+    return Iterables.filter(ImmutableList.copyOf(telephonyCallbackRegistrations), clazz);
+  }
+
+  /**
+   * @return true by default, or the value specified via {@link #setIsSmsCapable(boolean)}
+   */
   @Implementation
   protected boolean isSmsCapable() {
     return isSmsCapable;
@@ -638,7 +964,7 @@ public class ShadowTelephonyManager {
 
   /** Sets the value returned by {@link TelephonyManager#isSmsCapable()}. */
   public void setIsSmsCapable(boolean isSmsCapable) {
-    this.isSmsCapable = isSmsCapable;
+    ShadowTelephonyManager.isSmsCapable = isSmsCapable;
   }
 
   /**
@@ -647,6 +973,7 @@ public class ShadowTelephonyManager {
    */
   @Implementation(minSdk = O)
   protected PersistableBundle getCarrierConfig() {
+    checkReadPhoneStatePermission();
     return carrierConfig != null ? carrierConfig : new PersistableBundle();
   }
 
@@ -665,6 +992,7 @@ public class ShadowTelephonyManager {
    */
   @Implementation
   protected String getVoiceMailNumber() {
+    checkReadPhoneStatePermission();
     return voiceMailNumber;
   }
 
@@ -679,6 +1007,7 @@ public class ShadowTelephonyManager {
    */
   @Implementation
   protected String getVoiceMailAlphaTag() {
+    checkReadPhoneStatePermission();
     return voiceMailAlphaTag;
   }
 
@@ -695,7 +1024,18 @@ public class ShadowTelephonyManager {
 
   /** Sets the value returned by {@link TelephonyManager#getPhoneCount()}. */
   public void setPhoneCount(int phoneCount) {
-    this.phoneCount = phoneCount;
+    ShadowTelephonyManager.phoneCount = phoneCount;
+  }
+
+  /** Returns 1 by default or the value specified via {@link #setActiveModemCount(int)}. */
+  @Implementation(minSdk = R)
+  protected int getActiveModemCount() {
+    return activeModemCount;
+  }
+
+  /** Sets the value returned by {@link TelephonyManager#getActiveModemCount()}. */
+  public void setActiveModemCount(int activeModemCount) {
+    ShadowTelephonyManager.activeModemCount = activeModemCount;
   }
 
   /**
@@ -703,6 +1043,7 @@ public class ShadowTelephonyManager {
    */
   @Implementation(minSdk = M)
   protected String getDeviceId(int slot) {
+    checkReadPhoneStatePermission();
     return slotIndexToDeviceId.get(slot);
   }
 
@@ -721,7 +1062,7 @@ public class ShadowTelephonyManager {
 
   /** Sets the value returned by {@link #isVoiceCapable()}. */
   public void setVoiceCapable(boolean voiceCapable) {
-    this.voiceCapable = voiceCapable;
+    ShadowTelephonyManager.voiceCapable = voiceCapable;
   }
 
   /**
@@ -767,6 +1108,7 @@ public class ShadowTelephonyManager {
    */
   @Implementation(minSdk = O)
   protected TelephonyManager createForPhoneAccountHandle(PhoneAccountHandle handle) {
+    checkReadPhoneStatePermission();
     return phoneAccountToTelephonyManagers.get(handle);
   }
 
@@ -800,7 +1142,17 @@ public class ShadowTelephonyManager {
    */
   @Implementation(minSdk = O)
   protected ServiceState getServiceState() {
+    checkReadPhoneStatePermission();
     return serviceState;
+  }
+
+  /**
+   * Returns {@code null} by default or the value specified via {@link
+   * #setServiceState(ServiceState)}
+   */
+  @Implementation(minSdk = TIRAMISU)
+  protected ServiceState getServiceState(int includeLocationData) {
+    return getServiceState();
   }
 
   /** Sets the value returned by {@link TelephonyManager#getServiceState()}. */
@@ -809,6 +1161,11 @@ public class ShadowTelephonyManager {
 
     for (PhoneStateListener listener : getListenersForFlags(LISTEN_SERVICE_STATE)) {
       listener.onServiceStateChanged(serviceState);
+    }
+    if (VERSION.SDK_INT >= S) {
+      for (ServiceStateListener listener : getCallbackForListener(ServiceStateListener.class)) {
+        listener.onServiceStateChanged(serviceState);
+      }
     }
   }
 
@@ -829,7 +1186,7 @@ public class ShadowTelephonyManager {
   @Implementation(minSdk = M)
   @HiddenApi
   protected int getCurrentPhoneType(int subId) {
-    return currentPhoneTypes.get(subId, TelephonyManager.PHONE_TYPE_NONE);
+    return currentPhoneTypes.getOrDefault(subId, TelephonyManager.PHONE_TYPE_NONE);
   }
 
   /** Sets the phone type for the given {@code subId}. */
@@ -838,7 +1195,7 @@ public class ShadowTelephonyManager {
   }
 
   /** Removes all {@code subId} to {@code phoneType} mappings. */
-  public void clearPhoneTypes() {
+  public static void clearPhoneTypes() {
     currentPhoneTypes.clear();
   }
 
@@ -848,7 +1205,7 @@ public class ShadowTelephonyManager {
     return carrierPackageNames.get(phoneId);
   }
 
-  @Implementation(minSdk = LOLLIPOP)
+  @Implementation
   @HiddenApi
   protected List<String> getCarrierPackageNamesForIntent(Intent intent) {
     return carrierPackageNames.get(SubscriptionManager.DEFAULT_SUBSCRIPTION_ID);
@@ -879,6 +1236,26 @@ public class ShadowTelephonyManager {
     this.simCarrierId = simCarrierId;
   }
 
+  @Implementation(minSdk = Q)
+  protected int getSimSpecificCarrierId() {
+    return simSpecificCarrierId;
+  }
+
+  /** Sets the value to be returned by {@link #getSimSpecificCarrierId()}. */
+  public void setSimSpecificCarrierId(int simSpecificCarrierId) {
+    this.simSpecificCarrierId = simSpecificCarrierId;
+  }
+
+  @Implementation(minSdk = P)
+  protected CharSequence getSimCarrierIdName() {
+    return simCarrierIdName;
+  }
+
+  /** Sets the value to be returned by {@link #getSimCarrierIdName()}. */
+  public void setSimCarrierIdName(CharSequence simCarrierIdName) {
+    this.simCarrierIdName = simCarrierIdName;
+  }
+
   @Implementation
   protected String getSubscriberId() {
     checkReadPhoneStatePermission();
@@ -890,9 +1267,20 @@ public class ShadowTelephonyManager {
     this.subscriberId = subscriberId;
   }
 
+  @Implementation(minSdk = R)
+  protected int getSubscriptionId(PhoneAccountHandle handle) {
+    checkReadPhoneStatePermission();
+    return phoneAccountHandleSubscriptionId.get(handle);
+  }
+
+  public void setPhoneAccountHandleSubscriptionId(PhoneAccountHandle handle, int subscriptionId) {
+    phoneAccountHandleSubscriptionId.put(handle, subscriptionId);
+  }
+
   /** Returns the value set by {@link #setVisualVoicemailPackageName(String)}. */
   @Implementation(minSdk = O)
   protected String getVisualVoicemailPackageName() {
+    checkReadPhoneStatePermission();
     return visualVoicemailPackageName;
   }
 
@@ -913,6 +1301,12 @@ public class ShadowTelephonyManager {
         getListenersForFlags(PhoneStateListener.LISTEN_SIGNAL_STRENGTHS)) {
       listener.onSignalStrengthsChanged(signalStrength);
     }
+    if (VERSION.SDK_INT >= S) {
+      for (SignalStrengthsListener listener :
+          getCallbackForListener(SignalStrengthsListener.class)) {
+        listener.onSignalStrengthsChanged(signalStrength);
+      }
+    }
   }
 
   /**
@@ -922,6 +1316,9 @@ public class ShadowTelephonyManager {
    */
   @Implementation(minSdk = Build.VERSION_CODES.Q)
   protected boolean isEmergencyNumber(String number) {
+    if (ShadowServiceManager.getService(Context.TELEPHONY_SERVICE) == null) {
+      throw new IllegalStateException("telephony service is null.");
+    }
 
     if (number == null) {
       return false;
@@ -981,6 +1378,22 @@ public class ShadowTelephonyManager {
     return false;
   }
 
+  /**
+   * Emergency Callback Mode (ECBM) is typically set by the carrier, for a time window of 5 minutes
+   * after the last outgoing emergency call. The user can exit ECBM via a system notification.
+   *
+   * @param emergencyCallbackMode whether the device is in ECBM or not.
+   */
+  public void setEmergencyCallbackMode(boolean emergencyCallbackMode) {
+    ShadowTelephonyManager.emergencyCallbackMode = emergencyCallbackMode;
+  }
+
+  @Implementation(minSdk = Build.VERSION_CODES.O)
+  protected boolean getEmergencyCallbackMode() {
+    checkReadPrivilegedPhoneStatePermission();
+    return emergencyCallbackMode;
+  }
+
   @Implementation(minSdk = Build.VERSION_CODES.Q)
   protected boolean isPotentialEmergencyNumber(String number) {
     return isEmergencyNumber(number);
@@ -993,7 +1406,20 @@ public class ShadowTelephonyManager {
    */
   @Implementation(minSdk = Build.VERSION_CODES.O)
   protected boolean isDataEnabled() {
+    checkReadPhoneStatePermission();
     return dataEnabled;
+  }
+
+  /**
+   * Implementation for {@link TelephonyManager#isDataEnabledForReason}.
+   *
+   * @return True by default, unless reason is set to false with {@link
+   *     TelephonyManager#setDataEnabledForReason}.
+   */
+  @Implementation(minSdk = Build.VERSION_CODES.S)
+  protected boolean isDataEnabledForReason(@TelephonyManager.DataEnabledReason int reason) {
+    checkReadPhoneStatePermission();
+    return !dataDisabledReasons.contains(reason);
   }
 
   /**
@@ -1002,7 +1428,22 @@ public class ShadowTelephonyManager {
    */
   @Implementation(minSdk = Build.VERSION_CODES.O)
   public void setDataEnabled(boolean enabled) {
-    dataEnabled = enabled;
+    setDataEnabledForReason(TelephonyManager.DATA_ENABLED_REASON_USER, enabled);
+  }
+
+  /**
+   * Implementation for {@link TelephonyManager#setDataEnabledForReason}. Marked as public in order
+   * to allow it to be used as a test API.
+   */
+  @Implementation(minSdk = Build.VERSION_CODES.S)
+  public void setDataEnabledForReason(
+      @TelephonyManager.DataEnabledReason int reason, boolean enabled) {
+    if (enabled) {
+      dataDisabledReasons.remove(reason);
+    } else {
+      dataDisabledReasons.add(reason);
+    }
+    dataEnabled = dataDisabledReasons.isEmpty();
   }
 
   /**
@@ -1018,6 +1459,41 @@ public class ShadowTelephonyManager {
   /** Sets the value to be returned by {@link #isRttSupported()} */
   public void setRttSupported(boolean isRttSupported) {
     this.isRttSupported = isRttSupported;
+  }
+
+  /**
+   * Implementation for {@link TelephonyManager#isTtyModeSupported}.
+   *
+   * @return False by default, unless set with {@link #setTtyModeSupported(boolean)}.
+   */
+  @Implementation(minSdk = Build.VERSION_CODES.M)
+  protected boolean isTtyModeSupported() {
+    checkReadPhoneStatePermission();
+    return isTtyModeSupported;
+  }
+
+  /** Sets the value to be returned by {@link #isTtyModeSupported()} */
+  public void setTtyModeSupported(boolean isTtyModeSupported) {
+    ShadowTelephonyManager.isTtyModeSupported = isTtyModeSupported;
+  }
+
+  /**
+   * @return False by default, unless set with {@link #setHasCarrierPrivileges(int, boolean)}.
+   */
+  @Implementation(minSdk = Build.VERSION_CODES.N)
+  @HiddenApi
+  protected boolean hasCarrierPrivileges(int subId) {
+    return subIdToHasCarrierPrivileges.getOrDefault(subId, false);
+  }
+
+  public void setHasCarrierPrivileges(boolean hasCarrierPrivileges) {
+    int subId = ReflectionHelpers.callInstanceMethod(realTelephonyManager, "getSubId");
+    setHasCarrierPrivileges(subId, hasCarrierPrivileges);
+  }
+
+  /** Sets the {@code hasCarrierPrivileges} for the given {@code subId}. */
+  public void setHasCarrierPrivileges(int subId, boolean hasCarrierPrivileges) {
+    subIdToHasCarrierPrivileges.put(subId, hasCarrierPrivileges);
   }
 
   /**
@@ -1081,15 +1557,149 @@ public class ShadowTelephonyManager {
         getListenersForFlags(PhoneStateListener.LISTEN_DISPLAY_INFO_CHANGED)) {
       listener.onDisplayInfoChanged((TelephonyDisplayInfo) telephonyDisplayInfo);
     }
+    if (VERSION.SDK_INT >= S) {
+      for (DisplayInfoListener listener : getCallbackForListener(DisplayInfoListener.class)) {
+        listener.onDisplayInfoChanged((TelephonyDisplayInfo) telephonyDisplayInfo);
+      }
+    }
   }
 
   @Implementation(minSdk = R)
   @HiddenApi
   protected boolean isDataConnectionAllowed() {
+    checkReadPhoneStatePermission();
     return isDataConnectionAllowed;
   }
 
   public void setIsDataConnectionAllowed(boolean isDataConnectionAllowed) {
     this.isDataConnectionAllowed = isDataConnectionAllowed;
+  }
+
+  @Implementation(minSdk = O)
+  public void sendVisualVoicemailSms(
+      String number, int port, String text, PendingIntent sentIntent) {
+    lastVisualVoicemailSmsParams = new VisualVoicemailSmsParams(number, port, text, sentIntent);
+  }
+
+  public VisualVoicemailSmsParams getLastSentVisualVoicemailSmsParams() {
+    return lastVisualVoicemailSmsParams;
+  }
+
+  /**
+   * Implementation for {@link
+   * TelephonyManager#setVisualVoicemailSmsFilterSettings(VisualVoicemailSmsFilterSettings)}.
+   *
+   * @param settings The settings for the filter, or null to disable the filter.
+   */
+  @Implementation(minSdk = O)
+  public void setVisualVoicemailSmsFilterSettings(VisualVoicemailSmsFilterSettings settings) {
+    visualVoicemailSmsFilterSettings = settings;
+  }
+
+  /** Returns the last set {@link VisualVoicemailSmsFilterSettings}. */
+  public VisualVoicemailSmsFilterSettings getVisualVoicemailSmsFilterSettings() {
+    return visualVoicemailSmsFilterSettings;
+  }
+
+  /** Testable parameters from calls to {@link #sendVisualVoicemailSms}. */
+  public static class VisualVoicemailSmsParams {
+    private final String destinationAddress;
+    private final int port;
+    private final String text;
+    private final PendingIntent sentIntent;
+
+    public VisualVoicemailSmsParams(
+        String destinationAddress, int port, String text, PendingIntent sentIntent) {
+      this.destinationAddress = destinationAddress;
+      this.port = port;
+      this.text = text;
+      this.sentIntent = sentIntent;
+    }
+
+    public String getDestinationAddress() {
+      return destinationAddress;
+    }
+
+    public int getPort() {
+      return port;
+    }
+
+    public String getText() {
+      return text;
+    }
+
+    public PendingIntent getSentIntent() {
+      return sentIntent;
+    }
+  }
+
+  /**
+   * Sets the emergency numbers list returned by {@link TelephonyManager#getEmergencyNumberList}.
+   */
+  public static void setEmergencyNumberList(
+      Map<Integer, List<EmergencyNumber>> emergencyNumbersList) {
+    ShadowTelephonyManager.emergencyNumbersList = emergencyNumbersList;
+  }
+
+  /**
+   * Implementation for {@link TelephonyManager#getEmergencyNumberList}.
+   *
+   * @return an immutable map by default, unless set with {@link #setEmergencyNumberList}.
+   */
+  @Implementation(minSdk = R)
+  protected Map<Integer, List<EmergencyNumber>> getEmergencyNumberList() {
+    if (ShadowTelephonyManager.emergencyNumbersList != null) {
+      return ShadowTelephonyManager.emergencyNumbersList;
+    }
+    return ImmutableMap.of();
+  }
+
+  /**
+   * Implementation for {@link TelephonyManager#isDataRoamingEnabled}.
+   *
+   * @return False by default, unless set with {@link #setDataRoamingEnabled(boolean)}.
+   */
+  @Implementation(minSdk = Q)
+  protected boolean isDataRoamingEnabled() {
+    checkReadPhoneStatePermission();
+    return isDataRoamingEnabled;
+  }
+
+  /** Sets the value to be returned by {@link #isDataRoamingEnabled()} */
+  @Implementation(minSdk = Q)
+  protected void setDataRoamingEnabled(boolean isDataRoamingEnabled) {
+    ShadowTelephonyManager.isDataRoamingEnabled = isDataRoamingEnabled;
+  }
+
+  /**
+   * Sets the value to be returned by {@link #getCarrierRestrictionRules()}. Marked as public in
+   * order to allow it to be used as a test API.
+   *
+   * @param carrierRestrictionRules An object of type {@link CarrierRestrictionRules}
+   */
+  public void setCarrierRestrictionRules(Object carrierRestrictionRules) {
+    Preconditions.checkState(carrierRestrictionRules instanceof CarrierRestrictionRules);
+    this.carrierRestrictionRules = carrierRestrictionRules;
+  }
+
+  /**
+   * Implementation for {@link TelephonyManager#getCarrierRestrictionRules} that is set for tests by
+   * {@link TelephonyManager#setCarrierRestrictionRules}.
+   */
+  @Implementation(minSdk = Q)
+  protected @ClassName("android.telephony.CarrierRestrictionRules") Object
+      getCarrierRestrictionRules() {
+    return carrierRestrictionRules;
+  }
+
+  /** Implementation for {@link TelephonyManager#rebootModem} */
+  @Implementation(minSdk = Build.VERSION_CODES.TIRAMISU)
+  protected void rebootModem() {
+    checkModifyPhoneStatePermission();
+    modemRebootCount.incrementAndGet();
+  }
+
+  public int getModemRebootCount() {
+    return modemRebootCount.get();
   }
 }

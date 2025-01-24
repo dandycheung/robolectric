@@ -24,13 +24,15 @@ public class ShadowMimeTypeMapTest {
   @Test
   public void shouldResetStaticStateBetweenTests() {
     assertFalse(MimeTypeMap.getSingleton().hasExtension(VIDEO_EXTENSION));
-    shadowOf(MimeTypeMap.getSingleton()).addExtensionMimeTypMapping(VIDEO_EXTENSION, VIDEO_MIMETYPE);
+    shadowOf(MimeTypeMap.getSingleton())
+        .addExtensionMimeTypeMapping(VIDEO_EXTENSION, VIDEO_MIMETYPE);
   }
 
   @Test
   public void shouldResetStaticStateBetweenTests_anotherTime() {
     assertFalse(MimeTypeMap.getSingleton().hasExtension(VIDEO_EXTENSION));
-    shadowOf(MimeTypeMap.getSingleton()).addExtensionMimeTypMapping(VIDEO_EXTENSION, VIDEO_MIMETYPE);
+    shadowOf(MimeTypeMap.getSingleton())
+        .addExtensionMimeTypeMapping(VIDEO_EXTENSION, VIDEO_MIMETYPE);
   }
 
   @Test
@@ -50,26 +52,30 @@ public class ShadowMimeTypeMapTest {
   @Test
   public void addingMappingShouldWorkCorrectly() {
     ShadowMimeTypeMap shadowMimeTypeMap = Shadows.shadowOf(MimeTypeMap.getSingleton());
-    shadowMimeTypeMap.addExtensionMimeTypMapping(VIDEO_EXTENSION, VIDEO_MIMETYPE);
-    shadowMimeTypeMap.addExtensionMimeTypMapping(IMAGE_EXTENSION, IMAGE_MIMETYPE);
+    shadowMimeTypeMap.addExtensionMimeTypeMapping(VIDEO_EXTENSION, VIDEO_MIMETYPE);
+    shadowMimeTypeMap.addExtensionMimeTypeMapping(IMAGE_EXTENSION, IMAGE_MIMETYPE);
 
     assertTrue(MimeTypeMap.getSingleton().hasExtension(VIDEO_EXTENSION));
     assertTrue(MimeTypeMap.getSingleton().hasExtension(IMAGE_EXTENSION));
     assertTrue(MimeTypeMap.getSingleton().hasMimeType(VIDEO_MIMETYPE));
     assertTrue(MimeTypeMap.getSingleton().hasMimeType(IMAGE_MIMETYPE));
 
-    assertEquals(IMAGE_EXTENSION, MimeTypeMap.getSingleton().getExtensionFromMimeType(IMAGE_MIMETYPE));
-    assertEquals(VIDEO_EXTENSION, MimeTypeMap.getSingleton().getExtensionFromMimeType(VIDEO_MIMETYPE));
+    assertEquals(
+        IMAGE_EXTENSION, MimeTypeMap.getSingleton().getExtensionFromMimeType(IMAGE_MIMETYPE));
+    assertEquals(
+        VIDEO_EXTENSION, MimeTypeMap.getSingleton().getExtensionFromMimeType(VIDEO_MIMETYPE));
 
-    assertEquals(IMAGE_MIMETYPE, MimeTypeMap.getSingleton().getMimeTypeFromExtension(IMAGE_EXTENSION));
-    assertEquals(VIDEO_MIMETYPE, MimeTypeMap.getSingleton().getMimeTypeFromExtension(VIDEO_EXTENSION));
+    assertEquals(
+        IMAGE_MIMETYPE, MimeTypeMap.getSingleton().getMimeTypeFromExtension(IMAGE_EXTENSION));
+    assertEquals(
+        VIDEO_MIMETYPE, MimeTypeMap.getSingleton().getMimeTypeFromExtension(VIDEO_EXTENSION));
   }
 
   @Test
   public void clearMappingsShouldRemoveAllMappings() {
     ShadowMimeTypeMap shadowMimeTypeMap = Shadows.shadowOf(MimeTypeMap.getSingleton());
-    shadowMimeTypeMap.addExtensionMimeTypMapping(VIDEO_EXTENSION, VIDEO_MIMETYPE);
-    shadowMimeTypeMap.addExtensionMimeTypMapping(IMAGE_EXTENSION, IMAGE_MIMETYPE);
+    shadowMimeTypeMap.addExtensionMimeTypeMapping(VIDEO_EXTENSION, VIDEO_MIMETYPE);
+    shadowMimeTypeMap.addExtensionMimeTypeMapping(IMAGE_EXTENSION, IMAGE_MIMETYPE);
 
     shadowMimeTypeMap.clearMappings();
 
@@ -82,8 +88,8 @@ public class ShadowMimeTypeMapTest {
   @Test
   public void unknownExtensionShouldProvideNothing() {
     ShadowMimeTypeMap shadowMimeTypeMap = Shadows.shadowOf(MimeTypeMap.getSingleton());
-    shadowMimeTypeMap.addExtensionMimeTypMapping(VIDEO_EXTENSION, VIDEO_MIMETYPE);
-    shadowMimeTypeMap.addExtensionMimeTypMapping(IMAGE_EXTENSION, IMAGE_MIMETYPE);
+    shadowMimeTypeMap.addExtensionMimeTypeMapping(VIDEO_EXTENSION, VIDEO_MIMETYPE);
+    shadowMimeTypeMap.addExtensionMimeTypeMapping(IMAGE_EXTENSION, IMAGE_MIMETYPE);
 
     assertFalse(MimeTypeMap.getSingleton().hasExtension("foo"));
     assertNull(MimeTypeMap.getSingleton().getMimeTypeFromExtension("foo"));
@@ -92,8 +98,8 @@ public class ShadowMimeTypeMapTest {
   @Test
   public void unknownMimeTypeShouldProvideNothing() {
     ShadowMimeTypeMap shadowMimeTypeMap = Shadows.shadowOf(MimeTypeMap.getSingleton());
-    shadowMimeTypeMap.addExtensionMimeTypMapping(VIDEO_EXTENSION, VIDEO_MIMETYPE);
-    shadowMimeTypeMap.addExtensionMimeTypMapping(IMAGE_EXTENSION, IMAGE_MIMETYPE);
+    shadowMimeTypeMap.addExtensionMimeTypeMapping(VIDEO_EXTENSION, VIDEO_MIMETYPE);
+    shadowMimeTypeMap.addExtensionMimeTypeMapping(IMAGE_EXTENSION, IMAGE_MIMETYPE);
 
     assertFalse(MimeTypeMap.getSingleton().hasMimeType("foo/bar"));
     assertNull(MimeTypeMap.getSingleton().getExtensionFromMimeType("foo/bar"));

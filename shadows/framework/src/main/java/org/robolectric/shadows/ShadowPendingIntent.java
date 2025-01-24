@@ -5,13 +5,13 @@ import static android.app.PendingIntent.FLAG_IMMUTABLE;
 import static android.app.PendingIntent.FLAG_NO_CREATE;
 import static android.app.PendingIntent.FLAG_ONE_SHOT;
 import static android.app.PendingIntent.FLAG_UPDATE_CURRENT;
-import static android.os.Build.VERSION_CODES.JELLY_BEAN_MR1;
 import static android.os.Build.VERSION_CODES.M;
 import static android.os.Build.VERSION_CODES.N;
 import static android.os.Build.VERSION_CODES.O;
+import static android.os.Build.VERSION_CODES.S;
+import static org.robolectric.RuntimeEnvironment.getApiLevel;
 import static org.robolectric.util.reflector.Reflector.reflector;
 
-import android.annotation.NonNull;
 import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.app.ActivityThread;
@@ -24,7 +24,6 @@ import android.content.Intent;
 import android.content.IntentSender;
 import android.os.Bundle;
 import android.os.Handler;
-import android.os.IBinder;
 import android.os.Parcel;
 import android.os.Parcelable.Creator;
 import java.util.ArrayList;
@@ -32,6 +31,7 @@ import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Objects;
+import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import javax.annotation.concurrent.GuardedBy;
 import org.robolectric.RuntimeEnvironment;
@@ -44,6 +44,7 @@ import org.robolectric.shadow.api.Shadow;
 import org.robolectric.util.ReflectionHelpers;
 import org.robolectric.util.reflector.Accessor;
 import org.robolectric.util.reflector.ForType;
+import org.robolectric.versioning.AndroidVersions.V;
 
 @Implements(PendingIntent.class)
 @SuppressLint("NewApi")
@@ -65,15 +66,16 @@ public class ShadowPendingIntent {
 
   private static final List<PendingIntent> parceledPendingIntents = new ArrayList<>();
 
-  @RealObject
-  private PendingIntent realPendingIntent;
+  @RealObject private PendingIntent realPendingIntent;
 
-  @NonNull private Intent[] savedIntents;
+  @Nonnull private Intent[] savedIntents;
   private Context savedContext;
   private Type type;
   private int requestCode;
   private int flags;
+  @Nullable private Bundle options;
   private String creatorPackage;
+  private int creatorUid;
   private boolean canceled;
   @Nullable private PendingIntent.OnFinished lastOnFinished;
 
@@ -85,44 +87,45 @@ public class ShadowPendingIntent {
 
   @Implementation
   protected static PendingIntent getActivity(
-      Context context, int requestCode, @NonNull Intent intent, int flags) {
-    return create(context, new Intent[] {intent}, Type.ACTIVITY, requestCode, flags);
+      Context context, int requestCode, @Nonnull Intent intent, int flags) {
+    return create(context, new Intent[] {intent}, Type.ACTIVITY, requestCode, flags, null);
   }
 
   @Implementation
   protected static PendingIntent getActivity(
-      Context context, int requestCode, @NonNull Intent intent, int flags, Bundle options) {
-    return create(context, new Intent[] {intent}, Type.ACTIVITY, requestCode, flags);
+      Context context, int requestCode, @Nonnull Intent intent, int flags, Bundle options) {
+    return create(context, new Intent[] {intent}, Type.ACTIVITY, requestCode, flags, options);
   }
 
   @Implementation
   protected static PendingIntent getActivities(
-      Context context, int requestCode, @NonNull Intent[] intents, int flags) {
-    return create(context, intents, Type.ACTIVITY, requestCode, flags);
+      Context context, int requestCode, @Nonnull Intent[] intents, int flags) {
+    return create(context, intents, Type.ACTIVITY, requestCode, flags, null);
   }
 
   @Implementation
   protected static PendingIntent getActivities(
-      Context context, int requestCode, @NonNull Intent[] intents, int flags, Bundle options) {
-    return create(context, intents, Type.ACTIVITY, requestCode, flags);
+      Context context, int requestCode, @Nonnull Intent[] intents, int flags, Bundle options) {
+    return create(context, intents, Type.ACTIVITY, requestCode, flags, options);
   }
 
   @Implementation
   protected static PendingIntent getBroadcast(
-      Context context, int requestCode, @NonNull Intent intent, int flags) {
-    return create(context, new Intent[] {intent}, Type.BROADCAST, requestCode, flags);
+      Context context, int requestCode, @Nonnull Intent intent, int flags) {
+    return create(context, new Intent[] {intent}, Type.BROADCAST, requestCode, flags, null);
   }
 
   @Implementation
   protected static PendingIntent getService(
-      Context context, int requestCode, @NonNull Intent intent, int flags) {
-    return create(context, new Intent[] {intent}, Type.SERVICE, requestCode, flags);
+      Context context, int requestCode, @Nonnull Intent intent, int flags) {
+    return create(context, new Intent[] {intent}, Type.SERVICE, requestCode, flags, null);
   }
 
   @Implementation(minSdk = O)
   protected static PendingIntent getForegroundService(
-      Context context, int requestCode, @NonNull Intent intent, int flags) {
-    return create(context, new Intent[] {intent}, Type.FOREGROUND_SERVICE, requestCode, flags);
+      Context context, int requestCode, @Nonnull Intent intent, int flags) {
+    return create(
+        context, new Intent[] {intent}, Type.FOREGROUND_SERVICE, requestCode, flags, null);
   }
 
   @Implementation
@@ -162,21 +165,52 @@ public class ShadowPendingIntent {
   }
 
   @Implementation
-  protected void send(Context context, int code, Intent intent, PendingIntent.OnFinished onFinished,
-      Handler handler) throws CanceledException {
+  protected void send(
+      Context context,
+      int code,
+      Intent intent,
+      PendingIntent.OnFinished onFinished,
+      Handler handler)
+      throws CanceledException {
     send(context, code, intent, onFinished, handler, null);
   }
 
   @Implementation
-  protected void send(Context context, int code, Intent intent, PendingIntent.OnFinished onFinished,
-      Handler handler, String requiredPermission) throws CanceledException {
+  protected void send(
+      Context context,
+      int code,
+      Intent intent,
+      PendingIntent.OnFinished onFinished,
+      Handler handler,
+      String requiredPermission)
+      throws CanceledException {
     // Manually propagating to keep only one implementation regardless of SDK
     send(context, code, intent, onFinished, handler, requiredPermission, null);
   }
 
   @Implementation(minSdk = M)
-  protected void send(Context context, int code, Intent intent, PendingIntent.OnFinished onFinished,
-      Handler handler, String requiredPermission, Bundle options) throws CanceledException {
+  protected void send(
+      Context context,
+      int code,
+      Intent intent,
+      PendingIntent.OnFinished onFinished,
+      Handler handler,
+      String requiredPermission,
+      Bundle options)
+      throws CanceledException {
+    send(context, code, intent, onFinished, handler, requiredPermission, options, 0);
+  }
+
+  void send(
+      Context context,
+      int code,
+      Intent intent,
+      PendingIntent.OnFinished onFinished,
+      Handler handler,
+      String requiredPermission,
+      Bundle options,
+      int requestCode)
+      throws CanceledException {
     this.lastOnFinished =
         handler == null
             ? onFinished
@@ -196,35 +230,30 @@ public class ShadowPendingIntent {
       // Copy the last intent before filling it in to avoid modifying this PendingIntent.
       intentsToSend = Arrays.copyOf(savedIntents, savedIntents.length);
       Intent lastIntentCopy = new Intent(intentsToSend[intentsToSend.length - 1]);
-      lastIntentCopy.fillIn(intent, 0);
+      lastIntentCopy.fillIn(intent, flags);
       intentsToSend[intentsToSend.length - 1] = lastIntentCopy;
     } else {
       intentsToSend = savedIntents;
     }
 
     ActivityThread activityThread = (ActivityThread) RuntimeEnvironment.getActivityThread();
-    ShadowInstrumentation shadowInstrumentation = Shadow.extract(activityThread.getInstrumentation());
-    if (isActivityIntent()) {
+    ShadowInstrumentation shadowInstrumentation =
+        Shadow.extract(activityThread.getInstrumentation());
+    if (isActivity()) {
       for (Intent intentToSend : intentsToSend) {
         shadowInstrumentation.execStartActivity(
-            context,
-            (IBinder) null,
-            (IBinder) null,
-            (Activity) null,
-            intentToSend,
-            0,
-            (Bundle) null);
+            context, null, null, (Activity) null, intentToSend, requestCode, options);
       }
-    } else if (isBroadcastIntent()) {
+    } else if (isBroadcast()) {
       for (Intent intentToSend : intentsToSend) {
         shadowInstrumentation.sendBroadcastWithPermission(
             intentToSend, requiredPermission, context, options, code);
       }
-    } else if (isServiceIntent()) {
+    } else if (isService()) {
       for (Intent intentToSend : intentsToSend) {
         context.startService(intentToSend);
       }
-    } else if (isForegroundServiceIntent()) {
+    } else if (isForegroundService()) {
       for (Intent intentToSend : intentsToSend) {
         context.startForegroundService(intentToSend);
       }
@@ -241,27 +270,111 @@ public class ShadowPendingIntent {
   }
 
   /**
-   * @return {@code true} iff sending this PendingIntent will start an activity
+   * Returns {@code true} if this {@code PendingIntent} was created with {@link #getActivity} or
+   * {@link #getActivities}.
+   *
+   * <p>This method is intentionally left {@code public} rather than {@code protected} because it
+   * serves a secondary purpose as a utility shadow method for API levels < 31.
    */
+  @Implementation(minSdk = S)
+  public boolean isActivity() {
+    return type == Type.ACTIVITY;
+  }
+
+  /**
+   * Returns {@code true} if this {@code PendingIntent} was created with {@link #getBroadcast}.
+   *
+   * <p>This method is intentionally left {@code public} rather than {@code protected} because it
+   * serves a secondary purpose as a utility shadow method for API levels < 31.
+   */
+  @Implementation(minSdk = S)
+  public boolean isBroadcast() {
+    return type == Type.BROADCAST;
+  }
+
+  /**
+   * Returns {@code true} if this {@code PendingIntent} was created with {@link
+   * #getForegroundService}.
+   *
+   * <p>This method is intentionally left {@code public} rather than {@code protected} because it
+   * serves a secondary purpose as a utility shadow method for API levels < 31.
+   */
+  @Implementation(minSdk = S)
+  public boolean isForegroundService() {
+    return type == Type.FOREGROUND_SERVICE;
+  }
+
+  /**
+   * Returns {@code true} if this {@code PendingIntent} was created with {@link #getService}.
+   *
+   * <p>This method is intentionally left {@code public} rather than {@code protected} because it
+   * serves a secondary purpose as a utility shadow method for API levels < 31.
+   */
+  @Implementation(minSdk = S)
+  public boolean isService() {
+    return type == Type.SERVICE;
+  }
+
+  /**
+   * Returns {@code true} if this {@code PendingIntent} is marked with {@link
+   * PendingIntent#FLAG_IMMUTABLE}.
+   *
+   * <p>This method is intentionally left {@code public} rather than {@code protected} because it
+   * serves a secondary purpose as a utility shadow method for API levels < 31.
+   */
+  @Implementation(minSdk = S)
+  public boolean isImmutable() {
+    return (flags & FLAG_IMMUTABLE) > 0;
+  }
+
+  @Implementation
+  protected boolean isTargetedToPackage() {
+    // This is weird and we know it. See:
+    // https://googleplex-android.googlesource.com/platform/frameworks/base/+/f24a737c89de326199eb6d9f5912eae24b5514e6/services/core/java/com/android/server/am/ActivityManagerService.java#5377
+    for (Intent intent : savedIntents) {
+      if (intent.getPackage() != null && intent.getComponent() != null) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /**
+   * @return {@code true} iff sending this PendingIntent will start an activity
+   * @deprecated prefer {@link #isActivity} which was added to {@link PendingIntent} in API 31
+   *     (Android S).
+   */
+  @Deprecated
   public boolean isActivityIntent() {
     return type == Type.ACTIVITY;
   }
 
   /**
    * @return {@code true} iff sending this PendingIntent will broadcast an Intent
+   * @deprecated prefer {@link #isBroadcast} which was added to {@link PendingIntent} in API 31
+   *     (Android S).
    */
+  @Deprecated
   public boolean isBroadcastIntent() {
     return type == Type.BROADCAST;
   }
 
   /**
    * @return {@code true} iff sending this PendingIntent will start a service
+   * @deprecated prefer {@link #isService} which was added to {@link PendingIntent} in API 31
+   *     (Android S).
    */
+  @Deprecated
   public boolean isServiceIntent() {
     return type == Type.SERVICE;
   }
 
-  /** @return {@code true} iff sending this PendingIntent will start a foreground service */
+  /**
+   * @return {@code true} iff sending this PendingIntent will start a foreground service
+   * @deprecated prefer {@link #isForegroundService} which was added to {@link PendingIntent} in API
+   *     31 (Android S).
+   */
+  @Deprecated
   public boolean isForegroundServiceIntent() {
     return type == Type.FOREGROUND_SERVICE;
   }
@@ -292,9 +405,10 @@ public class ShadowPendingIntent {
 
   /**
    * This method is particularly useful for PendingIntents created with multiple Intents:
+   *
    * <ul>
-   *   <li>{@link #getActivities(Context, int, Intent[], int)}</li>
-   *   <li>{@link #getActivities(Context, int, Intent[], int, Bundle)}</li>
+   *   <li>{@link #getActivities(Context, int, Intent[], int)}
+   *   <li>{@link #getActivities(Context, int, Intent[], int, Bundle)}
    * </ul>
    *
    * @return all Intents to be delivered when the PendingIntent is sent
@@ -325,6 +439,13 @@ public class ShadowPendingIntent {
   }
 
   /**
+   * @return the flags with which this PendingIntent was created
+   */
+  public @Nullable Bundle getOptions() {
+    return options;
+  }
+
+  /**
    * Calls {@link PendingIntent.OnFinished#onSendFinished} on the last {@link
    * PendingIntent.OnFinished} passed with {@link #send()}.
    *
@@ -350,7 +471,7 @@ public class ShadowPendingIntent {
     return getCreatorPackage();
   }
 
-  @Implementation(minSdk = JELLY_BEAN_MR1)
+  @Implementation
   protected String getCreatorPackage() {
     return (creatorPackage == null)
         ? RuntimeEnvironment.getApplication().getPackageName()
@@ -361,12 +482,21 @@ public class ShadowPendingIntent {
     this.creatorPackage = creatorPackage;
   }
 
+  @Implementation
+  protected int getCreatorUid() {
+    return creatorUid;
+  }
+
+  public void setCreatorUid(int uid) {
+    this.creatorUid = uid;
+  }
+
   @Override
   @Implementation
   public boolean equals(Object o) {
     if (this == o) return true;
     if (o == null || realPendingIntent.getClass() != o.getClass()) return false;
-    ShadowPendingIntent that = Shadow.extract((PendingIntent) o);
+    ShadowPendingIntent that = Shadow.extract(o);
 
     String packageName = savedContext == null ? null : savedContext.getPackageName();
     String thatPackageName = that.savedContext == null ? null : that.savedContext.getPackageName();
@@ -404,7 +534,7 @@ public class ShadowPendingIntent {
 
   @Implementation
   @Nullable
-  public static PendingIntent readPendingIntentOrNullFromParcel(@NonNull Parcel in) {
+  public static PendingIntent readPendingIntentOrNullFromParcel(@Nonnull Parcel in) {
     int intentIndex = in.readInt();
     if (intentIndex == NULL_PENDING_INTENT_VALUE) {
       return null;
@@ -414,7 +544,7 @@ public class ShadowPendingIntent {
 
   @Implementation
   public static void writePendingIntentOrNullToParcel(
-      @Nullable PendingIntent sender, @NonNull Parcel out) {
+      @Nullable PendingIntent sender, @Nonnull Parcel out) {
     if (sender == null) {
       out.writeInt(NULL_PENDING_INTENT_VALUE);
       return;
@@ -424,7 +554,16 @@ public class ShadowPendingIntent {
     parceledPendingIntents.add(sender);
     out.writeInt(index);
 
-    if (RuntimeEnvironment.getApiLevel() >= N) {
+    if (getApiLevel() >= V.SDK_INT) {
+      ThreadLocal<List<OnMarshaledListener>> sOnMarshaledListeners =
+          ReflectionHelpers.getStaticField(PendingIntent.class, "sOnMarshaledListener");
+      List<OnMarshaledListener> listeners = sOnMarshaledListeners.get();
+      if (listeners != null) {
+        for (OnMarshaledListener listener : listeners) {
+          listener.onMarshaled(sender, out, 0);
+        }
+      }
+    } else if (getApiLevel() >= N) {
       ThreadLocal<OnMarshaledListener> sOnMarshaledListener =
           ReflectionHelpers.getStaticField(PendingIntent.class, "sOnMarshaledListener");
       OnMarshaledListener listener = sOnMarshaledListener.get();
@@ -453,7 +592,12 @@ public class ShadowPendingIntent {
   }
 
   private static PendingIntent create(
-      Context context, Intent[] intents, Type type, int requestCode, int flags) {
+      Context context,
+      Intent[] intents,
+      Type type,
+      int requestCode,
+      int flags,
+      @Nullable Bundle options) {
     synchronized (lock) {
       Objects.requireNonNull(intents, "intents may not be null");
 
@@ -494,6 +638,7 @@ public class ShadowPendingIntent {
         shadowPendingIntent.savedContext = context;
         shadowPendingIntent.requestCode = requestCode;
         shadowPendingIntent.flags = flags;
+        shadowPendingIntent.options = options;
 
         createdIntents.add(pendingIntent);
       }
@@ -502,8 +647,8 @@ public class ShadowPendingIntent {
     }
   }
 
-  private static PendingIntent getCreatedIntentFor(Type type, Intent[] intents, int requestCode,
-      int flags) {
+  private static PendingIntent getCreatedIntentFor(
+      Type type, Intent[] intents, int requestCode, int flags) {
     synchronized (lock) {
       for (PendingIntent createdIntent : createdIntents) {
         ShadowPendingIntent shadowPendingIntent = Shadow.extract(createdIntent);
@@ -549,6 +694,7 @@ public class ShadowPendingIntent {
   public static void reset() {
     synchronized (lock) {
       createdIntents.clear();
+      parceledPendingIntents.clear();
     }
   }
 

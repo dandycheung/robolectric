@@ -7,6 +7,7 @@ import android.telecom.Call;
 import android.telecom.CallScreeningService;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import java.util.Optional;
+import javax.annotation.Nonnull;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -30,7 +31,7 @@ public class ShadowCallScreeningServiceTest {
   public void getLastRespondToCallInput_whenRespondToCallNotCalled_shouldReturnEmptyOptional() {
     Optional<ShadowCallScreeningService.RespondToCallInput> lastRespondToCallInputOptional =
         shadowCallScreeningService.getLastRespondToCallInput();
-    assertThat(lastRespondToCallInputOptional.isPresent()).isFalse();
+    assertThat(lastRespondToCallInputOptional).isEmpty();
   }
 
   @Test
@@ -41,10 +42,8 @@ public class ShadowCallScreeningServiceTest {
 
     Optional<ShadowCallScreeningService.RespondToCallInput> lastRespondToCallInputOptional =
         shadowCallScreeningService.getLastRespondToCallInput();
-    assertThat(lastRespondToCallInputOptional.isPresent()).isTrue();
-    ShadowCallScreeningService.RespondToCallInput respondToCallInput =
-        shadowCallScreeningService.getLastRespondToCallInput().get();
-    assertThat(respondToCallInput.getCallDetails()).isNull();
+    assertThat(lastRespondToCallInputOptional).isPresent();
+    assertThat(lastRespondToCallInputOptional.get().getCallDetails()).isNull();
   }
 
   @Test
@@ -52,15 +51,15 @@ public class ShadowCallScreeningServiceTest {
     Call.Details testCallDetails = null;
     callScreeningService.onScreenCall(testCallDetails);
 
-    assertThat(shadowCallScreeningService.getLastRespondToCallInput().isPresent()).isTrue();
-    ShadowCallScreeningService.RespondToCallInput respondToCallInput =
-        shadowCallScreeningService.getLastRespondToCallInput().get();
-    assertThat(respondToCallInput.getCallResponse().getRejectCall()).isTrue();
+    Optional<ShadowCallScreeningService.RespondToCallInput> lastRespondToCallInputOptional =
+        shadowCallScreeningService.getLastRespondToCallInput();
+    assertThat(lastRespondToCallInputOptional).isPresent();
+    assertThat(lastRespondToCallInputOptional.get().getCallResponse().getRejectCall()).isTrue();
   }
 
   private static class TestCallScreeningService extends CallScreeningService {
     @Override
-    public void onScreenCall(Call.Details details) {
+    public void onScreenCall(@Nonnull Call.Details details) {
       CallResponse callResponse =
           new CallResponse.Builder()
               .setDisallowCall(true)

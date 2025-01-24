@@ -1,6 +1,5 @@
 package org.robolectric.shadows;
 
-import static android.os.Build.VERSION_CODES.JELLY_BEAN_MR1;
 import static android.os.Build.VERSION_CODES.LOLLIPOP_MR1;
 import static android.os.Build.VERSION_CODES.M;
 import static android.os.Build.VERSION_CODES.N;
@@ -8,11 +7,11 @@ import static android.os.Build.VERSION_CODES.P;
 import static android.os.Build.VERSION_CODES.Q;
 import static android.os.Build.VERSION_CODES.R;
 import static android.os.Build.VERSION_CODES.S;
+import static android.os.Build.VERSION_CODES.TIRAMISU;
 import static org.robolectric.util.reflector.Reflector.reflector;
 
 import android.os.Bundle;
 import android.os.IBinder;
-import android.os.Looper;
 import android.os.ResultReceiver;
 import android.util.SparseArray;
 import android.view.View;
@@ -24,16 +23,20 @@ import com.google.common.base.Optional;
 import com.google.common.collect.ImmutableList;
 import java.util.List;
 import org.robolectric.RuntimeEnvironment;
+import org.robolectric.annotation.ClassName;
 import org.robolectric.annotation.Implementation;
 import org.robolectric.annotation.Implements;
+import org.robolectric.annotation.InDevelopment;
 import org.robolectric.annotation.Resetter;
-import org.robolectric.util.ReflectionHelpers;
-import org.robolectric.util.ReflectionHelpers.ClassParameter;
 import org.robolectric.util.reflector.Accessor;
 import org.robolectric.util.reflector.Direct;
 import org.robolectric.util.reflector.ForType;
 import org.robolectric.util.reflector.Static;
+import org.robolectric.versioning.AndroidVersions.Baklava;
+import org.robolectric.versioning.AndroidVersions.U;
+import org.robolectric.versioning.AndroidVersions.V;
 
+/** Shadow for InputMethodManager. */
 @Implements(value = InputMethodManager.class)
 public class ShadowInputMethodManager {
 
@@ -56,12 +59,13 @@ public class ShadowInputMethodManager {
     void onPrivateCommand(View view, String action, Bundle data);
   }
 
-  private boolean softInputVisible;
-  private Optional<SoftInputVisibilityChangeHandler> visibilityChangeHandler = Optional.absent();
-  private Optional<PrivateCommandListener> privateCommandListener = Optional.absent();
-  private List<InputMethodInfo> inputMethodInfoList = ImmutableList.of();
-  private List<InputMethodInfo> enabledInputMethodInfoList = ImmutableList.of();
-  private Optional<InputMethodSubtype> inputMethodSubtype = Optional.absent();
+  private static boolean softInputVisible;
+  private static Optional<SoftInputVisibilityChangeHandler> visibilityChangeHandler =
+      Optional.absent();
+  private static Optional<PrivateCommandListener> privateCommandListener = Optional.absent();
+  private static List<InputMethodInfo> inputMethodInfoList = ImmutableList.of();
+  private static List<InputMethodInfo> enabledInputMethodInfoList = ImmutableList.of();
+  private static Optional<InputMethodSubtype> inputMethodSubtype = Optional.absent();
 
   @Implementation
   protected boolean showSoftInput(View view, int flags) {
@@ -74,15 +78,36 @@ public class ShadowInputMethodManager {
     return true;
   }
 
-  @Implementation(minSdk = S)
+  @Implementation(minSdk = S, maxSdk = TIRAMISU)
   protected boolean showSoftInput(
       View view, int flags, ResultReceiver resultReceiver, int ignoredReason) {
     return showSoftInput(view, flags, resultReceiver);
   }
 
-  @Implementation(minSdk = S)
+  @Implementation(minSdk = U.SDK_INT)
+  protected boolean showSoftInput(
+      View view,
+      @ClassName("android.view.inputmethod.ImeTracker$Token") Object statsToken,
+      int flags,
+      ResultReceiver resultReceiver,
+      int reason) {
+    return showSoftInput(view, flags, resultReceiver, reason);
+  }
+
+  @Implementation(minSdk = S, maxSdk = V.SDK_INT)
   protected boolean hideSoftInputFromWindow(
       IBinder windowToken, int flags, ResultReceiver resultReceiver, int ignoredReason) {
+    return hideSoftInputFromWindow(windowToken, flags, resultReceiver);
+  }
+
+  @Implementation(minSdk = Baklava.SDK_INT)
+  @InDevelopment
+  protected boolean hideSoftInputFromWindow(
+      IBinder windowToken,
+      int flags,
+      ResultReceiver resultReceiver,
+      int ignoredReason,
+      @ClassName("android.view.inputmethod.ImeTracker$Token") Object statsToken) {
     return hideSoftInputFromWindow(windowToken, flags, resultReceiver);
   }
 
@@ -229,12 +254,7 @@ public class ShadowInputMethodManager {
     // Android has a bug pre M where peekInstance was dereferenced without a null check:-
     // https://github.com/aosp-mirror/platform_frameworks_base/commit/a046faaf38ad818e6b5e981a39fd7394cf7cee03
     // So for earlier versions, just call through directly to getInstance()
-    if (RuntimeEnvironment.getApiLevel() <= JELLY_BEAN_MR1) {
-      return ReflectionHelpers.callStaticMethod(
-          InputMethodManager.class,
-          "getInstance",
-          ClassParameter.from(Looper.class, Looper.getMainLooper()));
-    } else if (RuntimeEnvironment.getApiLevel() <= LOLLIPOP_MR1) {
+    if (RuntimeEnvironment.getApiLevel() <= LOLLIPOP_MR1) {
       return InputMethodManager.getInstance();
     }
     return reflector(_InputMethodManager_.class).peekInstance();
@@ -265,13 +285,16 @@ public class ShadowInputMethodManager {
   public static void reset() {
     int apiLevel = RuntimeEnvironment.getApiLevel();
     _InputMethodManager_ _reflector = reflector(_InputMethodManager_.class);
-    if (apiLevel <= JELLY_BEAN_MR1) {
-      _reflector.setMInstance(null);
-    } else if (apiLevel <= P) {
-      _reflector.setInstance(null);
-    } else {
+    _reflector.setInstance(null);
+    if (apiLevel > P) {
       _reflector.getInstanceMap().clear();
     }
+    softInputVisible = false;
+    visibilityChangeHandler = Optional.absent();
+    privateCommandListener = Optional.absent();
+    inputMethodInfoList = ImmutableList.of();
+    enabledInputMethodInfoList = ImmutableList.of();
+    inputMethodSubtype = Optional.absent();
   }
 
   @ForType(InputMethodManager.class)

@@ -1,15 +1,18 @@
 package org.robolectric.shadows;
 
-import static android.os.Build.VERSION_CODES.LOLLIPOP;
 import static android.os.Build.VERSION_CODES.N;
 import static android.os.Build.VERSION_CODES.O;
+import static android.os.Build.VERSION_CODES.S;
 
 import android.annotation.SystemApi;
+import android.annotation.TargetApi;
 import android.app.JobSchedulerImpl;
 import android.app.job.JobInfo;
 import android.app.job.JobScheduler;
 import android.app.job.JobWorkItem;
+import android.os.Build;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -19,7 +22,7 @@ import org.robolectric.annotation.HiddenApi;
 import org.robolectric.annotation.Implementation;
 import org.robolectric.annotation.Implements;
 
-@Implements(value = JobScheduler.class, minSdk = LOLLIPOP)
+@Implements(value = JobScheduler.class)
 public abstract class ShadowJobScheduler {
 
   @Implementation
@@ -48,15 +51,25 @@ public abstract class ShadowJobScheduler {
 
   public abstract void failOnJob(int jobId);
 
-  @Implements(value = JobSchedulerImpl.class, isInAndroidSdk = false, minSdk = LOLLIPOP)
+  /** Whether to fail a job if it is set as expedited. */
+  public abstract void failExpeditedJob(boolean enabled);
+
+  @Implements(value = JobSchedulerImpl.class, isInAndroidSdk = false)
   public static class ShadowJobSchedulerImpl extends ShadowJobScheduler {
 
-    private Map<Integer, JobInfo> scheduledJobs = new LinkedHashMap<>();
-    private Set<Integer> jobsToFail = new HashSet<>();
+    private final Map<Integer, JobInfo> scheduledJobs =
+        Collections.synchronizedMap(new LinkedHashMap<>());
+    private final Set<Integer> jobsToFail = Collections.synchronizedSet(new HashSet<>());
+    private boolean failExpeditedJobEnabled;
 
-    @Override @Implementation
+    @Override
+    @Implementation
     public int schedule(JobInfo job) {
       if (jobsToFail.contains(job.getId())) {
+        return JobScheduler.RESULT_FAILURE;
+      }
+
+      if (Build.VERSION.SDK_INT >= S && failExpeditedJobEnabled && job.isExpedited()) {
         return JobScheduler.RESULT_FAILURE;
       }
 
@@ -76,22 +89,26 @@ public abstract class ShadowJobScheduler {
       return schedule(job);
     }
 
-    @Override @Implementation
+    @Override
+    @Implementation
     public void cancel(int jobId) {
       scheduledJobs.remove(jobId);
     }
 
-    @Override @Implementation
+    @Override
+    @Implementation
     public void cancelAll() {
       scheduledJobs.clear();
     }
 
-    @Override @Implementation
+    @Override
+    @Implementation
     public List<JobInfo> getAllPendingJobs() {
       return new ArrayList<>(scheduledJobs.values());
     }
 
-    @Override @Implementation(minSdk = N)
+    @Override
+    @Implementation(minSdk = N)
     public JobInfo getPendingJob(int jobId) {
       return scheduledJobs.get(jobId);
     }
@@ -106,6 +123,12 @@ public abstract class ShadowJobScheduler {
     @Override
     public void failOnJob(int jobId) {
       jobsToFail.add(jobId);
+    }
+
+    @Override
+    @TargetApi(S)
+    public void failExpeditedJob(boolean enabled) {
+      failExpeditedJobEnabled = enabled;
     }
   }
 }

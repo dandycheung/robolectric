@@ -5,13 +5,13 @@ import android.os.Looper;
 import android.os.SystemClock;
 import android.view.Choreographer;
 import android.view.Choreographer.FrameCallback;
+import java.time.Duration;
 import org.robolectric.annotation.Implementation;
 import org.robolectric.annotation.Implements;
 import org.robolectric.annotation.LooperMode;
 import org.robolectric.annotation.Resetter;
 import org.robolectric.shadow.api.Shadow;
 import org.robolectric.util.SoftThreadLocal;
-import org.robolectric.util.TimeUtils;
 
 /**
  * The {@link Choreographer} shadow for {@link LooperMode.Mode.PAUSED}.
@@ -27,13 +27,14 @@ import org.robolectric.util.TimeUtils;
     isInAndroidSdk = false)
 public class ShadowLegacyChoreographer extends ShadowChoreographer {
   private long nanoTime = 0;
-  private static long FRAME_INTERVAL = 10 * TimeUtils.NANOS_PER_MS; // 10ms
+  private static long FRAME_INTERVAL = Duration.ofMillis(10).toNanos();
   private static final Thread MAIN_THREAD = Thread.currentThread();
   private static SoftThreadLocal<Choreographer> instance = makeThreadLocal();
-  private Handler handler = new Handler(Looper.myLooper());
+  private final Handler handler = new Handler(Looper.myLooper());
   private static volatile int postCallbackDelayMillis = 0;
   private static volatile int postFrameCallbackDelayMillis = 0;
 
+  @SuppressWarnings("ReturnValueIgnored")
   private static SoftThreadLocal<Choreographer> makeThreadLocal() {
     return new SoftThreadLocal<Choreographer>() {
       @Override
@@ -132,12 +133,7 @@ public class ShadowLegacyChoreographer extends ShadowChoreographer {
   @Implementation
   protected void postFrameCallbackDelayed(final FrameCallback callback, long delayMillis) {
     handler.postAtTime(
-        new Runnable() {
-          @Override
-          public void run() {
-            callback.doFrame(getFrameTimeNanos());
-          }
-        },
+        () -> callback.doFrame(getFrameTimeNanos()),
         callback,
         SystemClock.uptimeMillis() + delayMillis);
   }
@@ -180,6 +176,8 @@ public class ShadowLegacyChoreographer extends ShadowChoreographer {
       throw new RuntimeException("You should only call this from the main thread!");
     }
     instance = makeThreadLocal();
-    FRAME_INTERVAL = 10 * TimeUtils.NANOS_PER_MS; // 10ms
+    FRAME_INTERVAL = Duration.ofMillis(10).toNanos();
+    postCallbackDelayMillis = 0;
+    postFrameCallbackDelayMillis = 0;
   }
 }

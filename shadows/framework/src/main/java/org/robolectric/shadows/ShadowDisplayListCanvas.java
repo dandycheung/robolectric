@@ -7,7 +7,6 @@ import static android.os.Build.VERSION_CODES.O;
 import static android.os.Build.VERSION_CODES.P;
 import static android.os.Build.VERSION_CODES.R;
 
-import org.robolectric.annotation.Config;
 import org.robolectric.annotation.Implementation;
 import org.robolectric.annotation.Implements;
 
@@ -17,19 +16,19 @@ import org.robolectric.annotation.Implements;
     isInAndroidSdk = false,
     minSdk = M,
     maxSdk = R)
-public class ShadowDisplayListCanvas extends ShadowCanvas {
+public class ShadowDisplayListCanvas extends ShadowLegacyCanvas {
 
   @Implementation(minSdk = O, maxSdk = P)
   protected static long nCreateDisplayListCanvas(long node, int width, int height) {
     return 1;
   }
 
-  @Config(minSdk = N, maxSdk = N_MR1)
+  @Implementation(minSdk = N, maxSdk = N_MR1)
   protected static long nCreateDisplayListCanvas(int width, int height) {
     return 1;
   }
 
-  @Config(maxSdk = M)
+  @Implementation(maxSdk = M)
   protected static long nCreateDisplayListCanvas() {
     return 1;
   }

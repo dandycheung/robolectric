@@ -1,7 +1,6 @@
 package org.robolectric.shadows;
 
-import static android.os.Build.VERSION_CODES.JELLY_BEAN;
-import static android.os.Build.VERSION_CODES.JELLY_BEAN_MR1;
+import static android.os.Build.VERSION_CODES.O;
 import static android.os.Build.VERSION_CODES.P;
 import static android.os.Build.VERSION_CODES.Q;
 import static com.google.common.truth.Truth.assertThat;
@@ -9,12 +8,14 @@ import static org.junit.Assert.fail;
 import static org.robolectric.Shadows.shadowOf;
 import static org.robolectric.shadows.ShadowDisplayManagerTest.HideFromJB.getGlobal;
 
+import android.app.Activity;
 import android.content.Context;
 import android.graphics.Point;
 import android.hardware.display.BrightnessChangeEvent;
 import android.hardware.display.BrightnessConfiguration;
 import android.hardware.display.DisplayManager;
 import android.hardware.display.DisplayManagerGlobal;
+import android.os.Build;
 import android.view.Display;
 import android.view.DisplayInfo;
 import android.view.Surface;
@@ -22,12 +23,17 @@ import androidx.test.core.app.ApplicationProvider;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
+import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.robolectric.Robolectric;
+import org.robolectric.android.controller.ActivityController;
 import org.robolectric.annotation.Config;
 import org.robolectric.shadow.api.Shadow;
 
+/** Tests for {@link ShadowDisplayManager}. */
 @RunWith(AndroidJUnit4.class)
 public class ShadowDisplayManagerTest {
 
@@ -40,19 +46,8 @@ public class ShadowDisplayManagerTest {
             ApplicationProvider.getApplicationContext().getSystemService(Context.DISPLAY_SERVICE);
   }
 
-  @Test @Config(maxSdk = JELLY_BEAN)
-  public void notSupportedInJellyBean() throws Exception {
-    try {
-      ShadowDisplayManager.removeDisplay(0);
-      fail("Expected Exception thrown");
-    } catch (UnsupportedOperationException e) {
-      assertThat(e).hasMessageThat().contains("displays not supported in Jelly Bean");
-    }
-  }
-
   @Test
-  @Config(minSdk = JELLY_BEAN_MR1)
-  public void getDisplayInfo_shouldReturnCopy() throws Exception {
+  public void getDisplayInfo_shouldReturnCopy() {
     DisplayInfo displayInfo = getGlobal().getDisplayInfo(Display.DEFAULT_DISPLAY);
     int origAppWidth = displayInfo.appWidth;
     displayInfo.appWidth++;
@@ -61,14 +56,12 @@ public class ShadowDisplayManagerTest {
   }
 
   @Test
-  @Config(minSdk = JELLY_BEAN_MR1)
-  public void forNonexistentDisplay_getDisplayInfo_shouldReturnNull() throws Exception {
+  public void forNonexistentDisplay_getDisplayInfo_shouldReturnNull() {
     assertThat(getGlobal().getDisplayInfo(3)).isEqualTo(null);
   }
 
   @Test
-  @Config(minSdk = JELLY_BEAN_MR1)
-  public void forNonexistentDisplay_changeDisplay_shouldThrow() throws Exception {
+  public void forNonexistentDisplay_changeDisplay_shouldThrow() {
     try {
       ShadowDisplayManager.changeDisplay(3, "");
       fail("Expected Exception thrown");
@@ -78,8 +71,7 @@ public class ShadowDisplayManagerTest {
   }
 
   @Test
-  @Config(minSdk = JELLY_BEAN_MR1)
-  public void forNonexistentDisplay_removeDisplay_shouldThrow() throws Exception {
+  public void forNonexistentDisplay_removeDisplay_shouldThrow() {
     try {
       ShadowDisplayManager.removeDisplay(3);
       fail("Expected Exception thrown");
@@ -88,8 +80,8 @@ public class ShadowDisplayManagerTest {
     }
   }
 
-  @Test @Config(minSdk = JELLY_BEAN_MR1)
-  public void addDisplay() throws Exception {
+  @Test
+  public void addDisplay() {
     int displayId = ShadowDisplayManager.addDisplay("w100dp-h200dp");
     assertThat(displayId).isGreaterThan(0);
 
@@ -99,18 +91,40 @@ public class ShadowDisplayManagerTest {
 
     Display display = instance.getDisplay(displayId);
     assertThat(display.getDisplayId()).isEqualTo(displayId);
+    assertThat(display.getName()).isEqualTo("Built-in screen");
   }
 
-  @Test @Config(minSdk = JELLY_BEAN_MR1)
-  public void addDisplay_shouldNotifyListeners() throws Exception {
+  @Test
+  public void addDisplay_withGivenType_shouldReflectInAddedDisplay() {
+    int displayId = ShadowDisplayManager.addDisplay("w100dp-h200dp", Display.TYPE_EXTERNAL);
+
+    assertThat(instance.getDisplay(displayId).getType()).isEqualTo(Display.TYPE_EXTERNAL);
+  }
+
+  @Test
+  public void addDisplay_withName_shouldReflectInAddedDisplay() {
+    int displayId = ShadowDisplayManager.addDisplay("w100dp-h200dp", "VirtualDevice_1");
+    assertThat(displayId).isGreaterThan(0);
+
+    DisplayInfo di = getGlobal().getDisplayInfo(displayId);
+    assertThat(di.appWidth).isEqualTo(100);
+    assertThat(di.appHeight).isEqualTo(200);
+
+    Display display = instance.getDisplay(displayId);
+    assertThat(display.getDisplayId()).isEqualTo(displayId);
+    assertThat(display.getName()).isEqualTo("VirtualDevice_1");
+  }
+
+  @Test
+  public void addDisplay_shouldNotifyListeners() {
     List<String> events = new ArrayList<>();
     instance.registerDisplayListener(new MyDisplayListener(events), null);
     int displayId = ShadowDisplayManager.addDisplay("w100dp-h200dp");
     assertThat(events).containsExactly("Added " + displayId);
   }
 
-  @Test @Config(minSdk = JELLY_BEAN_MR1)
-  public void changeDisplay_shouldUpdateSmallestAndLargestNominalWidthAndHeight() throws Exception {
+  @Test
+  public void changeDisplay_shouldUpdateSmallestAndLargestNominalWidthAndHeight() {
     Point smallest = new Point();
     Point largest = new Point();
 
@@ -128,8 +142,8 @@ public class ShadowDisplayManagerTest {
     assertThat(largest).isEqualTo(new Point(460, 460));
   }
 
-  @Test @Config(minSdk = JELLY_BEAN_MR1)
-  public void withQualifiers_changeDisplay_shouldUpdateSmallestAndLargestNominalWidthAndHeight() throws Exception {
+  @Test
+  public void withQualifiers_changeDisplay_shouldUpdateSmallestAndLargestNominalWidthAndHeight() {
     Point smallest = new Point();
     Point largest = new Point();
 
@@ -145,8 +159,8 @@ public class ShadowDisplayManagerTest {
     assertThat(largest).isEqualTo(new Point(460, 460));
   }
 
-  @Test @Config(minSdk = JELLY_BEAN_MR1)
-  public void changeAndRemoveDisplay_shouldNotifyListeners() throws Exception {
+  @Test
+  public void changeAndRemoveDisplay_shouldNotifyListeners() {
     List<String> events = new ArrayList<>();
     instance.registerDisplayListener(new MyDisplayListener(events), null);
     int displayId = ShadowDisplayManager.addDisplay("w100dp-h200dp");
@@ -160,14 +174,12 @@ public class ShadowDisplayManagerTest {
 
     ShadowDisplayManager.removeDisplay(displayId);
 
-    assertThat(events).containsExactly(
-        "Added " + displayId,
-        "Changed " + displayId,
-        "Removed " + displayId);
+    assertThat(events)
+        .containsExactly("Added " + displayId, "Changed " + displayId, "Removed " + displayId);
   }
 
-  @Test @Config(minSdk = JELLY_BEAN_MR1)
-  public void changeDisplay_shouldAllowPartialChanges() throws Exception {
+  @Test
+  public void changeDisplay_shouldAllowPartialChanges() {
     List<String> events = new ArrayList<>();
     instance.registerDisplayListener(new MyDisplayListener(events), null);
     int displayId = ShadowDisplayManager.addDisplay("w100dp-h200dp");
@@ -179,9 +191,77 @@ public class ShadowDisplayManagerTest {
     assertThat(display.getHeight()).isEqualTo(100);
     assertThat(display.getOrientation()).isEqualTo(Surface.ROTATION_90);
 
-    assertThat(events).containsExactly(
-        "Added " + displayId,
-        "Changed " + displayId);
+    assertThat(events).containsExactly("Added " + displayId, "Changed " + displayId);
+  }
+
+  @Test
+  @Config(minSdk = Build.VERSION_CODES.M)
+  public void modeBuilder_setsModeParameters() {
+    int modeId = 5;
+    int width = 500;
+    int height = 1000;
+    float refreshRate = 60.f;
+    Display.Mode mode =
+        ShadowDisplayManager.ModeBuilder.modeBuilder(modeId)
+            .setWidth(width)
+            .setHeight(height)
+            .setRefreshRate(refreshRate)
+            .build();
+    assertThat(mode.getPhysicalWidth()).isEqualTo(width);
+    assertThat(mode.getPhysicalHeight()).isEqualTo(height);
+    assertThat(mode.getModeId()).isEqualTo(modeId);
+    assertThat(mode.getRefreshRate()).isEqualTo(refreshRate);
+  }
+
+  @Test
+  @Config(minSdk = Build.VERSION_CODES.M)
+  public void setSupportedModes_addsOneDisplayMode() {
+    List<String> events = new ArrayList<>();
+    instance.registerDisplayListener(new MyDisplayListener(events), /* handler= */ null);
+    int displayId = ShadowDisplayManager.addDisplay(/* qualifiersStr= */ "w100dp-h200dp");
+
+    Display.Mode mode =
+        ShadowDisplayManager.ModeBuilder.modeBuilder(0)
+            .setWidth(500)
+            .setHeight(500)
+            .setRefreshRate(60)
+            .build();
+    ShadowDisplayManager.setSupportedModes(displayId, mode);
+
+    Display.Mode[] modes = getGlobal().getRealDisplay(displayId).getSupportedModes();
+    assertThat(modes).hasLength(1);
+    assertThat(modes).asList().containsExactly(mode);
+
+    assertThat(events).containsExactly("Added " + displayId, "Changed " + displayId);
+  }
+
+  @Test
+  @Config(minSdk = Build.VERSION_CODES.M)
+  public void setSupportedModes_addsMultipleDisplayModes() {
+    List<String> events = new ArrayList<>();
+    instance.registerDisplayListener(new MyDisplayListener(events), /* handler= */ null);
+    int displayId = ShadowDisplayManager.addDisplay(/* qualifiersStr= */ "w100dp-h200dp");
+
+    Display.Mode[] modesToSet =
+        new Display.Mode[] {
+          ShadowDisplayManager.ModeBuilder.modeBuilder(0)
+              .setWidth(500)
+              .setHeight(500)
+              .setRefreshRate(60)
+              .build(),
+          ShadowDisplayManager.ModeBuilder.modeBuilder(0)
+              .setWidth(1000)
+              .setHeight(1500)
+              .setRefreshRate(120)
+              .build()
+        };
+    ShadowDisplayManager.setSupportedModes(displayId, modesToSet);
+
+    Display.Mode[] modes = getGlobal().getRealDisplay(displayId).getSupportedModes();
+    assertThat(modes).hasLength(modesToSet.length);
+    assertThat(modes).asList().containsExactlyElementsIn(modesToSet);
+
+    assertThat(events).containsExactly("Added " + displayId, "Changed " + displayId);
   }
 
   @Test
@@ -234,36 +314,44 @@ public class ShadowDisplayManagerTest {
     assertThat(shadowOf(instance).getSaturationLevel()).isEqualTo(1.0f);
   }
 
-  @Test @Config(minSdk = P)
+  @Test
+  @Config(minSdk = P)
   public void setSaturationLevel_setToValueGreaterThanOne_shouldThrow() {
     try {
       instance.setSaturationLevel(1.1f);
       fail("Expected IllegalArgumentException thrown");
-    } catch (IllegalArgumentException expected) {}
+    } catch (IllegalArgumentException expected) {
+    }
   }
 
-  @Test @Config(minSdk = P)
+  @Test
+  @Config(minSdk = P)
   public void setSaturationLevel_setToNegativeValue_shouldThrow() {
     try {
       instance.setSaturationLevel(-0.1f);
       fail("Expected IllegalArgumentException thrown");
-    } catch (IllegalArgumentException expected) {}
+    } catch (IllegalArgumentException expected) {
+    }
   }
 
-  @Test @Config(minSdk = P)
+  @Test
+  @Config(minSdk = P)
   public void setSaturationLevel_setToValueGreaterThanOneViaShadow_shouldThrow() {
     try {
       shadowOf(instance).setSaturationLevel(1.1f);
       fail("Expected IllegalArgumentException thrown");
-    } catch (IllegalArgumentException expected) {}
+    } catch (IllegalArgumentException expected) {
+    }
   }
 
-  @Test @Config(minSdk = P)
-  public void setSaturationLevel_setToNegativevalueViaShadow_shouldThrow() {
+  @Test
+  @Config(minSdk = P)
+  public void setSaturationLevel_setToNegativeValueViaShadow_shouldThrow() {
     try {
       shadowOf(instance).setSaturationLevel(-0.1f);
       fail("Expected IllegalArgumentException thrown");
-    } catch (IllegalArgumentException expected) {}
+    } catch (IllegalArgumentException expected) {
+    }
   }
 
   @Test
@@ -372,16 +460,100 @@ public class ShadowDisplayManagerTest {
     assertThat(instance.getBrightnessEvents()).containsExactlyElementsIn(events);
   }
 
-  // because DisplayInfo and DisplayManagerGlobal don't exist in Jelly Bean,
-  // and we don't want them resolved as part of the test class.
-  static class HideFromJB {
-    static DisplayInfo createDisplayInfo(int width, int height) {
-      DisplayInfo displayInfo = new DisplayInfo();
-      displayInfo.appWidth = width;
-      displayInfo.appHeight = height;
-      return displayInfo;
-    }
+  @Test
+  public void setNaturallyPortrait_setPortrait_isRotatedWhenLandscape() {
+    ShadowDisplayManager.setNaturallyPortrait(Display.DEFAULT_DISPLAY, true);
 
+    ShadowDisplayManager.changeDisplay(Display.DEFAULT_DISPLAY, "land");
+
+    assertThat(ShadowDisplay.getDefaultDisplay().getRotation()).isEqualTo(Surface.ROTATION_90);
+  }
+
+  @Test
+  public void setNaturallyPortrait_setPortraitWhenLandscape_isRotated() {
+    ShadowDisplayManager.changeDisplay(Display.DEFAULT_DISPLAY, "land");
+
+    ShadowDisplayManager.setNaturallyPortrait(Display.DEFAULT_DISPLAY, true);
+
+    assertThat(ShadowDisplay.getDefaultDisplay().getRotation()).isEqualTo(Surface.ROTATION_90);
+  }
+
+  @Test
+  public void setNaturallyPortrait_setLandscape_isNotRotatedWhenLandscape() {
+    ShadowDisplayManager.setNaturallyPortrait(Display.DEFAULT_DISPLAY, false);
+
+    ShadowDisplayManager.changeDisplay(Display.DEFAULT_DISPLAY, "land");
+
+    assertThat(ShadowDisplay.getDefaultDisplay().getRotation()).isEqualTo(Surface.ROTATION_0);
+  }
+
+  @Test
+  public void setNaturallyPortrait_setLandscape_isRotatedWhenPortrait() {
+    ShadowDisplayManager.setNaturallyPortrait(Display.DEFAULT_DISPLAY, false);
+
+    ShadowDisplayManager.changeDisplay(Display.DEFAULT_DISPLAY, "port");
+
+    assertThat(ShadowDisplay.getDefaultDisplay().getRotation()).isEqualTo(Surface.ROTATION_90);
+  }
+
+  @Test
+  public void setNaturallyPortrait_setLandscapeWhenLandscape_isNotRotated() {
+    ShadowDisplayManager.changeDisplay(Display.DEFAULT_DISPLAY, "land");
+
+    ShadowDisplayManager.setNaturallyPortrait(Display.DEFAULT_DISPLAY, false);
+
+    assertThat(ShadowDisplay.getDefaultDisplay().getRotation()).isEqualTo(Surface.ROTATION_0);
+  }
+
+  @Test
+  public void configureDefaultDisplay_calledTwice_showsReasonableException() {
+    IllegalStateException e =
+        Assert.assertThrows(
+            IllegalStateException.class,
+            () -> ShadowDisplayManager.configureDefaultDisplay(null, null));
+
+    assertThat(e).hasMessageThat().contains("configureDefaultDisplay should only be called once");
+    assertThat(e)
+        .hasCauseThat()
+        .hasMessageThat()
+        .contains("configureDefaultDisplay was called a second time");
+  }
+
+  @Test
+  @Config(minSdk = O)
+  public void displayManager_activityContextEnabled_differentInstancesRetrieveDisplays() {
+    String originalProperty = System.getProperty("robolectric.createActivityContexts", "");
+    System.setProperty("robolectric.createActivityContexts", "true");
+    try (ActivityController<Activity> controller =
+        Robolectric.buildActivity(Activity.class).setup()) {
+      DisplayManager applicationDisplayManager =
+          ApplicationProvider.getApplicationContext().getSystemService(DisplayManager.class);
+      Activity activity = controller.get();
+      DisplayManager activityDisplayManager = activity.getSystemService(DisplayManager.class);
+
+      assertThat(applicationDisplayManager).isNotSameInstanceAs(activityDisplayManager);
+
+      Display[] applicationDisplays =
+          Objects.requireNonNull(applicationDisplayManager).getDisplays();
+      Display[] activityDisplays = Objects.requireNonNull(activityDisplayManager).getDisplays();
+
+      assertThat(activityDisplays.length).isEqualTo(applicationDisplays.length);
+
+      for (int i = 0; i < applicationDisplays.length; i++) {
+        Display appDisplay = applicationDisplays[i];
+        Display actDisplay = activityDisplays[i];
+
+        assertThat(actDisplay.getDisplayId()).isEqualTo(appDisplay.getDisplayId());
+        assertThat(actDisplay.getWidth()).isEqualTo(appDisplay.getWidth());
+        assertThat(actDisplay.getHeight()).isEqualTo(appDisplay.getHeight());
+      }
+    } finally {
+      System.setProperty("robolectric.createActivityContexts", originalProperty);
+    }
+  }
+
+  // because we don't want DisplayManagerGlobal resolved as part of the test class.
+  static class HideFromJB {
     public static DisplayManagerGlobal getGlobal() {
       return DisplayManagerGlobal.getInstance();
     }

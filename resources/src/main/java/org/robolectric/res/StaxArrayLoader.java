@@ -10,31 +10,38 @@ public class StaxArrayLoader extends StaxLoader {
   private List<TypedResource> items;
   private final StringBuilder buf = new StringBuilder();
 
-  public StaxArrayLoader(PackageResourceTable resourceTable, String attrType, ResType arrayResType, final ResType scalarResType) {
+  public StaxArrayLoader(
+      PackageResourceTable resourceTable,
+      String attrType,
+      ResType arrayResType,
+      final ResType scalarResType) {
     super(resourceTable, attrType, arrayResType);
 
-    addHandler("item", new NodeHandler() {
-      @Override
-      public void onStart(XMLStreamReader xml, XmlContext xmlContext) throws XMLStreamException {
-        buf.setLength(0);
-      }
+    addHandler(
+        "item",
+        new NodeHandler() {
+          @Override
+          public void onStart(XMLStreamReader xml, XmlContext xmlContext) {
+            buf.setLength(0);
+          }
 
-      @Override
-      public void onCharacters(XMLStreamReader xml, XmlContext xmlContext) throws XMLStreamException {
-        buf.append(xml.getText());
-      }
+          @Override
+          public void onCharacters(XMLStreamReader xml, XmlContext xmlContext) {
+            buf.append(xml.getText());
+          }
 
-      @Override
-      public void onEnd(XMLStreamReader xml, XmlContext xmlContext) throws XMLStreamException {
-        ResType resType = scalarResType == null ? ResType.inferType(buf.toString()) : scalarResType;
-        items.add(new TypedResource<>(buf.toString(), resType, xmlContext));
-      }
+          @Override
+          public void onEnd(XMLStreamReader xml, XmlContext xmlContext) {
+            ResType resType =
+                scalarResType == null ? ResType.inferType(buf.toString()) : scalarResType;
+            items.add(new TypedResource<>(buf.toString(), resType, xmlContext));
+          }
 
-      @Override
-      NodeHandler findMatchFor(XMLStreamReader xml) {
-        return new TextCollectingNodeHandler(buf);
-      }
-    });
+          @Override
+          NodeHandler findMatchFor(XMLStreamReader xml) {
+            return new TextCollectingNodeHandler(buf);
+          }
+        });
   }
 
   @Override
@@ -44,7 +51,7 @@ public class StaxArrayLoader extends StaxLoader {
   }
 
   @Override
-  public void onEnd(XMLStreamReader xml, XmlContext xmlContext) throws XMLStreamException {
+  public void onEnd(XMLStreamReader xml, XmlContext xmlContext) {
     resourceTable.addResource(attrType, name, new TypedResource<>(items, resType, xmlContext));
   }
 }

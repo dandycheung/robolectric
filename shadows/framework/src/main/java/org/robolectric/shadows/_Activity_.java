@@ -3,6 +3,7 @@ package org.robolectric.shadows;
 import android.app.Activity;
 import android.app.ActivityThread;
 import android.app.Application;
+import android.app.Dialog;
 import android.app.Instrumentation;
 import android.content.Context;
 import android.content.Intent;
@@ -26,23 +27,6 @@ public interface _Activity_ {
 
   @Accessor("mToken")
   IBinder getToken();
-
-  // <= KITKAT:
-  void attach(
-      Context context,
-      ActivityThread activityThread,
-      Instrumentation instrumentation,
-      IBinder token,
-      int ident,
-      Application application,
-      Intent intent,
-      ActivityInfo activityInfo,
-      CharSequence title,
-      Activity parent,
-      String id,
-      @WithType("android.app.Activity$NonConfigurationInstances")
-          Object lastNonConfigurationInstances,
-      Configuration configuration);
 
   // <= LOLLIPOP:
   void attach(
@@ -175,119 +159,13 @@ public interface _Activity_ {
       Application application,
       Intent intent,
       ActivityInfo activityInfo,
+      IBinder token,
       CharSequence activityTitle,
       @WithType("android.app.Activity$NonConfigurationInstances")
           Object lastNonConfigurationInstances) {
+    Configuration config = new Configuration(application.getResources().getConfiguration());
     int apiLevel = RuntimeEnvironment.getApiLevel();
-    if (apiLevel <= Build.VERSION_CODES.KITKAT) {
-      attach(
-          baseContext,
-          activityThread,
-          instrumentation,
-          null,
-          0,
-          application,
-          intent,
-          activityInfo,
-          activityTitle,
-          null,
-          "id",
-          lastNonConfigurationInstances,
-          application.getResources().getConfiguration());
-    } else if (apiLevel <= Build.VERSION_CODES.LOLLIPOP) {
-      attach(
-          baseContext,
-          activityThread,
-          instrumentation,
-          null,
-          0,
-          application,
-          intent,
-          activityInfo,
-          activityTitle,
-          null,
-          "id",
-          lastNonConfigurationInstances,
-          application.getResources().getConfiguration(),
-          null);
-    } else if (apiLevel <= Build.VERSION_CODES.M) {
-      attach(
-          baseContext,
-          activityThread,
-          instrumentation,
-          null,
-          0,
-          application,
-          intent,
-          activityInfo,
-          activityTitle,
-          null,
-          "id",
-          lastNonConfigurationInstances,
-          application.getResources().getConfiguration(),
-          "referrer",
-          null);
-    } else if (apiLevel <= Build.VERSION_CODES.N_MR1) {
-      attach(
-          baseContext,
-          activityThread,
-          instrumentation,
-          null,
-          0,
-          application,
-          intent,
-          activityInfo,
-          activityTitle,
-          null,
-          "id",
-          lastNonConfigurationInstances,
-          application.getResources().getConfiguration(),
-          "referrer",
-          null,
-          null);
-    } else if (apiLevel <= Build.VERSION_CODES.P) {
-      attach(
-          baseContext,
-          activityThread,
-          instrumentation,
-          null,
-          0,
-          application,
-          intent,
-          activityInfo,
-          activityTitle,
-          null,
-          "id",
-          lastNonConfigurationInstances,
-          application.getResources().getConfiguration(),
-          "referrer",
-          null,
-          null,
-          null);
-    } else if (apiLevel <= VERSION_CODES.R) {
-      attach(
-          baseContext,
-          activityThread,
-          instrumentation,
-          null,
-          0,
-          application,
-          intent,
-          activityInfo,
-          activityTitle,
-          null,
-          "id",
-          lastNonConfigurationInstances,
-          application.getResources().getConfiguration(),
-          "referrer",
-          null,
-          null,
-          null,
-          null);
-    } else if (apiLevel > Build.VERSION_CODES.R) {
-      ShadowActivityThread shadowActivityThread = Shadow.extract(activityThread);
-      IBinder token =
-          shadowActivityThread.registerActivityLaunch(intent, activityInfo, realActivity);
+    if (apiLevel == Build.VERSION_CODES.LOLLIPOP) {
       attach(
           baseContext,
           activityThread,
@@ -299,9 +177,99 @@ public interface _Activity_ {
           activityInfo,
           activityTitle,
           null,
-          "id",
+          null,
           lastNonConfigurationInstances,
-          application.getResources().getConfiguration(),
+          config,
+          null);
+    } else if (apiLevel <= Build.VERSION_CODES.M) {
+      attach(
+          baseContext,
+          activityThread,
+          instrumentation,
+          token,
+          0,
+          application,
+          intent,
+          activityInfo,
+          activityTitle,
+          null,
+          null,
+          lastNonConfigurationInstances,
+          config,
+          "referrer",
+          null);
+    } else if (apiLevel <= Build.VERSION_CODES.N_MR1) {
+      attach(
+          baseContext,
+          activityThread,
+          instrumentation,
+          token,
+          0,
+          application,
+          intent,
+          activityInfo,
+          activityTitle,
+          null,
+          null,
+          lastNonConfigurationInstances,
+          config,
+          "referrer",
+          null,
+          null);
+    } else if (apiLevel <= Build.VERSION_CODES.P) {
+      attach(
+          baseContext,
+          activityThread,
+          instrumentation,
+          token,
+          0,
+          application,
+          intent,
+          activityInfo,
+          activityTitle,
+          null,
+          null,
+          lastNonConfigurationInstances,
+          config,
+          "referrer",
+          null,
+          null,
+          null);
+    } else if (apiLevel <= VERSION_CODES.R) {
+      attach(
+          baseContext,
+          activityThread,
+          instrumentation,
+          token,
+          0,
+          application,
+          intent,
+          activityInfo,
+          activityTitle,
+          null,
+          null,
+          lastNonConfigurationInstances,
+          config,
+          "referrer",
+          null,
+          null,
+          null,
+          null);
+    } else if (apiLevel > Build.VERSION_CODES.R) {
+      attach(
+          baseContext,
+          activityThread,
+          instrumentation,
+          token,
+          0,
+          application,
+          intent,
+          activityInfo,
+          activityTitle,
+          null,
+          null,
+          lastNonConfigurationInstances,
+          config,
           "referrer",
           null,
           null,
@@ -309,6 +277,8 @@ public interface _Activity_ {
           null,
           null);
     }
+    Shadow.<ShadowActivityThread>extract(activityThread)
+        .registerActivityLaunch(intent, activityInfo, realActivity, token);
   }
 
   void performCreate(Bundle icicle);
@@ -321,11 +291,15 @@ public interface _Activity_ {
 
   void performRestart(boolean start, String reason);
 
+  void performRestart(boolean start);
+
   void performRestoreInstanceState(Bundle savedInstanceState);
 
   void performResume();
 
   void performResume(boolean followedByPause, String reason);
+
+  void performTopResumedActivityChanged(boolean isTopResumedActivity, String reason);
 
   void performSaveInstanceState(Bundle outState);
 
@@ -347,6 +321,19 @@ public interface _Activity_ {
 
   void onNewIntent(Intent intent);
 
+  void onActivityResult(int requestCode, int resultCode, Intent data);
+
+  void dispatchActivityResult(String who, int requestCode, int resultCode, Intent data);
+
+  void dispatchActivityResult(
+      String who, int requestCode, int resultCode, Intent data, String type);
+
+  Dialog onCreateDialog(int id);
+
+  void onPrepareDialog(int id, Dialog dialog, Bundle args);
+
+  void onPrepareDialog(int id, Dialog dialog);
+
   Object retainNonConfigurationInstances();
 
   @Accessor("mApplication")
@@ -354,6 +341,9 @@ public interface _Activity_ {
 
   @Accessor("mDecor")
   void setDecor(View decorView);
+
+  @Accessor("mFinished")
+  void setFinished(boolean finished);
 
   @Accessor("mLastNonConfigurationInstances")
   void setLastNonConfigurationInstances(Object nonConfigInstance);

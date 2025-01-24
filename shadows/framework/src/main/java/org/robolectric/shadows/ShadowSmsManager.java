@@ -1,7 +1,5 @@
 package org.robolectric.shadows;
 
-import static android.os.Build.VERSION_CODES.JELLY_BEAN_MR2;
-import static android.os.Build.VERSION_CODES.LOLLIPOP;
 import static android.os.Build.VERSION_CODES.LOLLIPOP_MR1;
 import static android.os.Build.VERSION_CODES.R;
 import static android.os.Build.VERSION_CODES.S;
@@ -12,17 +10,17 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.telephony.SmsManager;
 import android.text.TextUtils;
-import androidx.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import javax.annotation.Nullable;
 import org.robolectric.RuntimeEnvironment;
 import org.robolectric.annotation.Implementation;
 import org.robolectric.annotation.Implements;
 import org.robolectric.annotation.Resetter;
 import org.robolectric.util.ReflectionHelpers;
 
-@Implements(value = SmsManager.class, minSdk = JELLY_BEAN_MR2)
+@Implements(value = SmsManager.class)
 public class ShadowSmsManager {
 
   private String smscAddress;
@@ -121,7 +119,9 @@ public class ShadowSmsManager {
         new TextMultipartParams(destinationAddress, scAddress, parts, sentIntents, deliveryIntents);
   }
 
-  /** @return Parameters for last call to {@link #sendDataMessage}. */
+  /**
+   * @return Parameters for last call to {@link #sendDataMessage}.
+   */
   public DataMessageParams getLastSentDataMessageParams() {
     return lastDataParams;
   }
@@ -131,7 +131,9 @@ public class ShadowSmsManager {
     lastDataParams = null;
   }
 
-  /** @return Parameters for last call to {@link #sendTextMessage}. */
+  /**
+   * @return Parameters for last call to {@link #sendTextMessage}.
+   */
   public TextSmsParams getLastSentTextMessageParams() {
     return lastTextSmsParams;
   }
@@ -141,7 +143,9 @@ public class ShadowSmsManager {
     lastTextSmsParams = null;
   }
 
-  /** @return Parameters for last call to {@link #sendMultipartTextMessage}. */
+  /**
+   * @return Parameters for last call to {@link #sendMultipartTextMessage}.
+   */
   public TextMultipartParams getLastSentMultipartTextMessageParams() {
     return lastTextMultipartParams;
   }
@@ -318,7 +322,7 @@ public class ShadowSmsManager {
   protected SendMultimediaMessageParams lastSentMultimediaMessageParams;
   protected DownloadMultimediaMessageParams lastDownloadedMultimediaMessageParams;
 
-  @Implementation(minSdk = LOLLIPOP)
+  @Implementation
   protected void sendMultimediaMessage(
       Context context,
       Uri contentUri,
@@ -350,7 +354,7 @@ public class ShadowSmsManager {
             contentUri, locationUrl, configOverrides, sentIntent, messageId);
   }
 
-  @Implementation(minSdk = LOLLIPOP)
+  @Implementation
   protected void downloadMultimediaMessage(
       Context context,
       String locationUrl,
@@ -391,7 +395,9 @@ public class ShadowSmsManager {
             contentUri, locationUrl, configOverrides, sentIntent, messageId);
   }
 
-  /** @return Parameters for last call to {@link #sendMultimediaMessage}. */
+  /**
+   * @return Parameters for last call to {@link #sendMultimediaMessage}.
+   */
   public SendMultimediaMessageParams getLastSentMultimediaMessageParams() {
     return lastSentMultimediaMessageParams;
   }
@@ -401,7 +407,9 @@ public class ShadowSmsManager {
     lastSentMultimediaMessageParams = null;
   }
 
-  /** @return Parameters for last call to {@link #downloadMultimediaMessage}. */
+  /**
+   * @return Parameters for last call to {@link #downloadMultimediaMessage}.
+   */
   public DownloadMultimediaMessageParams getLastDownloadedMultimediaMessageParams() {
     return lastDownloadedMultimediaMessageParams;
   }

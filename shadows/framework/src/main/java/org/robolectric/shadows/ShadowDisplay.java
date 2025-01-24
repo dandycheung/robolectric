@@ -1,11 +1,8 @@
 package org.robolectric.shadows;
 
-import static android.os.Build.VERSION_CODES.JELLY_BEAN;
 import static org.robolectric.util.reflector.Reflector.reflector;
 
 import android.content.Context;
-import android.content.res.Configuration;
-import android.graphics.Point;
 import android.os.Build;
 import android.os.Build.VERSION_CODES;
 import android.util.DisplayMetrics;
@@ -45,43 +42,20 @@ public class ShadowDisplay {
   @RealObject Display realObject;
 
   private Float refreshRate;
-
-  // the following fields are used only for Jelly Bean...
-  private String name;
-  private Integer displayId;
-  private Integer width;
-  private Integer height;
-  private Integer realWidth;
-  private Integer realHeight;
-  private Integer densityDpi;
-  private Float xdpi;
-  private Float ydpi;
   private Float scaledDensity;
-  private Integer rotation;
-  private Integer pixelFormat;
 
   /**
    * If {@link #setScaledDensity(float)} has been called, {@link DisplayMetrics#scaledDensity} will
    * be modified to reflect the value specified. Note that this is not a realistic state.
    *
-   * @deprecated This behavior is deprecated and will be removed in Robolectric 3.7.
+   * @deprecated This behavior is deprecated and will be removed in Robolectric 4.13.
    */
   @Deprecated
   @Implementation
   protected void getMetrics(DisplayMetrics outMetrics) {
-    if (isJB()) {
-      outMetrics.density = densityDpi * DisplayMetrics.DENSITY_DEFAULT_SCALE;
-      outMetrics.densityDpi = densityDpi;
+    reflector(_Display_.class, realObject).getMetrics(outMetrics);
+    if (scaledDensity != null) {
       outMetrics.scaledDensity = scaledDensity;
-      outMetrics.widthPixels = width;
-      outMetrics.heightPixels = height;
-      outMetrics.xdpi = xdpi;
-      outMetrics.ydpi = ydpi;
-    } else {
-      reflector(_Display_.class, realObject).getMetrics(outMetrics);
-      if (scaledDensity != null) {
-        outMetrics.scaledDensity = scaledDensity;
-      }
     }
   }
 
@@ -89,32 +63,25 @@ public class ShadowDisplay {
    * If {@link #setScaledDensity(float)} has been called, {@link DisplayMetrics#scaledDensity} will
    * be modified to reflect the value specified. Note that this is not a realistic state.
    *
-   * @deprecated This behavior is deprecated and will be removed in Robolectric 3.7.
+   * @deprecated This behavior is deprecated and will be removed in Robolectric 4.13.
    */
   @Deprecated
   @Implementation
   protected void getRealMetrics(DisplayMetrics outMetrics) {
-    if (isJB()) {
-      getMetrics(outMetrics);
-      outMetrics.widthPixels = realWidth;
-      outMetrics.heightPixels = realHeight;
-    } else {
-      reflector(_Display_.class, realObject).getRealMetrics(outMetrics);
-      if (scaledDensity != null) {
-        outMetrics.scaledDensity = scaledDensity;
-      }
+    reflector(_Display_.class, realObject).getRealMetrics(outMetrics);
+    if (scaledDensity != null) {
+      outMetrics.scaledDensity = scaledDensity;
     }
   }
 
   /**
-   * If {@link #setDisplayId(int)} has been called, this method will return the specified value.
+   * Changes the scaled density for this display.
    *
-   * @deprecated This behavior is deprecated and will be removed in Robolectric 3.7.
+   * @deprecated This method is deprecated and will be removed in Robolectric 4.13.
    */
   @Deprecated
-  @Implementation
-  protected int getDisplayId() {
-    return displayId == null ? reflector(_Display_.class, realObject).getDisplayId() : displayId;
+  public void setScaledDensity(float scaledDensity) {
+    this.scaledDensity = scaledDensity;
   }
 
   /**
@@ -137,38 +104,6 @@ public class ShadowDisplay {
   }
 
   /**
-   * If {@link #setPixelFormat(int)} has been called, this method will return the specified value.
-   *
-   * @deprecated This behavior is deprecated and will be removed in Robolectric 3.7.
-   */
-  @Deprecated
-  @Implementation
-  protected int getPixelFormat() {
-    return pixelFormat == null
-        ? reflector(_Display_.class, realObject).getPixelFormat()
-        : pixelFormat;
-  }
-
-  @Implementation(maxSdk = JELLY_BEAN)
-  protected void getSizeInternal(Point outSize, boolean doCompat) {
-    outSize.x = width;
-    outSize.y = height;
-  }
-
-  @Implementation(maxSdk = JELLY_BEAN)
-  protected void getCurrentSizeRange(Point outSmallestSize, Point outLargestSize) {
-    int minimum = Math.min(width, height);
-    int maximum = Math.max(width, height);
-    outSmallestSize.set(minimum, minimum);
-    outLargestSize.set(maximum, maximum);
-  }
-
-  @Implementation(maxSdk = JELLY_BEAN)
-  protected void getRealSize(Point outSize) {
-    outSize.set(realWidth, realHeight);
-  }
-
-  /**
    * Changes the density for this display.
    *
    * <p>Any registered {@link android.hardware.display.DisplayManager.DisplayListener}s will be
@@ -185,12 +120,8 @@ public class ShadowDisplay {
    * notified of the change.
    */
   public void setDensityDpi(int densityDpi) {
-    if (isJB()) {
-      this.densityDpi = densityDpi;
-    } else {
-      ShadowDisplayManager.changeDisplay(
-          realObject.getDisplayId(), di -> di.logicalDensityDpi = densityDpi);
-    }
+    ShadowDisplayManager.changeDisplay(
+        realObject.getDisplayId(), di -> di.logicalDensityDpi = densityDpi);
   }
 
   /**
@@ -200,11 +131,7 @@ public class ShadowDisplay {
    * notified of the change.
    */
   public void setXdpi(float xdpi) {
-    if (isJB()) {
-      this.xdpi = xdpi;
-    } else {
-      ShadowDisplayManager.changeDisplay(realObject.getDisplayId(), di -> di.physicalXDpi = xdpi);
-    }
+    ShadowDisplayManager.changeDisplay(realObject.getDisplayId(), di -> di.physicalXDpi = xdpi);
   }
 
   /**
@@ -214,34 +141,7 @@ public class ShadowDisplay {
    * notified of the change.
    */
   public void setYdpi(float ydpi) {
-    if (isJB()) {
-      this.ydpi = ydpi;
-    } else {
-      ShadowDisplayManager.changeDisplay(realObject.getDisplayId(), di -> di.physicalYDpi = ydpi);
-    }
-  }
-
-  /**
-   * Changes the scaled density for this display.
-   *
-   * @deprecated This method is deprecated and will be removed in Robolectric 3.7.
-   */
-  @Deprecated
-  public void setScaledDensity(float scaledDensity) {
-    this.scaledDensity = scaledDensity;
-  }
-
-  /**
-   * Changes the ID for this display.
-   *
-   * <p>Any registered {@link android.hardware.display.DisplayManager.DisplayListener}s will be
-   * notified of the change.
-   *
-   * @deprecated This method is deprecated and will be removed in Robolectric 3.7.
-   */
-  @Deprecated
-  public void setDisplayId(int displayId) {
-    this.displayId = displayId;
+    ShadowDisplayManager.changeDisplay(realObject.getDisplayId(), di -> di.physicalYDpi = ydpi);
   }
 
   /**
@@ -251,11 +151,7 @@ public class ShadowDisplay {
    * notified of the change.
    */
   public void setName(String name) {
-    if (isJB()) {
-      this.name = name;
-    } else {
-      ShadowDisplayManager.changeDisplay(realObject.getDisplayId(), di -> di.name = name);
-    }
+    ShadowDisplayManager.changeDisplay(realObject.getDisplayId(), di -> di.name = name);
   }
 
   /**
@@ -267,9 +163,7 @@ public class ShadowDisplay {
   public void setFlags(int flags) {
     reflector(_Display_.class, realObject).setFlags(flags);
 
-    if (!isJB()) {
-      ShadowDisplayManager.changeDisplay(realObject.getDisplayId(), di -> di.flags = flags);
-    }
+    ShadowDisplayManager.changeDisplay(realObject.getDisplayId(), di -> di.flags = flags);
   }
 
   /**
@@ -281,11 +175,7 @@ public class ShadowDisplay {
    * @param width the new width in pixels
    */
   public void setWidth(int width) {
-    if (isJB()) {
-      this.width = width;
-    } else {
-      ShadowDisplayManager.changeDisplay(realObject.getDisplayId(), di -> di.appWidth = width);
-    }
+    ShadowDisplayManager.changeDisplay(realObject.getDisplayId(), di -> di.appWidth = width);
   }
 
   /**
@@ -297,11 +187,7 @@ public class ShadowDisplay {
    * @param height new height in pixels
    */
   public void setHeight(int height) {
-    if (isJB()) {
-      this.height = height;
-    } else {
-      ShadowDisplayManager.changeDisplay(realObject.getDisplayId(), di -> di.appHeight = height);
-    }
+    ShadowDisplayManager.changeDisplay(realObject.getDisplayId(), di -> di.appHeight = height);
   }
 
   /**
@@ -313,11 +199,7 @@ public class ShadowDisplay {
    * @param width the new width in pixels
    */
   public void setRealWidth(int width) {
-    if (isJB()) {
-      this.realWidth = width;
-    } else {
-      ShadowDisplayManager.changeDisplay(realObject.getDisplayId(), di -> di.logicalWidth = width);
-    }
+    ShadowDisplayManager.changeDisplay(realObject.getDisplayId(), di -> di.logicalWidth = width);
   }
 
   /**
@@ -329,12 +211,7 @@ public class ShadowDisplay {
    * @param height the new height in pixels
    */
   public void setRealHeight(int height) {
-    if (isJB()) {
-      this.realHeight = height;
-    } else {
-      ShadowDisplayManager.changeDisplay(
-          realObject.getDisplayId(), di -> di.logicalHeight = height);
-    }
+    ShadowDisplayManager.changeDisplay(realObject.getDisplayId(), di -> di.logicalHeight = height);
   }
 
   /**
@@ -357,21 +234,7 @@ public class ShadowDisplay {
    *     Surface#ROTATION_180}, {@link Surface#ROTATION_270}
    */
   public void setRotation(int rotation) {
-    if (isJB()) {
-      this.rotation = rotation;
-    } else {
-      ShadowDisplayManager.changeDisplay(realObject.getDisplayId(), di -> di.rotation = rotation);
-    }
-  }
-
-  /**
-   * Changes the pixel format for this display.
-   *
-   * @deprecated This method is deprecated and will be removed in Robolectric 3.7.
-   */
-  @Deprecated
-  public void setPixelFormat(int pixelFormat) {
-    this.pixelFormat = pixelFormat;
+    ShadowDisplayManager.changeDisplay(realObject.getDisplayId(), di -> di.rotation = rotation);
   }
 
   /**
@@ -384,16 +247,14 @@ public class ShadowDisplay {
    *     Display#STATE_DOZE}, {@link Display#STATE_DOZE_SUSPEND}, or {@link Display#STATE_UNKNOWN}.
    */
   public void setState(int state) {
-    if (!isJB()) {
-      ShadowDisplayManager.changeDisplay(realObject.getDisplayId(), di -> di.state = state);
-    }
+    ShadowDisplayManager.changeDisplay(realObject.getDisplayId(), di -> di.state = state);
   }
 
   /**
    * Set HDR capabilities to the display sourced with displayId. see {@link HdrCapabilities} for
    * supportedHdrTypes.
    *
-   * @throws UnsupportedOperationException if the method is called below Android vesrsion N.
+   * @throws UnsupportedOperationException if the method is called below Android version N.
    */
   public void setDisplayHdrCapabilities(
       int displayId,
@@ -405,6 +266,11 @@ public class ShadowDisplay {
       throw new UnsupportedOperationException("HDR capabilities are not supported below Android N");
     }
 
+    if (RuntimeEnvironment.getApiLevel() > VERSION_CODES.TIRAMISU) {
+      reflector(DisplayModeReflector.class, realObject.getMode())
+          .setSupportedHdrTypes(supportedHdrTypes);
+    }
+
     ShadowDisplayManager.changeDisplay(
         displayId,
         displayConfig -> {
@@ -412,6 +278,23 @@ public class ShadowDisplay {
               new HdrCapabilities(
                   supportedHdrTypes, maxLuminance, maxAverageLuminance, minLuminance);
         });
+  }
+
+  /**
+   * Sets current hdr/sdr ratio expressed as the ratio of targetHdrPeakBrightnessInNits /
+   * targetSdrWhitePointInNits. This will have the intended side effect of making {@link
+   * Display#isHdrSdrRatioAvailable()} equal to true if set to any value other than {@link
+   * Float#NaN}.
+   *
+   * @throws UnsupportedOperationException if the method is called below Android version U.
+   */
+  public void setHdrSdrRatio(float hdrSdrRatio) {
+    if (Build.VERSION.SDK_INT < VERSION_CODES.UPSIDE_DOWN_CAKE) {
+      throw new UnsupportedOperationException("setHdrSdrRatio is not supported below Android U");
+    }
+
+    ShadowDisplayManager.changeDisplay(
+        realObject.getDisplayId(), displayConfig -> displayConfig.hdrSdrRatio = hdrSdrRatio);
   }
 
   /**
@@ -428,34 +311,9 @@ public class ShadowDisplay {
         realObject.getDisplayId(), displayConfig -> displayConfig.displayCutout = displayCutout);
   }
 
-  private boolean isJB() {
-    return RuntimeEnvironment.getApiLevel() == JELLY_BEAN;
-  }
-
-  void configureForJBOnly(Configuration configuration, DisplayMetrics displayMetrics) {
-    int widthPx = (int) (configuration.screenWidthDp * displayMetrics.density);
-    int heightPx = (int) (configuration.screenHeightDp * displayMetrics.density);
-
-    name = "Built-in screen";
-    displayId = 0;
-    width = widthPx;
-    height = heightPx;
-    realWidth = widthPx;
-    realHeight = heightPx;
-    densityDpi = displayMetrics.densityDpi;
-    xdpi = (float) displayMetrics.densityDpi;
-    ydpi = (float) displayMetrics.densityDpi;
-    scaledDensity = displayMetrics.densityDpi * DisplayMetrics.DENSITY_DEFAULT_SCALE;
-    rotation =
-        configuration.orientation == Configuration.ORIENTATION_PORTRAIT
-            ? Surface.ROTATION_0
-            : Surface.ROTATION_90;
-  }
-
   /** Reflector interface for {@link Display}'s internals. */
   @ForType(Display.class)
   interface _Display_ {
-
     @Direct
     void getMetrics(DisplayMetrics outMetrics);
 
@@ -463,15 +321,15 @@ public class ShadowDisplay {
     void getRealMetrics(DisplayMetrics outMetrics);
 
     @Direct
-    int getDisplayId();
-
-    @Direct
     float getRefreshRate();
-
-    @Direct
-    int getPixelFormat();
 
     @Accessor("mFlags")
     void setFlags(int flags);
+  }
+
+  @ForType(Display.Mode.class)
+  interface DisplayModeReflector {
+    @Accessor("mSupportedHdrTypes")
+    void setSupportedHdrTypes(int[] types);
   }
 }

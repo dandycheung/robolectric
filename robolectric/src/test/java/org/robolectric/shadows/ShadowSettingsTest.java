@@ -2,9 +2,6 @@ package org.robolectric.shadows;
 
 import static android.location.LocationManager.GPS_PROVIDER;
 import static android.location.LocationManager.NETWORK_PROVIDER;
-import static android.os.Build.VERSION_CODES.JELLY_BEAN_MR1;
-import static android.os.Build.VERSION_CODES.JELLY_BEAN_MR2;
-import static android.os.Build.VERSION_CODES.LOLLIPOP;
 import static android.os.Build.VERSION_CODES.O;
 import static android.provider.Settings.Secure.LOCATION_MODE;
 import static android.provider.Settings.Secure.LOCATION_MODE_BATTERY_SAVING;
@@ -12,9 +9,15 @@ import static android.provider.Settings.Secure.LOCATION_MODE_HIGH_ACCURACY;
 import static android.provider.Settings.Secure.LOCATION_MODE_OFF;
 import static android.provider.Settings.Secure.LOCATION_MODE_SENSORS_ONLY;
 import static com.google.common.truth.Truth.assertThat;
+import static org.robolectric.annotation.Config.OLDEST_SDK;
+import static org.robolectric.shadows.ShadowLooper.idleMainLooper;
 
+import android.animation.ValueAnimator;
 import android.app.Application;
 import android.content.ContentResolver;
+import android.content.Context;
+import android.content.res.Configuration;
+import android.os.SystemClock;
 import android.provider.Settings;
 import android.provider.Settings.Global;
 import android.provider.Settings.Secure;
@@ -25,6 +28,7 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.robolectric.annotation.Config;
+import org.robolectric.versioning.AndroidVersions.U;
 
 @RunWith(AndroidJUnit4.class)
 public class ShadowSettingsTest {
@@ -57,7 +61,6 @@ public class ShadowSettingsTest {
   }
 
   @Test
-  @Config(minSdk = JELLY_BEAN_MR1)
   public void testGlobalGetInt() {
     assertThat(Settings.Global.getInt(contentResolver, "property", 0)).isEqualTo(0);
     assertThat(Settings.Global.getInt(contentResolver, "property", 2)).isEqualTo(2);
@@ -130,15 +133,13 @@ public class ShadowSettingsTest {
   }
 
   @Test
-  @Config(minSdk = JELLY_BEAN_MR1)
-  public void testSetAdbEnabled_sinceJBMR1_settingsGlobal_true() {
+  public void testSetAdbEnabled_settingsGlobal_true() {
     ShadowSettings.setAdbEnabled(true);
     assertThat(Global.getInt(context.getContentResolver(), Global.ADB_ENABLED, 0)).isEqualTo(1);
   }
 
   @Test
-  @Config(minSdk = JELLY_BEAN_MR1)
-  public void testSetAdbEnabled_sinceJBMR1_settingsGlobal_false() {
+  public void testSetAdbEnabled_settingsGlobal_false() {
     ShadowSettings.setAdbEnabled(false);
     assertThat(Global.getInt(context.getContentResolver(), Global.ADB_ENABLED, 1)).isEqualTo(0);
   }
@@ -158,22 +159,20 @@ public class ShadowSettingsTest {
   }
 
   @Test
-  @Config(minSdk = JELLY_BEAN_MR1)
-  public void testSetInstallNonMarketApps_sinceJBMR1_settingsGlobal_true() {
+  public void testSetInstallNonMarketApps_settingsGlobal_true() {
     ShadowSettings.setInstallNonMarketApps(true);
     assertThat(Global.getInt(context.getContentResolver(), Global.INSTALL_NON_MARKET_APPS, 0))
         .isEqualTo(1);
   }
 
   @Test
-  @Config(minSdk = JELLY_BEAN_MR1)
-  public void testSetInstallNonMarketApps_sinceJBMR1_settingsGlobal_false() {
+  public void testSetInstallNonMarketApps_settingsGlobal_false() {
     ShadowSettings.setInstallNonMarketApps(false);
     assertThat(Global.getInt(context.getContentResolver(), Global.INSTALL_NON_MARKET_APPS, 1))
         .isEqualTo(0);
   }
 
-  @Config(minSdk = LOLLIPOP, maxSdk = O) // TODO(christianw) fix location mode
+  @Config(minSdk = OLDEST_SDK, maxSdk = O) // TODO(christianw) fix location mode
   @Test
   public void locationProviders_affectsLocationMode() {
     // Verify default values
@@ -201,7 +200,7 @@ public class ShadowSettingsTest {
     assertThat(Secure.getInt(contentResolver, LOCATION_MODE, -1)).isEqualTo(LOCATION_MODE_OFF);
   }
 
-  @Config(minSdk = LOLLIPOP, maxSdk = O) // TODO(christianw) fix location mode
+  @Config(minSdk = OLDEST_SDK, maxSdk = O) // TODO(christianw) fix location mode
   @Test
   public void locationMode_affectsLocationProviders() {
     // Verify the default value
@@ -237,31 +236,7 @@ public class ShadowSettingsTest {
     assertThat(Secure.isLocationProviderEnabled(contentResolver, NETWORK_PROVIDER)).isTrue();
   }
 
-  @Config(maxSdk = JELLY_BEAN_MR2)
   @Test
-  public void setLocationProviderEnabled() {
-    // Verify default values
-    assertThat(Secure.isLocationProviderEnabled(contentResolver, GPS_PROVIDER)).isTrue();
-    assertThat(Secure.isLocationProviderEnabled(contentResolver, NETWORK_PROVIDER)).isFalse();
-
-    Secure.setLocationProviderEnabled(contentResolver, NETWORK_PROVIDER, true);
-
-    assertThat(Secure.isLocationProviderEnabled(contentResolver, GPS_PROVIDER)).isTrue();
-    assertThat(Secure.isLocationProviderEnabled(contentResolver, NETWORK_PROVIDER)).isTrue();
-
-    Secure.setLocationProviderEnabled(contentResolver, GPS_PROVIDER, false);
-
-    assertThat(Secure.isLocationProviderEnabled(contentResolver, GPS_PROVIDER)).isFalse();
-    assertThat(Secure.isLocationProviderEnabled(contentResolver, NETWORK_PROVIDER)).isTrue();
-
-    Secure.setLocationProviderEnabled(contentResolver, NETWORK_PROVIDER, false);
-
-    assertThat(Secure.isLocationProviderEnabled(contentResolver, GPS_PROVIDER)).isFalse();
-    assertThat(Secure.isLocationProviderEnabled(contentResolver, NETWORK_PROVIDER)).isFalse();
-  }
-
-  @Test
-  @Config(minSdk = JELLY_BEAN_MR1)
   public void testGlobalGetFloat() {
     float durationScale =
         Global.getFloat(
@@ -273,5 +248,93 @@ public class ShadowSettingsTest {
     assertThat(
             Global.getFloat(contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, /* def= */ 0))
         .isEqualTo(0.01f);
+  }
+
+  @Test
+  public void differentContentResolver() {
+    Context context = ApplicationProvider.getApplicationContext();
+    ContentResolver contentResolver1 =
+        context.createConfigurationContext(new Configuration()).getContentResolver();
+    ContentResolver contentResolver2 =
+        context.createConfigurationContext(new Configuration()).getContentResolver();
+
+    Settings.System.putString(contentResolver1, "setting", "system");
+    Settings.Secure.putString(contentResolver1, "setting", "secure");
+    Settings.Global.putString(contentResolver1, "setting", "global");
+
+    assertThat(contentResolver1).isNotSameInstanceAs(contentResolver2);
+    assertThat(Settings.System.getString(contentResolver2, "setting")).isEqualTo("system");
+    assertThat(Settings.Secure.getString(contentResolver2, "setting")).isEqualTo("secure");
+    assertThat(Settings.Global.getString(contentResolver2, "setting")).isEqualTo("global");
+  }
+
+  @Test
+  public void global_animatorDurationScale() {
+    long startTime = SystemClock.uptimeMillis();
+    ValueAnimator valueAnimator = ValueAnimator.ofFloat(0, 1);
+
+    Settings.Global.putFloat(contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 0);
+    valueAnimator.setDuration(100);
+    valueAnimator.start();
+    idleMainLooper();
+
+    assertThat(valueAnimator.isRunning()).isFalse();
+    assertThat(valueAnimator.getAnimatedFraction()).isEqualTo(1);
+    // Expect to complete in one frame when the scale is 0 (animator on M runs a post-start "commit"
+    // frame, so expect no more than 2 frame callbacks).
+    assertThat(SystemClock.uptimeMillis() - startTime)
+        .isAtMost(ShadowChoreographer.getFrameDelay().toMillis() * 2);
+  }
+
+  @Test
+  public void testSetLockScreenShowNotifications_settingsSecure_true() {
+    ShadowSettings.setLockScreenShowNotifications(true);
+    assertThat(
+            Secure.getInt(context.getContentResolver(), Secure.LOCK_SCREEN_SHOW_NOTIFICATIONS, 0))
+        .isEqualTo(1);
+  }
+
+  @Test
+  public void testSetLockScreenShowNotifications_settingsSecure_false() {
+    ShadowSettings.setLockScreenShowNotifications(false);
+    assertThat(
+            Secure.getInt(context.getContentResolver(), Secure.LOCK_SCREEN_SHOW_NOTIFICATIONS, 0))
+        .isEqualTo(0);
+  }
+
+  @Test
+  public void testSetLockScreenAllowPrivateNotifications_settingsSecure_true() {
+    ShadowSettings.setLockScreenAllowPrivateNotifications(true);
+    assertThat(
+            Secure.getInt(
+                context.getContentResolver(), Secure.LOCK_SCREEN_ALLOW_PRIVATE_NOTIFICATIONS, 0))
+        .isEqualTo(1);
+  }
+
+  @Test
+  public void testSetLockScreenAllowPrivateNotifications_settingsSecure_false() {
+    ShadowSettings.setLockScreenAllowPrivateNotifications(false);
+    assertThat(
+            Secure.getInt(
+                context.getContentResolver(), Secure.LOCK_SCREEN_ALLOW_PRIVATE_NOTIFICATIONS, 0))
+        .isEqualTo(0);
+  }
+
+  @Config(minSdk = U.SDK_INT)
+  @Test
+  public void testConfig_putAndGetString() {
+    assertThat(Settings.Config.putString("namespace", "key", "value", false)).isTrue();
+    assertThat(Settings.Config.getString("namespace/key")).isEqualTo("value");
+    assertThat(Settings.Config.getString("namespace/missing_key")).isEqualTo(null);
+    assertThat(Settings.Config.getString("missing_namespace/key")).isEqualTo(null);
+  }
+
+  @Config(minSdk = U.SDK_INT)
+  @Test
+  public void testConfig_putAndGetStrings() {
+    assertThat(Settings.Config.putString("namespace", "key", "value", false)).isTrue();
+    assertThat(Settings.Config.getString("namespace/key")).isEqualTo("value");
+    assertThat(Settings.Config.getString("namespace/missing_key")).isEqualTo(null);
+    assertThat(Settings.Config.getString("missing_namespace/key")).isEqualTo(null);
   }
 }

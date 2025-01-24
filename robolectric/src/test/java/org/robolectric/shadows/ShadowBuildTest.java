@@ -1,5 +1,6 @@
 package org.robolectric.shadows;
 
+import static android.os.Build.VERSION_CODES.L;
 import static android.os.Build.VERSION_CODES.M;
 import static android.os.Build.VERSION_CODES.O;
 import static android.os.Build.VERSION_CODES.R;
@@ -15,6 +16,12 @@ import org.robolectric.annotation.Config;
 
 @RunWith(AndroidJUnit4.class)
 public class ShadowBuildTest {
+
+  @Test
+  public void setBoard() {
+    ShadowBuild.setBoard("test_board");
+    assertThat(Build.BOARD).isEqualTo("test_board");
+  }
 
   @Test
   public void setDevice() {
@@ -121,7 +128,54 @@ public class ShadowBuildTest {
   @Test
   @Config(minSdk = O)
   public void getSerial() {
-    assertThat(Build.getSerial()).isEqualTo(Build.UNKNOWN);
+    assertThat(Build.getSerial()).isEqualTo("unknown");
+    ShadowBuild.setSerial("robo_serial");
+    assertThat(Build.getSerial()).isEqualTo("robo_serial");
+  }
+
+  @Test
+  @Config(minSdk = L)
+  public void supported32BitAbis() {
+    assertThat(Build.SUPPORTED_32_BIT_ABIS).isEqualTo(new String[] {"armeabi-v7a", "armeabi"});
+    ShadowBuild.setSupported32BitAbis(new String[] {"x86"});
+    assertThat(Build.SUPPORTED_32_BIT_ABIS).isEqualTo(new String[] {"x86"});
+  }
+
+  @Test
+  @Config(minSdk = L)
+  public void supported64BitAbis() {
+    assertThat(Build.SUPPORTED_64_BIT_ABIS).isEqualTo(new String[] {"armeabi-v7a", "armeabi"});
+    ShadowBuild.setSupported64BitAbis(new String[] {"x86_64"});
+    assertThat(Build.SUPPORTED_64_BIT_ABIS).isEqualTo(new String[] {"x86_64"});
+  }
+
+  @Test
+  @Config(minSdk = L)
+  public void supportedAbis() {
+    assertThat(Build.SUPPORTED_ABIS).isEqualTo(new String[] {"armeabi-v7a"});
+    ShadowBuild.setSupportedAbis(new String[] {"x86"});
+    assertThat(Build.SUPPORTED_ABIS).isEqualTo(new String[] {"x86"});
+  }
+
+  @Test
+  @Config(minSdk = S)
+  public void systemOnChipManufacturer() {
+    ShadowBuild.setSystemOnChipManufacturer("manufacturer");
+    assertThat(Build.SOC_MANUFACTURER).isEqualTo("manufacturer");
+  }
+
+  @Test
+  @Config(minSdk = S)
+  public void systemOnChipModel() {
+    ShadowBuild.setSystemOnChipModel("model");
+    assertThat(Build.SOC_MODEL).isEqualTo("model");
+  }
+
+  @Test
+  @Config(minSdk = S)
+  public void odmSku() {
+    ShadowBuild.setOdmSku("odm_sku");
+    assertThat(Build.ODM_SKU).isEqualTo("odm_sku");
   }
 
   /** Verifies that each test gets a fresh set of Build values. */

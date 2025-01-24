@@ -9,13 +9,11 @@ import java.lang.ref.SoftReference;
  */
 public abstract class SoftThreadLocal<T> {
 
-  private final ThreadLocal<SoftReference<T>> threadLocal = new ThreadLocal<SoftReference<T>>() {
-    @Override protected SoftReference<T> initialValue() {
-      return new SoftReference<>(create());
-    }
-  };
+  @SuppressWarnings({"AndroidJdkLibsChecker", "NewApi"})
+  private final ThreadLocal<SoftReference<T>> threadLocal =
+      ThreadLocal.withInitial(() -> new SoftReference<>(create()));
 
-  synchronized public T get() {
+  public synchronized T get() {
     T item = threadLocal.get().get();
     if (item == null) {
       item = create();
@@ -28,5 +26,5 @@ public abstract class SoftThreadLocal<T> {
     threadLocal.set(new SoftReference<>(item));
   }
 
-  abstract protected T create();
+  protected abstract T create();
 }

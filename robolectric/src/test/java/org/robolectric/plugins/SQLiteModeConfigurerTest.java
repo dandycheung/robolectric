@@ -14,31 +14,18 @@ import org.robolectric.annotation.SQLiteMode.Mode;
 public class SQLiteModeConfigurerTest {
 
   @Test
-  public void defaultConfig() {
-    Properties systemProperties = new Properties();
-    SQLiteModeConfigurer configurer = new SQLiteModeConfigurer(systemProperties);
-    assertThat(configurer.defaultConfig()).isSameInstanceAs(Mode.LEGACY);
+  public void defaultConfigWithPrePopulatedSQLiteMode() {
+    Properties systemProperties1 = new Properties();
+    SQLiteModeConfigurer configurer1 =
+        new SQLiteModeConfigurer(systemProperties1, new PackagePropertiesLoader());
 
-    systemProperties.setProperty("robolectric.sqliteMode", "LEGACY");
-    assertThat(configurer.defaultConfig()).isSameInstanceAs(Mode.LEGACY);
+    systemProperties1.setProperty("robolectric.sqliteMode", "LEGACY");
+    assertThat(configurer1.defaultConfig()).isSameInstanceAs(Mode.LEGACY);
 
-    systemProperties.setProperty("robolectric.sqliteMode", "NATIVE");
-    assertThat(configurer.defaultConfig()).isSameInstanceAs(Mode.NATIVE);
-  }
-
-  @Test
-  public void osArchSpecificConfig() {
-    Properties systemProperties = new Properties();
-    SQLiteModeConfigurer configurer = new SQLiteModeConfigurer(systemProperties);
-    assertThat(configurer.defaultConfig()).isSameInstanceAs(Mode.LEGACY);
-
-    systemProperties.setProperty("os.name", "Mac OS X");
-    systemProperties.setProperty("os.arch", "aarch64");
-
-    assertThat(configurer.defaultConfig()).isSameInstanceAs(Mode.NATIVE);
-
-    systemProperties.setProperty("os.arch", "amd64");
-
-    assertThat(configurer.defaultConfig()).isSameInstanceAs(Mode.LEGACY);
+    Properties systemProperties2 = new Properties();
+    SQLiteModeConfigurer configurer2 =
+        new SQLiteModeConfigurer(systemProperties2, new PackagePropertiesLoader());
+    systemProperties2.setProperty("robolectric.sqliteMode", "NATIVE");
+    assertThat(configurer2.defaultConfig()).isSameInstanceAs(Mode.NATIVE);
   }
 }

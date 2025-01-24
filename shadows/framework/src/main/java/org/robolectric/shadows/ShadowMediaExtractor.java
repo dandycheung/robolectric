@@ -2,6 +2,7 @@ package org.robolectric.shadows;
 
 import static android.os.Build.VERSION_CODES.M;
 import static android.os.Build.VERSION_CODES.N;
+import static android.os.Build.VERSION_CODES.O;
 import static java.lang.Math.min;
 import static org.robolectric.shadows.util.DataSource.toDataSource;
 
@@ -11,6 +12,7 @@ import android.media.MediaDataSource;
 import android.media.MediaExtractor;
 import android.media.MediaFormat;
 import android.net.Uri;
+import android.os.PersistableBundle;
 import java.io.FileDescriptor;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
@@ -48,8 +50,10 @@ public class ShadowMediaExtractor {
   }
 
   private static final Map<DataSource, List<TrackInfo>> tracksMap = new HashMap<>();
+  private static final Map<DataSource, PersistableBundle> metricsMap = new HashMap<>();
 
   private List<TrackInfo> tracks;
+  private PersistableBundle metrics;
   private int[] trackSampleReadPositions;
   private int[] trackLastReadSize;
   private int selectedTrackIndex = -1;
@@ -65,9 +69,18 @@ public class ShadowMediaExtractor {
     TrackInfo trackInfo = new TrackInfo();
     trackInfo.format = format;
     trackInfo.sampleData = sampleData;
-    tracksMap.putIfAbsent(dataSource, new ArrayList<TrackInfo>());
+    tracksMap.putIfAbsent(dataSource, new ArrayList<>());
     List<TrackInfo> tracks = tracksMap.get(dataSource);
     tracks.add(trackInfo);
+  }
+
+  /**
+   * Sets metrics for an associated {@link org.robolectric.shadows.util.DataSource}.
+   *
+   * @param metrics the data which will be returned by {@link MediaExtractor#getMetrics()}.
+   */
+  public static void setMetrics(DataSource dataSource, PersistableBundle metrics) {
+    metricsMap.put(dataSource, metrics);
   }
 
   private void setDataSource(DataSource dataSource) {
@@ -81,6 +94,8 @@ public class ShadowMediaExtractor {
     Arrays.fill(trackSampleReadPositions, 0);
     this.trackLastReadSize = new int[tracks.size()];
     Arrays.fill(trackLastReadSize, 0);
+
+    this.metrics = metricsMap.get(dataSource);
   }
 
   @Implementation(minSdk = N)
@@ -140,7 +155,7 @@ public class ShadowMediaExtractor {
   }
 
   @Implementation
-  protected final int getTrackCount() {
+  protected int getTrackCount() {
     return tracks.size();
   }
 
@@ -203,8 +218,15 @@ public class ShadowMediaExtractor {
     selectedTrackIndex = -1;
   }
 
+  @Implementation(minSdk = O)
+  protected PersistableBundle getMetrics() {
+    return metrics;
+  }
+
   @Resetter
   public static void reset() {
     tracksMap.clear();
+    metricsMap.clear();
+    DataSource.reset();
   }
 }

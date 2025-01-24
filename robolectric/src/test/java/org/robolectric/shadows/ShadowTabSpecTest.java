@@ -13,6 +13,7 @@ import android.widget.TabHost;
 import android.widget.TextView;
 import androidx.test.core.app.ApplicationProvider;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
+import javax.annotation.Nonnull;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -84,7 +85,6 @@ public class ShadowTabSpecTest {
     ShadowTabHost.ShadowTabSpec shadowFoo = shadowOf(foo);
     TextView textView = (TextView) shadowFoo.getContentView();
 
-
     assertThat(textView.getText().toString()).isEqualTo("The Text of Foo");
   }
 
@@ -101,22 +101,17 @@ public class ShadowTabSpecTest {
   private static class TestIcon extends Drawable {
 
     @Override
-    public void draw(Canvas canvas) {
-    }
+    public void draw(@Nonnull Canvas canvas) {}
 
     @Override
-    public void setAlpha(int alpha) {
-    }
+    public void setAlpha(int alpha) {}
 
     @Override
-    public void setColorFilter(ColorFilter cf) {
-    }
+    public void setColorFilter(ColorFilter cf) {}
 
     @Override
     public int getOpacity() {
       return 0;
     }
-
   }
-
 }

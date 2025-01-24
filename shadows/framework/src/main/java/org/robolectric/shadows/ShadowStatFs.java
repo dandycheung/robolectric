@@ -1,7 +1,5 @@
 package org.robolectric.shadows;
 
-import static android.os.Build.VERSION_CODES.JELLY_BEAN_MR2;
-
 import android.os.StatFs;
 import java.io.File;
 import java.util.Map;
@@ -11,7 +9,7 @@ import org.robolectric.annotation.Implements;
 import org.robolectric.annotation.Resetter;
 
 /**
- * Robolectic doesn't provide actual filesystem stats; rather, it provides the ability to specify
+ * Robolectric doesn't provide actual filesystem stats; rather, it provides the ability to specify
  * stats values in advance.
  *
  * @see #registerStats(File, int, int, int)
@@ -20,7 +18,7 @@ import org.robolectric.annotation.Resetter;
 public class ShadowStatFs {
   public static final int BLOCK_SIZE = 4096;
   private static final Stats DEFAULT_STATS = new Stats(0, 0, 0);
-  private static TreeMap<String, Stats> stats = new TreeMap<>();
+  private static final TreeMap<String, Stats> stats = new TreeMap<>();
   private Stats stat;
 
   @Implementation
@@ -43,22 +41,22 @@ public class ShadowStatFs {
     return stat.freeBlocks;
   }
 
-  @Implementation(minSdk = JELLY_BEAN_MR2)
+  @Implementation
   protected long getFreeBlocksLong() {
     return stat.freeBlocks;
   }
 
-  @Implementation(minSdk = JELLY_BEAN_MR2)
+  @Implementation
   protected long getFreeBytes() {
     return getBlockSizeLong() * getFreeBlocksLong();
   }
 
-  @Implementation(minSdk = JELLY_BEAN_MR2)
+  @Implementation
   protected long getAvailableBytes() {
     return getBlockSizeLong() * getAvailableBlocksLong();
   }
 
-  @Implementation(minSdk = JELLY_BEAN_MR2)
+  @Implementation
   protected long getTotalBytes() {
     return getBlockSizeLong() * getBlockCountLong();
   }
@@ -71,7 +69,7 @@ public class ShadowStatFs {
   @Implementation
   protected void restat(String path) {
     Map.Entry<String, Stats> mapEntry = stats.floorEntry(path);
-    for (;;) {
+    for (; ; ) {
       // We will hit all matching paths, longest one first. We may hit non-matching paths before we
       // find the right one.
       if (mapEntry == null) {
@@ -88,17 +86,17 @@ public class ShadowStatFs {
   }
 
   /** Robolectric always uses a block size of 4096. */
-  @Implementation(minSdk = JELLY_BEAN_MR2)
+  @Implementation
   protected long getBlockSizeLong() {
     return BLOCK_SIZE;
   }
 
-  @Implementation(minSdk = JELLY_BEAN_MR2)
+  @Implementation
   protected long getBlockCountLong() {
     return stat.blockCount;
   }
 
-  @Implementation(minSdk = JELLY_BEAN_MR2)
+  @Implementation
   protected long getAvailableBlocksLong() {
     return stat.availableBlocks;
   }
@@ -118,7 +116,7 @@ public class ShadowStatFs {
 
   /**
    * Register stats for a path, which will be used when a matching {@link StatFs} instance is
-   * created.  A {@link StatFs} instance matches if it extends path. If several registered paths
+   * created. A {@link StatFs} instance matches if it extends path. If several registered paths
    * match, we pick the longest one.
    *
    * @param path path to the file
@@ -126,9 +124,27 @@ public class ShadowStatFs {
    * @param freeBlocks number of free blocks
    * @param availableBlocks number of available blocks
    */
-  public static void registerStats(String path, int blockCount, int freeBlocks,
-      int availableBlocks) {
+  public static void registerStats(
+      String path, int blockCount, int freeBlocks, int availableBlocks) {
     stats.put(path, new Stats(blockCount, freeBlocks, availableBlocks));
+  }
+
+  /**
+   * Unregister stats for a path. If the path is not registered, it will be a no-op.
+   *
+   * @param path path to the file
+   */
+  public static void unregisterStats(File path) {
+    unregisterStats(path.getAbsolutePath());
+  }
+
+  /**
+   * Unregister stats for a path. If the path is not registered, it will be a no-op.
+   *
+   * @param path path to the file
+   */
+  public static void unregisterStats(String path) {
+    stats.remove(path);
   }
 
   @Resetter
@@ -142,6 +158,7 @@ public class ShadowStatFs {
       this.freeBlocks = freeBlocks;
       this.availableBlocks = availableBlocks;
     }
+
     int blockCount, freeBlocks, availableBlocks;
   }
 }

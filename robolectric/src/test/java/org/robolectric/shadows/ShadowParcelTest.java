@@ -1,11 +1,10 @@
 package org.robolectric.shadows;
 
-import static android.os.Build.VERSION_CODES.LOLLIPOP;
 import static android.os.Build.VERSION_CODES.M;
 import static com.google.common.truth.Truth.assertThat;
 import static com.google.common.truth.Truth.assertWithMessage;
+import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 import android.accounts.Account;
@@ -161,7 +160,6 @@ public class ShadowParcelTest {
   }
 
   @Test
-  @Config(minSdk = LOLLIPOP)
   public void testReadWriteSingleStrongBinder() {
     IBinder binder = new Binder();
     parcel.writeStrongBinder(binder);
@@ -170,7 +168,6 @@ public class ShadowParcelTest {
   }
 
   @Test
-  @Config(minSdk = LOLLIPOP)
   public void testWriteNullStrongBinder() {
     parcel.writeStrongBinder(null);
     parcel.setDataPosition(0);
@@ -178,7 +175,6 @@ public class ShadowParcelTest {
   }
 
   @Test
-  @Config(minSdk = LOLLIPOP)
   public void testReadWriteMultipleStrongBinders() {
     List<IBinder> binders = new ArrayList<>();
     for (int i = 0; i < 10; ++i) {
@@ -399,8 +395,8 @@ public class ShadowParcelTest {
   }
 
   @Test
-  public void testReadWriteIntArray() throws Exception {
-    final int[] ints = { 1, 2 };
+  public void testReadWriteIntArray() {
+    final int[] ints = {1, 2};
     parcel.writeIntArray(ints);
     // Make sure a copy was stored.
     ints[0] = 99;
@@ -412,24 +408,24 @@ public class ShadowParcelTest {
   }
 
   @Test
-  public void testWriteAndCreateNullIntArray() throws Exception {
+  public void testWriteAndCreateNullIntArray() {
     parcel.writeIntArray(null);
     parcel.setDataPosition(0);
     assertThat(parcel.createIntArray()).isNull();
   }
 
   @Test
-  public void testReadWriteLongArray() throws Exception {
-    final long[] longs = { 1, 2 };
+  public void testReadWriteLongArray() {
+    final long[] longs = {1, 2};
     parcel.writeLongArray(longs);
     parcel.setDataPosition(0);
     final long[] longs2 = new long[longs.length];
     parcel.readLongArray(longs2);
-    assertTrue(Arrays.equals(longs, longs2));
+    assertArrayEquals(longs, longs2);
   }
 
   @Test
-  public void testWriteAndCreateNullLongArray() throws Exception {
+  public void testWriteAndCreateNullLongArray() {
     parcel.writeLongArray(null);
     parcel.setDataPosition(0);
     assertThat(parcel.createLongArray()).isNull();
@@ -444,51 +440,51 @@ public class ShadowParcelTest {
   }
 
   @Test
-  public void testReadWriteFloatArray() throws Exception {
-    final float[] floats = { 1.1f, 2.0f };
+  public void testReadWriteFloatArray() {
+    final float[] floats = {1.1f, 2.0f};
     parcel.writeFloatArray(floats);
     parcel.setDataPosition(0);
     final float[] floats2 = new float[floats.length];
     parcel.readFloatArray(floats2);
-    assertTrue(Arrays.equals(floats, floats2));
+    assertArrayEquals(floats, floats2, 0f);
   }
 
   @Test
-  public void testWriteAndCreateNullFloatArray() throws Exception {
+  public void testWriteAndCreateNullFloatArray() {
     parcel.writeFloatArray(null);
     parcel.setDataPosition(0);
     assertThat(parcel.createFloatArray()).isNull();
   }
 
   @Test
-  public void testReadWriteDoubleArray() throws Exception {
-    final double[] doubles = { 1.1f, 2.0f };
+  public void testReadWriteDoubleArray() {
+    final double[] doubles = {1.1f, 2.0f};
     parcel.writeDoubleArray(doubles);
     parcel.setDataPosition(0);
     final double[] doubles2 = new double[doubles.length];
     parcel.readDoubleArray(doubles2);
-    assertTrue(Arrays.equals(doubles, doubles2));
+    assertArrayEquals(doubles, doubles2, 0.0);
   }
 
   @Test
-  public void testWriteAndCreateNullDoubleArray() throws Exception {
+  public void testWriteAndCreateNullDoubleArray() {
     parcel.writeDoubleArray(null);
     parcel.setDataPosition(0);
     assertThat(parcel.createDoubleArray()).isNull();
   }
 
   @Test
-  public void testReadWriteStringArray() throws Exception {
-    final String[] strings = { "foo", "bar" };
+  public void testReadWriteStringArray() {
+    final String[] strings = {"foo", "bar"};
     parcel.writeStringArray(strings);
     parcel.setDataPosition(0);
     final String[] strings2 = new String[strings.length];
     parcel.readStringArray(strings2);
-    assertTrue(Arrays.equals(strings, strings2));
+    assertArrayEquals(strings, strings2);
   }
 
   @Test
-  public void testWriteAndCreateNullStringArray() throws Exception {
+  public void testWriteAndCreateNullStringArray() {
     parcel.writeStringArray(null);
     parcel.setDataPosition(0);
     assertThat(parcel.createStringArray()).isNull();
@@ -579,7 +575,7 @@ public class ShadowParcelTest {
   }
 
   @Test
-  public void testWriteAndCreateNullByteArray() throws Exception {
+  public void testWriteAndCreateNullByteArray() {
     parcel.writeByteArray(null);
     assertThat(parcel.dataSize()).isEqualTo(4);
     parcel.setDataPosition(0);
@@ -593,7 +589,7 @@ public class ShadowParcelTest {
     assertThat(parcel.dataSize()).isEqualTo(4);
     parcel.setDataPosition(0);
     byte[] actualBytes = parcel.createByteArray();
-    assertTrue(Arrays.equals(bytes, actualBytes));
+    assertArrayEquals(bytes, actualBytes);
   }
 
   @Test
@@ -637,18 +633,18 @@ public class ShadowParcelTest {
 
   @Test
   public void testWriteAndReadByteArray() {
-    byte[] bytes = new byte[] { -1, 2, 3, 127 };
+    byte[] bytes = new byte[] {-1, 2, 3, 127};
     parcel.writeByteArray(bytes);
     assertThat(parcel.dataSize()).isEqualTo(8);
     parcel.setDataPosition(0);
     byte[] actualBytes = new byte[bytes.length];
     parcel.readByteArray(actualBytes);
-    assertTrue(Arrays.equals(bytes, actualBytes));
+    assertArrayEquals(bytes, actualBytes);
   }
 
   @Test(expected = RuntimeException.class)
   public void testWriteAndReadByteArray_badLength() {
-    byte[] bytes = new byte[] { -1, 2, 3, 127 };
+    byte[] bytes = new byte[] {-1, 2, 3, 127};
     parcel.writeByteArray(bytes);
     assertThat(parcel.dataSize()).isEqualTo(8);
     parcel.setDataPosition(0);
@@ -832,7 +828,7 @@ public class ShadowParcelTest {
   }
 
   @Test
-  public void testCreateStringArrayList() throws Exception {
+  public void testCreateStringArrayList() {
     parcel.writeStringList(Arrays.asList("str1", "str2"));
     parcel.setDataPosition(0);
 
@@ -843,46 +839,48 @@ public class ShadowParcelTest {
   }
 
   @Test
-  public void testWriteTypedListAndCreateTypedArrayList() throws Exception {
+  public void testWriteTypedListAndCreateTypedArrayList() {
     TestParcelable normal = new TestParcelable(23);
     ArrayList<TestParcelable> normals = new ArrayList<>();
     normals.add(normal);
 
     parcel.writeTypedList(normals);
     parcel.setDataPosition(0);
-    List<org.robolectric.shadows.TestParcelable> rehydrated = parcel
-        .createTypedArrayList(TestParcelable.CREATOR);
+    List<org.robolectric.shadows.TestParcelable> rehydrated =
+        parcel.createTypedArrayList(TestParcelable.CREATOR);
 
     assertEquals(1, rehydrated.size());
     assertEquals(23, rehydrated.get(0).contents);
   }
 
   @Test
-  public void testParcelableWithPackageProtected() throws Exception {
+  public void testParcelableWithPackageProtected() {
     TestParcelablePackage normal = new TestParcelablePackage(23);
 
     parcel.writeParcelable(normal, 0);
     parcel.setDataPosition(0);
 
-    TestParcelablePackage rehydrated = parcel.readParcelable(TestParcelablePackage.class.getClassLoader());
+    TestParcelablePackage rehydrated =
+        parcel.readParcelable(TestParcelablePackage.class.getClassLoader());
 
     assertEquals(normal.contents, rehydrated.contents);
   }
 
   @Test
-  public void testParcelableWithBase() throws Exception {
+  public void testParcelableWithBase() {
     TestParcelableImpl normal = new TestParcelableImpl(23);
 
     parcel.writeParcelable(normal, 0);
     parcel.setDataPosition(0);
 
-    TestParcelableImpl rehydrated = parcel.readParcelable(TestParcelableImpl.class.getClassLoader());
+    TestParcelableImpl rehydrated =
+        parcel.readParcelable(TestParcelableImpl.class.getClassLoader());
 
     assertEquals(normal.contents, rehydrated.contents);
   }
 
   @Test
-  public void testParcelableWithPublicClass() throws Exception {
+  public void testParcelableWithPublicClass() {
     TestParcelable normal = new TestParcelable(23);
 
     parcel.writeParcelable(normal, 0);
@@ -894,7 +892,7 @@ public class ShadowParcelTest {
   }
 
   @Test
-  public void testReadAndWriteStringList() throws Exception {
+  public void testReadAndWriteStringList() {
     ArrayList<String> original = new ArrayList<>();
     List<String> rehydrated = new ArrayList<>();
     original.add("str1");
@@ -908,7 +906,7 @@ public class ShadowParcelTest {
   }
 
   @Test
-  public void testReadWriteMap() throws Exception {
+  public void testReadWriteMap() {
     HashMap<String, String> original = new HashMap<>();
     original.put("key", "value");
     parcel.writeMap(original);
@@ -920,11 +918,11 @@ public class ShadowParcelTest {
 
   @Test
   public void testCreateStringArray() {
-    String[] strs = { "a1", "b2" };
+    String[] strs = {"a1", "b2"};
     parcel.writeStringArray(strs);
     parcel.setDataPosition(0);
     String[] newStrs = parcel.createStringArray();
-    assertTrue(Arrays.equals(strs, newStrs));
+    assertArrayEquals(strs, newStrs);
   }
 
   @Test
@@ -1130,7 +1128,7 @@ public class ShadowParcelTest {
     try {
       assertThat(parcel2.readString()).isEqualTo("hello world");
 
-      Intent unmarshalledIntent = (Intent) parcel2.readParcelable(Intent.class.getClassLoader());
+      Intent unmarshalledIntent = parcel2.readParcelable(Intent.class.getClassLoader());
       assertThat(unmarshalledIntent.getAction()).isEqualTo("action.foo");
       assertThat(unmarshalledIntent.getStringExtra("key1")).isEqualTo("str1");
       assertThat(unmarshalledIntent.getIntExtra("key2", -1)).isEqualTo(2);
@@ -1191,7 +1189,7 @@ public class ShadowParcelTest {
   }
 
   @Test
-  public void testUnmarshallZeroes() throws IOException {
+  public void testUnmarshallZeroes() {
     // This tests special-case handling of zeroes in marshalling.  A few tests rely on the rather
     // well-defined behavior that Parcel will interpret a byte array of all zeroes as zero
     // primitives and empty arrays.  When unmarshalling, this can be easily disambiguated from an
@@ -1234,7 +1232,7 @@ public class ShadowParcelTest {
   }
 
   @Test
-  public void testUnmarshallEmpty() throws IOException {
+  public void testUnmarshallEmpty() {
     // Unmarshall an zero-length byte string, although, pass a non-empty array to make sure the
     // length/offset are respected.
     parcel.unmarshall(new byte[] {1, 2, 3}, 1, 0);
@@ -1339,7 +1337,7 @@ public class ShadowParcelTest {
     parcel.setDataCapacity(12);
     assertWithMessage("capacity never shrinks").that(parcel.dataCapacity()).isEqualTo(404);
   }
-  
+
   @Test
   public void testWriteAndEnforceCompatibleInterface() {
     parcel.writeInterfaceToken("com.example.IMyInterface");
@@ -1347,7 +1345,7 @@ public class ShadowParcelTest {
     parcel.enforceInterface("com.example.IMyInterface");
     // Nothing explodes
   }
-  
+
   @Test
   public void testWriteAndEnforceIncompatibleInterface() {
     parcel.writeInterfaceToken("com.example.Derp");

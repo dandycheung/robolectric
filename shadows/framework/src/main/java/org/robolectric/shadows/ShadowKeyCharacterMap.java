@@ -1,8 +1,5 @@
 package org.robolectric.shadows;
 
-import static android.os.Build.VERSION_CODES.KITKAT;
-import static android.os.Build.VERSION_CODES.KITKAT_WATCH;
-
 import android.view.KeyCharacterMap;
 import android.view.KeyEvent;
 import java.util.HashMap;
@@ -64,6 +61,7 @@ public class ShadowKeyCharacterMap {
     CHAR_TO_KEY_CODE.put(',', KeyEvent.KEYCODE_COMMA);
     CHAR_TO_KEY_CODE.put('[', KeyEvent.KEYCODE_LEFT_BRACKET);
     CHAR_TO_KEY_CODE.put(']', KeyEvent.KEYCODE_RIGHT_BRACKET);
+    CHAR_TO_KEY_CODE.put(';', KeyEvent.KEYCODE_SEMICOLON);
     CHAR_TO_KEY_CODE.put('\'', KeyEvent.KEYCODE_APOSTROPHE);
     CHAR_TO_KEY_CODE.put(')', KeyEvent.KEYCODE_NUMPAD_RIGHT_PAREN);
     CHAR_TO_KEY_CODE.put('(', KeyEvent.KEYCODE_NUMPAD_LEFT_PAREN);
@@ -76,14 +74,23 @@ public class ShadowKeyCharacterMap {
     CHAR_TO_KEY_CODE.put('\n', KeyEvent.KEYCODE_ENTER);
 
     CHAR_TO_KEY_CODE_SHIFT_ON.put('_', KeyEvent.KEYCODE_MINUS);
+    CHAR_TO_KEY_CODE_SHIFT_ON.put('+', KeyEvent.KEYCODE_EQUALS);
     CHAR_TO_KEY_CODE_SHIFT_ON.put('{', KeyEvent.KEYCODE_LEFT_BRACKET);
     CHAR_TO_KEY_CODE_SHIFT_ON.put('}', KeyEvent.KEYCODE_RIGHT_BRACKET);
+    CHAR_TO_KEY_CODE_SHIFT_ON.put(':', KeyEvent.KEYCODE_SEMICOLON);
     CHAR_TO_KEY_CODE_SHIFT_ON.put('\"', KeyEvent.KEYCODE_APOSTROPHE);
+    CHAR_TO_KEY_CODE_SHIFT_ON.put(')', KeyEvent.KEYCODE_0);
     CHAR_TO_KEY_CODE_SHIFT_ON.put('!', KeyEvent.KEYCODE_1);
+    CHAR_TO_KEY_CODE_SHIFT_ON.put('@', KeyEvent.KEYCODE_2);
+    CHAR_TO_KEY_CODE_SHIFT_ON.put('#', KeyEvent.KEYCODE_3);
     CHAR_TO_KEY_CODE_SHIFT_ON.put('$', KeyEvent.KEYCODE_4);
     CHAR_TO_KEY_CODE_SHIFT_ON.put('%', KeyEvent.KEYCODE_5);
     CHAR_TO_KEY_CODE_SHIFT_ON.put('^', KeyEvent.KEYCODE_6);
     CHAR_TO_KEY_CODE_SHIFT_ON.put('&', KeyEvent.KEYCODE_7);
+    CHAR_TO_KEY_CODE_SHIFT_ON.put('*', KeyEvent.KEYCODE_8);
+    CHAR_TO_KEY_CODE_SHIFT_ON.put('(', KeyEvent.KEYCODE_9);
+    CHAR_TO_KEY_CODE_SHIFT_ON.put('>', KeyEvent.KEYCODE_PERIOD);
+    CHAR_TO_KEY_CODE_SHIFT_ON.put('<', KeyEvent.KEYCODE_COMMA);
     CHAR_TO_KEY_CODE_SHIFT_ON.put('?', KeyEvent.KEYCODE_SLASH);
     CHAR_TO_KEY_CODE_SHIFT_ON.put('|', KeyEvent.KEYCODE_BACKSLASH);
     CHAR_TO_KEY_CODE_SHIFT_ON.put('~', KeyEvent.KEYCODE_GRAVE);
@@ -132,6 +139,7 @@ public class ShadowKeyCharacterMap {
     KEY_CODE_TO_CHAR.put(KeyEvent.KEYCODE_COMMA, ',');
     KEY_CODE_TO_CHAR.put(KeyEvent.KEYCODE_LEFT_BRACKET, '[');
     KEY_CODE_TO_CHAR.put(KeyEvent.KEYCODE_RIGHT_BRACKET, ']');
+    KEY_CODE_TO_CHAR.put(KeyEvent.KEYCODE_SEMICOLON, ';');
     KEY_CODE_TO_CHAR.put(KeyEvent.KEYCODE_APOSTROPHE, '\'');
     KEY_CODE_TO_CHAR.put(KeyEvent.KEYCODE_NUMPAD_RIGHT_PAREN, ')');
     KEY_CODE_TO_CHAR.put(KeyEvent.KEYCODE_NUMPAD_LEFT_PAREN, '(');
@@ -144,14 +152,23 @@ public class ShadowKeyCharacterMap {
     KEY_CODE_TO_CHAR.put(KeyEvent.KEYCODE_ENTER, '\n');
 
     KEY_CODE_TO_CHAR_SHIFT_ON.put(KeyEvent.KEYCODE_MINUS, '_');
+    KEY_CODE_TO_CHAR_SHIFT_ON.put(KeyEvent.KEYCODE_EQUALS, '+');
     KEY_CODE_TO_CHAR_SHIFT_ON.put(KeyEvent.KEYCODE_LEFT_BRACKET, '{');
     KEY_CODE_TO_CHAR_SHIFT_ON.put(KeyEvent.KEYCODE_RIGHT_BRACKET, '}');
+    KEY_CODE_TO_CHAR_SHIFT_ON.put(KeyEvent.KEYCODE_SEMICOLON, ':');
     KEY_CODE_TO_CHAR_SHIFT_ON.put(KeyEvent.KEYCODE_APOSTROPHE, '\"');
+    KEY_CODE_TO_CHAR_SHIFT_ON.put(KeyEvent.KEYCODE_0, ')');
     KEY_CODE_TO_CHAR_SHIFT_ON.put(KeyEvent.KEYCODE_1, '!');
+    KEY_CODE_TO_CHAR_SHIFT_ON.put(KeyEvent.KEYCODE_2, '@');
+    KEY_CODE_TO_CHAR_SHIFT_ON.put(KeyEvent.KEYCODE_3, '#');
     KEY_CODE_TO_CHAR_SHIFT_ON.put(KeyEvent.KEYCODE_4, '$');
     KEY_CODE_TO_CHAR_SHIFT_ON.put(KeyEvent.KEYCODE_5, '%');
     KEY_CODE_TO_CHAR_SHIFT_ON.put(KeyEvent.KEYCODE_6, '^');
     KEY_CODE_TO_CHAR_SHIFT_ON.put(KeyEvent.KEYCODE_7, '&');
+    KEY_CODE_TO_CHAR_SHIFT_ON.put(KeyEvent.KEYCODE_8, '*');
+    KEY_CODE_TO_CHAR_SHIFT_ON.put(KeyEvent.KEYCODE_9, '(');
+    KEY_CODE_TO_CHAR_SHIFT_ON.put(KeyEvent.KEYCODE_PERIOD, '>');
+    KEY_CODE_TO_CHAR_SHIFT_ON.put(KeyEvent.KEYCODE_COMMA, '<');
     KEY_CODE_TO_CHAR_SHIFT_ON.put(KeyEvent.KEYCODE_SLASH, '?');
     KEY_CODE_TO_CHAR_SHIFT_ON.put(KeyEvent.KEYCODE_BACKSLASH, '|');
     KEY_CODE_TO_CHAR_SHIFT_ON.put(KeyEvent.KEYCODE_GRAVE, '~');
@@ -163,10 +180,7 @@ public class ShadowKeyCharacterMap {
   }
 
   @Implementation
-  protected KeyEvent[] getEvents(char[] chars) {
-    if (chars == null) {
-      throw new IllegalArgumentException("chars must not be null.");
-    }
+  protected static KeyEvent[] nativeGetEvents(long ptr, char[] chars) {
     int eventsPerChar = 2;
     KeyEvent[] events = new KeyEvent[chars.length * eventsPerChar];
 
@@ -179,26 +193,24 @@ public class ShadowKeyCharacterMap {
   }
 
   @Implementation
-  protected int getKeyboardType() {
+  protected static int nativeGetKeyboardType(long ptr) {
     return KeyCharacterMap.FULL;
   }
 
   @Implementation
-  protected int get(int keyCode, int metaState) {
+  protected static char nativeGetCharacter(long ptr, int keyCode, int metaState) {
     boolean metaShiftOn = (metaState & KeyEvent.META_SHIFT_ON) != 0;
     Character character = KEY_CODE_TO_CHAR.get(keyCode);
     if (character == null) {
       return 0;
     } else if (metaShiftOn) {
-      return KEY_CODE_TO_CHAR_SHIFT_ON.containsKey(keyCode)
-          ? KEY_CODE_TO_CHAR_SHIFT_ON.get(keyCode)
-          : character;
+      return KEY_CODE_TO_CHAR_SHIFT_ON.getOrDefault(keyCode, character);
     } else {
       return Character.toLowerCase(character);
     }
   }
 
-  public KeyEvent getDownEvent(char a) {
+  private static KeyEvent getDownEvent(char a) {
     return new KeyEvent(
         0,
         0,
@@ -210,7 +222,7 @@ public class ShadowKeyCharacterMap {
         0);
   }
 
-  public KeyEvent getUpEvent(char a) {
+  private static KeyEvent getUpEvent(char a) {
     return new KeyEvent(
         0,
         0,
@@ -222,7 +234,12 @@ public class ShadowKeyCharacterMap {
         0);
   }
 
-  @Implementation(minSdk = KITKAT_WATCH)
+  @Implementation
+  protected static char nativeGetDisplayLabel(long ptr, int keyCode) {
+    return KEY_CODE_TO_CHAR.getOrDefault(keyCode, (char) 0);
+  }
+
+  @Implementation
   protected static char nativeGetNumber(long ptr, int keyCode) {
     Character character = KEY_CODE_TO_CHAR.get(keyCode);
     if (character == null) {
@@ -231,16 +248,7 @@ public class ShadowKeyCharacterMap {
     return character;
   }
 
-  @Implementation(maxSdk = KITKAT)
-  protected static char nativeGetNumber(int ptr, int keyCode) {
-    Character character = KEY_CODE_TO_CHAR.get(keyCode);
-    if (character == null) {
-      return 0;
-    }
-    return character;
-  }
-
-  private int toCharKeyCode(char a) {
+  private static int toCharKeyCode(char a) {
     if (CHAR_TO_KEY_CODE.containsKey(Character.toUpperCase(a))) {
       return CHAR_TO_KEY_CODE.get(Character.toUpperCase(a));
     } else if (CHAR_TO_KEY_CODE_SHIFT_ON.containsKey(a)) {
@@ -250,7 +258,7 @@ public class ShadowKeyCharacterMap {
     }
   }
 
-  private int getMetaState(char a) {
+  private static int getMetaState(char a) {
     if (Character.isUpperCase(a) || CHAR_TO_KEY_CODE_SHIFT_ON.containsKey(a)) {
       return KeyEvent.META_SHIFT_ON;
     } else {

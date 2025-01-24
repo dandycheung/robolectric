@@ -1,6 +1,5 @@
 package org.robolectric.shadows;
 
-import static android.os.Build.VERSION_CODES.JELLY_BEAN_MR1;
 import static android.os.Build.VERSION_CODES.P;
 
 import android.os.SystemClock;
@@ -25,7 +24,7 @@ import org.robolectric.annotation.Resetter;
     // turn off shadowOf generation
     isInAndroidSdk = false)
 public class ShadowLegacySystemClock extends ShadowSystemClock {
-  private static long bootedAt = 0;
+  private static final long bootedAt = 0;
   private static long nanoTime = 0;
   private static final int MILLIS_PER_NANO = 1000000;
 
@@ -59,7 +58,7 @@ public class ShadowLegacySystemClock extends ShadowSystemClock {
     return uptimeMillis();
   }
 
-  @Implementation(minSdk = JELLY_BEAN_MR1)
+  @Implementation
   protected static long elapsedRealtimeNanos() {
     return elapsedRealtime() * MILLIS_PER_NANO;
   }

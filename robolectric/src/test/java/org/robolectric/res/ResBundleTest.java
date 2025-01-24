@@ -17,7 +17,7 @@ import org.robolectric.res.android.ResTable_config;
 
 @RunWith(JUnit4.class)
 public class ResBundleTest {
-  private ResBundle.ResMap resMap = new ResBundle.ResMap();
+  private final ResBundle.ResMap resMap = new ResBundle.ResMap();
   private ResName resName;
 
   @Before
@@ -129,38 +129,37 @@ public class ResBundleTest {
   }
 
   @Test
-  public void shouldMatchQualifiersPerAndroidSpec() throws Exception {
-    assertEquals("en-port", asResMap(
-        "",
-        "en",
-        "fr-rCA",
+  public void shouldMatchQualifiersPerAndroidSpec() {
+    assertEquals(
         "en-port",
-        "en-notouch-12key",
-        "port-ldpi",
-        "land-notouch-12key").pick(resName,
-        from("en-rGB-port-hdpi-notouch-12key-v25")).asString());
+        asResMap(
+                "",
+                "en",
+                "fr-rCA",
+                "en-port",
+                "en-notouch-12key",
+                "port-ldpi",
+                "land-notouch-12key")
+            .pick(resName, from("en-rGB-port-hdpi-notouch-12key-v25"))
+            .asString());
   }
 
   @Test
-  public void shouldMatchQualifiersInSizeRange() throws Exception {
-    assertEquals("sw300dp-port", asResMap(
-        "",
-        "sw200dp",
-        "sw350dp-port",
+  public void shouldMatchQualifiersInSizeRange() {
+    assertEquals(
         "sw300dp-port",
-        "sw300dp").pick(resName,
-        from("sw320dp-port-v25")).asString());
+        asResMap("", "sw200dp", "sw350dp-port", "sw300dp-port", "sw300dp")
+            .pick(resName, from("sw320dp-port-v25"))
+            .asString());
   }
 
   @Test
-  public void shouldPreferWidthOverHeight() throws Exception {
-    assertEquals("sw300dp-w200dp", asResMap(
-        "",
-        "sw200dp",
-        "sw200dp-w300dp",
+  public void shouldPreferWidthOverHeight() {
+    assertEquals(
         "sw300dp-w200dp",
-        "w300dp").pick(resName,
-        from("sw320dp-w320dp-v25")).asString());
+        asResMap("", "sw200dp", "sw200dp-w300dp", "sw300dp-w200dp", "w300dp")
+            .pick(resName, from("sw320dp-w320dp-v25"))
+            .asString());
   }
 
   @Test
@@ -171,12 +170,18 @@ public class ResBundleTest {
     when(xmlContext.getConfig()).thenReturn(new ResTable_config());
     when(xmlContext.getPackageName()).thenReturn("org.robolectric");
 
-    TypedResource firstValue = new TypedResource<>("first_value", ResType.CHAR_SEQUENCE, xmlContext);
-    TypedResource secondValue = new TypedResource<>("second_value", ResType.CHAR_SEQUENCE, xmlContext);
+    TypedResource firstValue =
+        new TypedResource<>("first_value", ResType.CHAR_SEQUENCE, xmlContext);
+    TypedResource secondValue =
+        new TypedResource<>("second_value", ResType.CHAR_SEQUENCE, xmlContext);
     bundle.put(new ResName("org.robolectric", "string", "resource_name"), firstValue);
     bundle.put(new ResName("org.robolectric", "string", "resource_name"), secondValue);
 
-    assertThat(bundle.get(new ResName("org.robolectric", "string", "resource_name"), from("")).getData()).isEqualTo("first_value");
+    assertThat(
+            bundle
+                .get(new ResName("org.robolectric", "string", "resource_name"), from(""))
+                .getData())
+        .isEqualTo("first_value");
   }
 
   private ResBundle.ResMap asResMap(String... qualifierses) {
@@ -202,8 +207,7 @@ public class ResBundleTest {
 
   private static ResTable_config from(String qualifiers) {
     ResTable_config config = new ResTable_config();
-    if (!Strings.isNullOrEmpty(qualifiers) &&
-        !ConfigDescription.parse(qualifiers, config, false)) {
+    if (!Strings.isNullOrEmpty(qualifiers) && !ConfigDescription.parse(qualifiers, config, false)) {
       throw new IllegalArgumentException("Invalid qualifiers \"" + qualifiers + "\"");
     }
     return config;

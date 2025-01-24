@@ -2,12 +2,12 @@ package org.robolectric.shadows;
 
 import static android.media.MediaRouter.ROUTE_TYPE_LIVE_AUDIO;
 import static android.media.MediaRouter.ROUTE_TYPE_LIVE_VIDEO;
-import static android.os.Build.VERSION_CODES.JELLY_BEAN_MR1;
-import static android.os.Build.VERSION_CODES.JELLY_BEAN_MR2;
 import static android.os.Build.VERSION_CODES.N;
+import static android.os.Build.VERSION_CODES.O;
 import static com.google.common.truth.Truth.assertThat;
 import static org.robolectric.Shadows.shadowOf;
 
+import android.app.Activity;
 import android.content.Context;
 import android.media.MediaRouter;
 import android.media.MediaRouter.RouteInfo;
@@ -16,7 +16,8 @@ import androidx.test.ext.junit.runners.AndroidJUnit4;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
-import org.robolectric.RuntimeEnvironment;
+import org.robolectric.Robolectric;
+import org.robolectric.android.controller.ActivityController;
 import org.robolectric.annotation.Config;
 
 /** Tests for {@link ShadowMediaRouter}. */
@@ -51,13 +52,6 @@ public final class ShadowMediaRouterTest {
     RouteInfo bluetoothRoute = mediaRouter.getRouteAt(1);
     assertThat(bluetoothRoute.getName().toString())
         .isEqualTo(ShadowMediaRouter.BLUETOOTH_DEVICE_NAME);
-  }
-
-  @Test
-  @Config(minSdk = JELLY_BEAN_MR2)
-  public void testAddBluetoothRoute_checkBluetoothRouteProperties_apiJbMr2() {
-    shadowOf(mediaRouter).addBluetoothRoute();
-    RouteInfo bluetoothRoute = mediaRouter.getRouteAt(1);
     assertThat(bluetoothRoute.getDescription().toString()).isEqualTo("Bluetooth audio");
   }
 
@@ -88,7 +82,8 @@ public final class ShadowMediaRouterTest {
     shadowOf(mediaRouter).removeBluetoothRoute();
 
     assertThat(mediaRouter.getRouteCount()).isEqualTo(1);
-    assertThat(mediaRouter.getSelectedRoute(ROUTE_TYPE_LIVE_AUDIO)).isEqualTo(getDefaultRoute());
+    assertThat(mediaRouter.getSelectedRoute(ROUTE_TYPE_LIVE_AUDIO))
+        .isEqualTo(mediaRouter.getDefaultRoute());
   }
 
   @Test
@@ -100,7 +95,8 @@ public final class ShadowMediaRouterTest {
     shadowOf(mediaRouter).removeBluetoothRoute();
 
     assertThat(mediaRouter.getRouteCount()).isEqualTo(1);
-    assertThat(mediaRouter.getSelectedRoute(ROUTE_TYPE_LIVE_AUDIO)).isEqualTo(getDefaultRoute());
+    assertThat(mediaRouter.getSelectedRoute(ROUTE_TYPE_LIVE_AUDIO))
+        .isEqualTo(mediaRouter.getDefaultRoute());
   }
 
   @Test
@@ -108,24 +104,21 @@ public final class ShadowMediaRouterTest {
     assertThat(shadowOf(mediaRouter).isBluetoothRouteSelected(ROUTE_TYPE_LIVE_AUDIO)).isFalse();
   }
 
-  // Pre-API 18, non-user routes weren't able to be selected.
   @Test
-  @Config(minSdk = JELLY_BEAN_MR2)
   public void testIsBluetoothRouteSelected_bluetoothRouteAddedButNotSelected_returnsFalse() {
     shadowOf(mediaRouter).addBluetoothRoute();
-    mediaRouter.selectRoute(ROUTE_TYPE_LIVE_AUDIO, getDefaultRoute());
+    mediaRouter.selectRoute(ROUTE_TYPE_LIVE_AUDIO, mediaRouter.getDefaultRoute());
     assertThat(shadowOf(mediaRouter).isBluetoothRouteSelected(ROUTE_TYPE_LIVE_AUDIO)).isFalse();
   }
 
   @Test
-  @Config(minSdk = JELLY_BEAN_MR1)
   public void testIsBluetoothRouteSelected_bluetoothRouteSelectedForDifferentType_returnsFalse() {
     shadowOf(mediaRouter).addBluetoothRoute();
     RouteInfo bluetoothRoute = mediaRouter.getRouteAt(1);
 
     // Select the Bluetooth route for AUDIO and the default route for AUDIO.
     mediaRouter.selectRoute(ROUTE_TYPE_LIVE_AUDIO, bluetoothRoute);
-    mediaRouter.selectRoute(ROUTE_TYPE_LIVE_VIDEO, getDefaultRoute());
+    mediaRouter.selectRoute(ROUTE_TYPE_LIVE_VIDEO, mediaRouter.getDefaultRoute());
 
     assertThat(shadowOf(mediaRouter).isBluetoothRouteSelected(ROUTE_TYPE_LIVE_VIDEO)).isFalse();
   }
@@ -138,10 +131,30 @@ public final class ShadowMediaRouterTest {
     assertThat(shadowOf(mediaRouter).isBluetoothRouteSelected(ROUTE_TYPE_LIVE_AUDIO)).isTrue();
   }
 
-  private RouteInfo getDefaultRoute() {
-    if (RuntimeEnvironment.getApiLevel() >= JELLY_BEAN_MR2) {
-      return mediaRouter.getDefaultRoute();
+  @Test
+  @Config(minSdk = O)
+  public void mediaRouter_activityContextEnabled_differentInstancesRetrieveDefaultRoute() {
+    String originalProperty = System.getProperty("robolectric.createActivityContexts", "");
+    System.setProperty("robolectric.createActivityContexts", "true");
+    try (ActivityController<Activity> controller =
+        Robolectric.buildActivity(Activity.class).setup()) {
+      MediaRouter applicationMediaRouter =
+          (MediaRouter)
+              ApplicationProvider.getApplicationContext()
+                  .getSystemService(Context.MEDIA_ROUTER_SERVICE);
+
+      Activity activity = controller.get();
+      MediaRouter activityMediaRouter =
+          (MediaRouter) activity.getSystemService(Context.MEDIA_ROUTER_SERVICE);
+
+      assertThat(applicationMediaRouter).isNotSameInstanceAs(activityMediaRouter);
+
+      MediaRouter.RouteInfo applicationDefaultRoute = applicationMediaRouter.getDefaultRoute();
+      MediaRouter.RouteInfo activityDefaultRoute = activityMediaRouter.getDefaultRoute();
+
+      assertThat(activityDefaultRoute).isEqualTo(applicationDefaultRoute);
+    } finally {
+      System.setProperty("robolectric.createActivityContexts", originalProperty);
     }
-    return mediaRouter.getRouteAt(0);
   }
 }

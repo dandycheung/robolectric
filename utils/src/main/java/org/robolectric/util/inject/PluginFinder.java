@@ -3,8 +3,14 @@ package org.robolectric.util.inject;
 import static java.util.Collections.reverseOrder;
 import static java.util.Comparator.comparing;
 
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.Enumeration;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
@@ -15,6 +21,7 @@ import java.util.stream.Collectors;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import javax.annotation.Priority;
+import org.robolectric.util.PerfStatsCollector;
 
 @SuppressWarnings({"NewApi", "AndroidJdkLibsChecker"})
 class PluginFinder {
@@ -69,23 +76,23 @@ class PluginFinder {
   }
 
   private <T> Iterable<Class<? extends T>> filter(Iterable<Class<? extends T>> classes) {
-    Set<Class<?>> superceded = new HashSet<>();
+    Set<Class<?>> superseded = new HashSet<>();
     for (Class<? extends T> clazz : classes) {
-      Supercedes supercedes = clazz.getAnnotation(Supercedes.class);
-      if (supercedes != null) {
-        superceded.add(supercedes.value());
+      Supersedes supersedes = clazz.getAnnotation(Supersedes.class);
+      if (supersedes != null) {
+        superseded.add(supersedes.value());
       }
     }
-    if (superceded.isEmpty()) {
+    if (superseded.isEmpty()) {
       return classes;
     } else {
-      return () -> new Filterator<>(classes.iterator(), o -> !superceded.contains(o));
+      return () -> new Filterator<>(classes.iterator(), o -> !superseded.contains(o));
     }
   }
 
   @Nullable
-  private <T> Class<? extends T> best(Class<T> pluginType,
-      List<Class<? extends T>> serviceClasses) {
+  private <T> Class<? extends T> best(
+      Class<T> pluginType, List<Class<? extends T>> serviceClasses) {
     if (serviceClasses.isEmpty()) {
       return null;
     }
@@ -96,9 +103,10 @@ class PluginFinder {
     }
 
     int topPriority = priority(first);
-    serviceClasses = serviceClasses.stream()
-        .filter(it -> priority(it) == topPriority)
-        .collect(Collectors.toList());
+    serviceClasses =
+        serviceClasses.stream()
+            .filter(it -> priority(it) == topPriority)
+            .collect(Collectors.toList());
 
     if (serviceClasses.size() == 1) {
       return serviceClasses.get(0);
@@ -117,11 +125,36 @@ class PluginFinder {
 
     @Nonnull
     <T> Iterable<Class<? extends T>> load(Class<T> pluginType) {
-      if (classLoader == null) {
-        return ServiceFinder.load(pluginType);
-      } else {
-        return ServiceFinder.load(pluginType, classLoader);
-      }
+      return PerfStatsCollector.getInstance()
+          .measure(
+              "loadPlugins",
+              () -> {
+                ClassLoader serviceClassLoader = classLoader;
+                if (serviceClassLoader == null) {
+                  serviceClassLoader = Thread.currentThread().getContextClassLoader();
+                }
+                HashSet<Class<? extends T>> result = new HashSet<>();
+
+                try {
+                  Enumeration<URL> urls =
+                      serviceClassLoader.getResources("META-INF/services/" + pluginType.getName());
+                  while (urls.hasMoreElements()) {
+                    URL url = urls.nextElement();
+                    BufferedReader reader =
+                        new BufferedReader(
+                            new InputStreamReader(url.openStream(), StandardCharsets.UTF_8));
+                    while (reader.ready()) {
+                      String s = reader.readLine();
+                      result.add(
+                          Class.forName(s, false, serviceClassLoader).asSubclass(pluginType));
+                    }
+                    reader.close();
+                  }
+                  return result;
+                } catch (IOException | ClassNotFoundException e) {
+                  throw new AssertionError(e);
+                }
+              });
     }
   }
 

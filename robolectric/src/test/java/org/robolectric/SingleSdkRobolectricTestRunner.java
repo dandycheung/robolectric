@@ -4,7 +4,9 @@ import android.os.Build;
 import java.util.Collections;
 import java.util.List;
 import javax.annotation.Nonnull;
+import org.junit.runners.model.FrameworkMethod;
 import org.junit.runners.model.InitializationError;
+import org.robolectric.internal.AndroidSandbox;
 import org.robolectric.pluginapi.Sdk;
 import org.robolectric.pluginapi.SdkPicker;
 import org.robolectric.pluginapi.UsesSdk;
@@ -16,9 +18,10 @@ public class SingleSdkRobolectricTestRunner extends RobolectricTestRunner {
 
   private static final Injector DEFAULT_INJECTOR = defaultInjector().build();
 
+  private AndroidSandbox latestSandbox;
+
   public static Injector.Builder defaultInjector() {
-    return RobolectricTestRunner.defaultInjector()
-        .bind(SdkPicker.class, SingleSdkPicker.class);
+    return RobolectricTestRunner.defaultInjector().bind(SdkPicker.class, SingleSdkPicker.class);
   }
 
   public SingleSdkRobolectricTestRunner(Class<?> testClass) throws InitializationError {
@@ -31,8 +34,15 @@ public class SingleSdkRobolectricTestRunner extends RobolectricTestRunner {
   }
 
   @Override
-  ResModeStrategy getResModeStrategy() {
-    return ResModeStrategy.binary;
+  @Nonnull
+  protected AndroidSandbox getSandbox(FrameworkMethod method) {
+    AndroidSandbox sandbox = super.getSandbox(method);
+    latestSandbox = sandbox;
+    return sandbox;
+  }
+
+  public AndroidSandbox getLatestSandbox() {
+    return latestSandbox;
   }
 
   public static class SingleSdkPicker implements SdkPicker {

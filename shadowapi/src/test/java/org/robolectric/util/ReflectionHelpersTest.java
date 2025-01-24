@@ -2,16 +2,29 @@ package org.robolectric.util;
 
 import static com.google.common.truth.Truth.assertThat;
 import static com.google.common.truth.Truth.assertWithMessage;
+import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.fail;
 
 import java.lang.reflect.Field;
+import javax.annotation.Nullable;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
+import org.robolectric.annotation.ClassName;
 import org.robolectric.util.ReflectionHelpers.ClassParameter;
 
 @RunWith(JUnit4.class)
 public class ReflectionHelpersTest {
+
+  @Test
+  public void hasConstructor() {
+    assertThat(ReflectionHelpers.hasConstructor(ExampleClass.class, String.class)).isTrue();
+    assertThat(ReflectionHelpers.hasConstructor(ExampleClass.class, int.class)).isTrue();
+    assertThat(ReflectionHelpers.hasConstructor(ExampleClass.class, int.class, int.class))
+        .isFalse();
+    assertThat(ReflectionHelpers.hasConstructor(ExampleClass.class, double.class)).isFalse();
+    assertThat(ReflectionHelpers.hasConstructor(ExampleClass.class, Object.class)).isFalse();
+  }
 
   @Test
   public void getFieldReflectively_getsPrivateFields() {
@@ -92,7 +105,7 @@ public class ReflectionHelpersTest {
   }
 
   @Test
-  public void getFinalStaticFieldReflectively_withFieldName_getsStaticField() throws Exception {
+  public void getFinalStaticFieldReflectively_withFieldName_getsStaticField() {
     assertThat((int) ReflectionHelpers.getStaticField(ExampleBase.class, "BASE")).isEqualTo(8);
   }
 
@@ -103,7 +116,7 @@ public class ReflectionHelpersTest {
 
     ReflectionHelpers.setStaticField(field, 7);
     assertWithMessage("startingValue").that(startingValue).isEqualTo(6);
-    assertWithMessage("DESCENDENT").that(ExampleDescendant.DESCENDANT).isEqualTo(7);
+    assertWithMessage("DESCENDANT").that(ExampleDescendant.DESCENDANT).isEqualTo(7);
 
     /// Reset the value to avoid test pollution
     ReflectionHelpers.setStaticField(field, startingValue);
@@ -115,7 +128,7 @@ public class ReflectionHelpersTest {
 
     ReflectionHelpers.setStaticField(ExampleDescendant.class, "DESCENDANT", 7);
     assertWithMessage("startingValue").that(startingValue).isEqualTo(6);
-    assertWithMessage("DESCENDENT").that(ExampleDescendant.DESCENDANT).isEqualTo(7);
+    assertWithMessage("DESCENDANT").that(ExampleDescendant.DESCENDANT).isEqualTo(7);
 
     // Reset the value to avoid test pollution
     ReflectionHelpers.setStaticField(ExampleDescendant.class, "DESCENDANT", startingValue);
@@ -123,16 +136,14 @@ public class ReflectionHelpersTest {
 
   @Test
   public void setFinalStaticFieldReflectively_withFieldName_setsStaticFields() {
-    int startingValue = ReflectionHelpers.getStaticField(ExampleWithFinalStatic.class, "FIELD");
-
-    ReflectionHelpers.setStaticField(ExampleWithFinalStatic.class, "FIELD", 101);
-    assertWithMessage("startingValue").that(startingValue).isEqualTo(100);
-    assertWithMessage("BASE")
-        .that((int) ReflectionHelpers.getStaticField(ExampleWithFinalStatic.class, "FIELD"))
-        .isEqualTo(101);
-
-    // Reset the value to avoid test pollution
-    ReflectionHelpers.setStaticField(ExampleWithFinalStatic.class, "FIELD", startingValue);
+    RuntimeException thrown =
+        assertThrows(
+            RuntimeException.class,
+            () -> ReflectionHelpers.setStaticField(ExampleWithFinalStatic.class, "FIELD", 101));
+    assertThat(thrown)
+        .hasCauseThat()
+        .hasMessageThat()
+        .contains("Cannot set the value of final field");
   }
 
   @Test
@@ -142,7 +153,8 @@ public class ReflectionHelpersTest {
   }
 
   @Test
-  public void callInstanceMethodReflectively_whenMultipleSignaturesExistForAMethodName_callsMethodWithCorrectSignature() {
+  public void
+      callInstanceMethodReflectively_whenMultipleSignaturesExistForAMethodName_callsMethodWithCorrectSignature() {
     ExampleDescendant example = new ExampleDescendant();
     int returnNumber =
         ReflectionHelpers.callInstanceMethod(
@@ -283,23 +295,83 @@ public class ReflectionHelpersTest {
   }
 
   @Test
-  public void callConstructorReflectively_whenMultipleSignaturesExistForTheConstructor_callsConstructorWithCorrectSignature() {
-    ExampleClass ec = ReflectionHelpers.callConstructor(ExampleClass.class, ClassParameter.from(int.class, 16));
+  public void
+      callConstructorReflectively_whenMultipleSignaturesExistForTheConstructor_callsConstructorWithCorrectSignature() {
+    ExampleClass ec =
+        ReflectionHelpers.callConstructor(ExampleClass.class, ClassParameter.from(int.class, 16));
     assertWithMessage("index").that(ec.index).isEqualTo(16);
     assertWithMessage("name").that(ec.name).isNull();
   }
 
-  @SuppressWarnings("serial")
-  private static class TestError extends Error {
+  @Test
+  public void callHasField_withStaticAndRegularMember() {
+    assertWithMessage("has field failed for member: unusedName")
+        .that(ReflectionHelpers.hasField(FieldTestClass.class, "unusedName"))
+        .isTrue();
+    assertWithMessage("has field failed for member: unusedStaticName")
+        .that(ReflectionHelpers.hasField(FieldTestClass.class, "unusedStaticName"))
+        .isTrue();
+    assertWithMessage("has field failed for non existent member: noname")
+        .that(ReflectionHelpers.hasField(FieldTestClass.class, "noname"))
+        .isFalse();
   }
 
-  @SuppressWarnings("serial")
-  private static class TestException extends Exception {
+  @Test
+  public void createDelegatingProxy_defersToNullProxyIfNoMethodMatches() {
+    DelegatingProxyFixture fixture =
+        ReflectionHelpers.createDelegatingProxy(DelegatingProxyFixture.class, new Object());
+    assertThat(fixture.delegateMethod()).isNull();
   }
 
-  @SuppressWarnings("serial")
-  private static class TestRuntimeException extends RuntimeException {
+  @Test
+  public void createDelegatingProxy_defersToDelegate() {
+    DelegatingProxyFixture fixture =
+        ReflectionHelpers.createDelegatingProxy(DelegatingProxyFixture.class, new Delegate());
+    assertThat(fixture.delegateMethod()).isEqualTo("called");
   }
+
+  @Test
+  public void createDelegatingProxy_defersToDelegateWithParams() {
+    DelegatingProxyFixture fixture =
+        ReflectionHelpers.createDelegatingProxy(DelegatingProxyFixture.class, new Delegate());
+    assertThat(fixture.delegateMethod("value")).isEqualTo("called value");
+  }
+
+  @Test
+  public void createDelegatingProxy_wrongParamType() {
+    DelegatingProxyFixture fixture =
+        ReflectionHelpers.createDelegatingProxy(DelegatingProxyFixture.class, new Delegate());
+    // verify the mismatched delegate method doesn't get matched
+    assertThat(fixture.delegateMethodWrongParamType("value")).isNull();
+  }
+
+  @Test
+  public void createDelegatingProxy_wrongVisibility() {
+    DelegatingProxyFixture fixture =
+        ReflectionHelpers.createDelegatingProxy(DelegatingProxyFixture.class, new Delegate());
+    // verify the mismatched delegate method doesn't get matched
+    assertThat(fixture.delegateMethodWrongVisibility("value")).isNull();
+  }
+
+  @Test
+  public void createDelegatingProxy_className() {
+    DelegatingProxyFixture fixture =
+        ReflectionHelpers.createDelegatingProxy(DelegatingProxyFixture.class, new Delegate());
+    assertThat(fixture.delegateMethodWithClassName("value")).isEqualTo("called ClassName value");
+  }
+
+  @Test
+  public void createDelegatingProxy_multipleParams() {
+    DelegatingProxyFixture fixture =
+        ReflectionHelpers.createDelegatingProxy(DelegatingProxyFixture.class, new Delegate());
+    assertThat(fixture.delegateMethod("value", "value2")).isEqualTo("called valuevalue2");
+  }
+
+  private static class TestError extends Error {}
+
+  private static class TestException extends Exception {}
+
+  private static class TestRuntimeException extends RuntimeException {}
 
   @SuppressWarnings("unused")
   private static class ExampleBase {
@@ -396,8 +468,7 @@ public class ReflectionHelpersTest {
     public String name;
     public int index;
 
-    private ExampleClass() {
-    }
+    private ExampleClass() {}
 
     private ExampleClass(String name) {
       this.name = name;
@@ -405,6 +476,58 @@ public class ReflectionHelpersTest {
 
     private ExampleClass(int index) {
       this.index = index;
+    }
+  }
+
+  private static class FieldTestClass {
+    public String unusedName;
+    public static String unusedStaticName = "unusedStaticNameValue";
+
+    private FieldTestClass() {}
+  }
+
+  private interface DelegatingProxyFixture {
+    String delegateMethod();
+
+    String delegateMethod(String value);
+
+    String delegateMethod(String value, String value2);
+
+    String delegateMethodWrongParamType(String value);
+
+    String delegateMethodWithClassName(String value);
+
+    String delegateMethodWrongVisibility(String value);
+  }
+
+  /** A delegate for DelegatingProxyFixture */
+  private static class Delegate {
+    public String delegateMethod() {
+      return "called";
+    }
+
+    public String delegateMethod(String value) {
+      return "called " + value;
+    }
+
+    public String delegateMethod(String value, String value2) {
+      return "called " + value + value2;
+    }
+
+    public String delegateMethodWrongParamType(int value) {
+      throw new IllegalStateException("delegateMethodWrongParamType unexpectedly called");
+    }
+
+    /**
+     * Add a Nullable annotation as well as ClassName to ensure logic handles multiple annotations
+     */
+    public String delegateMethodWithClassName(
+        @Nullable @ClassName("java.lang.String") Object value) {
+      return "called ClassName " + (String) value;
+    }
+
+    String delegateMethodWrongVisibility(String value) {
+      throw new IllegalStateException("delegateMethodWrongVisibility unexpectedly called");
     }
   }
 }

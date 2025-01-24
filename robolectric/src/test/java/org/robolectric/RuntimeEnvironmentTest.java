@@ -6,8 +6,12 @@ import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static org.robolectric.annotation.LooperMode.Mode.LEGACY;
 
 import android.app.Application;
+import android.content.Context;
 import android.content.res.Configuration;
+import android.text.format.DateUtils;
+import android.util.DisplayMetrics;
 import android.view.Surface;
+import androidx.test.core.app.ApplicationProvider;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -41,13 +45,11 @@ public class RuntimeEnvironmentTest {
     final AtomicBoolean res = new AtomicBoolean();
     final CountDownLatch finished = new CountDownLatch(1);
     Thread t =
-        new Thread() {
-          @Override
-          public void run() {
-            res.set(RuntimeEnvironment.isMainThread());
-            finished.countDown();
-          }
-        };
+        new Thread(
+            () -> {
+              res.set(RuntimeEnvironment.isMainThread());
+              finished.countDown();
+            });
     RuntimeEnvironment.setMainThread(Thread.currentThread());
     t.start();
     if (!finished.await(1000, MILLISECONDS)) {
@@ -79,7 +81,7 @@ public class RuntimeEnvironmentTest {
 
   @Test
   @LooperMode(LEGACY)
-  public void isMainThread_withArg_forNewThread_withSwitch() throws InterruptedException {
+  public void isMainThread_withArg_forNewThread_withSwitch() {
     Thread t = new Thread();
     RuntimeEnvironment.setMainThread(t);
     assertThat(RuntimeEnvironment.isMainThread(t)).isTrue();
@@ -110,9 +112,40 @@ public class RuntimeEnvironmentTest {
   }
 
   @Test
+  public void testSetFontScale_updatesFontScale() {
+    Context context = ApplicationProvider.getApplicationContext();
+    DisplayMetrics displayMetrics = context.getResources().getDisplayMetrics();
+
+    assertThat(context.getResources().getConfiguration().fontScale).isEqualTo(1.0f);
+    assertThat(displayMetrics.scaledDensity).isEqualTo(displayMetrics.density);
+    assertThat(RuntimeEnvironment.getFontScale()).isEqualTo(1.0f);
+
+    RuntimeEnvironment.setFontScale(1.3f);
+
+    assertThat(context.getResources().getConfiguration().fontScale).isEqualTo(1.3f);
+    assertThat(displayMetrics.scaledDensity).isEqualTo(displayMetrics.density * 1.3f);
+    assertThat(RuntimeEnvironment.getFontScale()).isEqualTo(1.3f);
+  }
+
+  @Test
   public void testGetRotation() {
     RuntimeEnvironment.setQualifiers("+land");
     int screenRotation = ShadowDisplay.getDefaultDisplay().getRotation();
-    assertThat(screenRotation).isEqualTo(Surface.ROTATION_0);
+    assertThat(screenRotation).isEqualTo(Surface.ROTATION_90);
+  }
+
+  @Test
+  public void setQualifiers_resetsDateUtilsFormatCache() {
+    RuntimeEnvironment.setQualifiers("ar-rXB");
+    // Populate the DateUtils static format cache.
+    String unused = DateUtils.formatElapsedTime(120);
+    RuntimeEnvironment.setQualifiers("en-rUS");
+    assertThat(DateUtils.formatElapsedTime(120)).isEqualTo("02:00");
+  }
+
+  @Test
+  public void setQualifiers_withResultFromGetQualifiers() {
+    // Calling this should not cause an exception, e.g. API level mismatch.
+    RuntimeEnvironment.setQualifiers(RuntimeEnvironment.getQualifiers());
   }
 }

@@ -1,16 +1,13 @@
 package org.robolectric.shadows;
 
-import static android.os.Build.VERSION_CODES.JELLY_BEAN_MR1;
-import static android.os.Build.VERSION_CODES.JELLY_BEAN_MR2;
-import static android.os.Build.VERSION_CODES.KITKAT;
-import static android.os.Build.VERSION_CODES.LOLLIPOP;
 import static android.os.Build.VERSION_CODES.M;
 import static android.os.Build.VERSION_CODES.N;
 import static android.os.Build.VERSION_CODES.O;
+import static android.os.Build.VERSION_CODES.Q;
+import static android.os.Build.VERSION_CODES.TIRAMISU;
 import static org.robolectric.shadow.api.Shadow.directlyOn;
 import static org.robolectric.util.reflector.Reflector.reflector;
 
-import android.annotation.Nullable;
 import android.annotation.RequiresPermission;
 import android.app.ActivityThread;
 import android.app.LoadedApk;
@@ -26,7 +23,6 @@ import android.content.ServiceConnection;
 import android.content.SharedPreferences;
 import android.content.pm.ActivityInfo;
 import android.content.res.Configuration;
-import android.os.Build;
 import android.os.Build.VERSION_CODES;
 import android.os.Bundle;
 import android.os.Environment;
@@ -35,12 +31,15 @@ import android.os.Handler;
 import android.os.IBinder;
 import android.os.UserHandle;
 import com.google.common.base.Strings;
+import com.google.errorprone.annotations.concurrent.GuardedBy;
 import java.io.File;
 import java.nio.file.Paths;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.Executor;
+import javax.annotation.Nullable;
 import org.robolectric.RuntimeEnvironment;
 import org.robolectric.annotation.Implementation;
 import org.robolectric.annotation.Implements;
@@ -58,18 +57,22 @@ import org.robolectric.util.reflector.Static;
 public class ShadowContextImpl {
 
   public static final String CLASS_NAME = "android.app.ContextImpl";
-  private ContentResolver contentResolver;
 
   @RealObject private Context realContextImpl;
 
-  private Map<String, Object> systemServices = new HashMap<String, Object>();
+  private final Map<String, Object> systemServices = new HashMap<>();
   private final Set<String> removedSystemServices = new HashSet<>();
+  private final Object contentResolverLock = new Object();
+
+  @GuardedBy("contentResolverLock")
+  private ContentResolver contentResolver;
+
   private Integer userId;
 
   /**
    * Returns the handle to a system-level service by name. If the service is not available in
-   * Roboletric, or it is set to unavailable in {@link ShadowServiceManager#setServiceAvailability},
-   * {@code null} will be returned.
+   * Robolectric, or it is set to unavailable in {@link
+   * ShadowServiceManager#setServiceAvailability}, {@code null} will be returned.
    */
   @Implementation
   @Nullable
@@ -124,58 +127,67 @@ public class ShadowContextImpl {
 
   @Implementation
   protected ContentResolver getContentResolver() {
-    if (contentResolver == null) {
-      contentResolver =
-          new ContentResolver(realContextImpl) {
-            @Override
-            protected IContentProvider acquireProvider(Context c, String name) {
-              return null;
-            }
+    synchronized (contentResolverLock) {
+      if (contentResolver == null) {
+        contentResolver =
+            new ContentResolver(realContextImpl) {
+              @Override
+              protected IContentProvider acquireProvider(Context c, String name) {
+                return null;
+              }
 
-            @Override
-            public boolean releaseProvider(IContentProvider icp) {
-              return false;
-            }
+              @Override
+              public boolean releaseProvider(IContentProvider icp) {
+                return false;
+              }
 
-            @Override
-            protected IContentProvider acquireUnstableProvider(Context c, String name) {
-              return null;
-            }
+              @Override
+              protected IContentProvider acquireUnstableProvider(Context c, String name) {
+                return null;
+              }
 
-            @Override
-            public boolean releaseUnstableProvider(IContentProvider icp) {
-              return false;
-            }
+              @Override
+              public boolean releaseUnstableProvider(IContentProvider icp) {
+                return false;
+              }
 
-            @Override
-            public void unstableProviderDied(IContentProvider icp) {}
-          };
+              @Override
+              public void unstableProviderDied(IContentProvider icp) {}
+            };
+      }
+      return contentResolver;
     }
-    return contentResolver;
   }
 
   @Implementation
   protected void sendBroadcast(Intent intent) {
     getShadowInstrumentation()
         .sendBroadcastWithPermission(
-            intent, /*userHandle=*/ null, /*receiverPermission=*/ null, realContextImpl);
+            intent, /* userHandle= */ null, /* receiverPermission= */ null, realContextImpl);
   }
 
   @Implementation
   protected void sendBroadcast(Intent intent, String receiverPermission) {
     getShadowInstrumentation()
         .sendBroadcastWithPermission(
-            intent, /*userHandle=*/ null, receiverPermission, realContextImpl);
+            intent, /* userHandle= */ null, receiverPermission, realContextImpl);
   }
 
-  @Implementation(minSdk = JELLY_BEAN_MR1)
+  @Implementation(minSdk = TIRAMISU)
+  protected void sendBroadcast(Intent intent, String receiverPermission, Bundle options) {
+    getShadowInstrumentation()
+        .sendBroadcastWithPermission(
+            intent, receiverPermission, realContextImpl, options, /* resultCode= */ 0);
+  }
+
+  @Implementation
   @RequiresPermission(android.Manifest.permission.INTERACT_ACROSS_USERS)
   protected void sendBroadcastAsUser(@RequiresPermission Intent intent, UserHandle user) {
     getShadowInstrumentation()
-        .sendBroadcastWithPermission(intent, user, /*receiverPermission=*/ null, realContextImpl);
+        .sendBroadcastWithPermission(intent, user, /* receiverPermission= */ null, realContextImpl);
   }
 
-  @Implementation(minSdk = JELLY_BEAN_MR1)
+  @Implementation
   @RequiresPermission(android.Manifest.permission.INTERACT_ACROSS_USERS)
   protected void sendBroadcastAsUser(
       @RequiresPermission Intent intent, UserHandle user, @Nullable String receiverPermission) {
@@ -201,7 +213,7 @@ public class ShadowContextImpl {
     getShadowInstrumentation()
         .sendOrderedBroadcastAsUser(
             intent,
-            /*userHandle=*/ null,
+            /* userHandle= */ null,
             receiverPermission,
             resultReceiver,
             scheduler,
@@ -215,7 +227,7 @@ public class ShadowContextImpl {
    * Allows the test to query for the broadcasts for specific users, for everything else behaves as
    * {@link #sendOrderedBroadcastAsUser}.
    */
-  @Implementation(minSdk = JELLY_BEAN_MR1)
+  @Implementation
   protected void sendOrderedBroadcastAsUser(
       Intent intent,
       UserHandle userHandle,
@@ -274,7 +286,12 @@ public class ShadowContextImpl {
 
   @Implementation
   protected Intent registerReceiver(BroadcastReceiver receiver, IntentFilter filter) {
-    return getShadowInstrumentation().registerReceiver(receiver, filter, realContextImpl);
+    return getShadowInstrumentation().registerReceiver(receiver, filter, 0, realContextImpl);
+  }
+
+  @Implementation(minSdk = O)
+  protected Intent registerReceiver(BroadcastReceiver receiver, IntentFilter filter, int flags) {
+    return getShadowInstrumentation().registerReceiver(receiver, filter, flags, realContextImpl);
   }
 
   @Implementation
@@ -284,10 +301,21 @@ public class ShadowContextImpl {
       String broadcastPermission,
       Handler scheduler) {
     return getShadowInstrumentation()
-        .registerReceiver(receiver, filter, broadcastPermission, scheduler, realContextImpl);
+        .registerReceiver(receiver, filter, broadcastPermission, scheduler, 0, realContextImpl);
   }
 
-  @Implementation(minSdk = JELLY_BEAN_MR1)
+  @Implementation(minSdk = O)
+  protected Intent registerReceiver(
+      BroadcastReceiver receiver,
+      IntentFilter filter,
+      String broadcastPermission,
+      Handler scheduler,
+      int flags) {
+    return getShadowInstrumentation()
+        .registerReceiver(receiver, filter, broadcastPermission, scheduler, flags, realContextImpl);
+  }
+
+  @Implementation
   protected Intent registerReceiverAsUser(
       BroadcastReceiver receiver,
       UserHandle user,
@@ -296,7 +324,7 @@ public class ShadowContextImpl {
       Handler scheduler) {
     return getShadowInstrumentation()
         .registerReceiverWithContext(
-            receiver, filter, broadcastPermission, scheduler, realContextImpl);
+            receiver, filter, broadcastPermission, scheduler, 0, realContextImpl);
   }
 
   @Implementation
@@ -321,6 +349,12 @@ public class ShadowContextImpl {
     return getShadowInstrumentation().stopService(name);
   }
 
+  @Implementation(minSdk = Q)
+  protected boolean bindService(
+      Intent service, int flags, Executor executor, ServiceConnection conn) {
+    return getShadowInstrumentation().bindService(service, flags, executor, conn);
+  }
+
   @Implementation
   protected boolean bindService(Intent intent, final ServiceConnection serviceConnection, int i) {
     validateServiceIntent(intent);
@@ -328,7 +362,7 @@ public class ShadowContextImpl {
   }
 
   /** Binds to a service but ignores the given UserHandle. */
-  @Implementation(minSdk = LOLLIPOP)
+  @Implementation
   protected boolean bindServiceAsUser(
       Intent intent, final ServiceConnection serviceConnection, int i, UserHandle userHandle) {
     return bindService(intent, serviceConnection, i);
@@ -340,10 +374,9 @@ public class ShadowContextImpl {
   }
 
   // This is a private method in ContextImpl so we copy the relevant portions of it here.
-  private void validateServiceIntent(Intent service) {
-    if (service.getComponent() == null
-        && service.getPackage() == null
-        && realContextImpl.getApplicationInfo().targetSdkVersion >= Build.VERSION_CODES.LOLLIPOP) {
+  @Implementation
+  protected void validateServiceIntent(Intent service) {
+    if (service.getComponent() == null && service.getPackage() == null) {
       throw new IllegalArgumentException("Service Intent must be explicit: " + service);
     }
   }
@@ -352,19 +385,19 @@ public class ShadowContextImpl {
    * Behaves as {@link android.app.ContextImpl#startActivity(Intent, Bundle)}. The user parameter is
    * ignored.
    */
-  @Implementation(minSdk = LOLLIPOP)
+  @Implementation
   protected void startActivityAsUser(Intent intent, Bundle options, UserHandle user) {
     // TODO: Remove this once {@link com.android.server.wmActivityTaskManagerService} is
     // properly shadowed.
     reflector(_ContextImpl_.class, realContextImpl).startActivity(intent, options);
   }
 
-  /* Set the user id returned by {@link #getUserId()}. */
+  /** Set the user id returned by {@link #getUserId()}. */
   public void setUserId(int userId) {
     this.userId = userId;
   }
 
-  @Implementation(minSdk = JELLY_BEAN_MR2)
+  @Implementation
   protected int getUserId() {
     if (userId != null) {
       return userId;
@@ -373,25 +406,35 @@ public class ShadowContextImpl {
     }
   }
 
-  @Implementation(maxSdk = JELLY_BEAN_MR2)
+  @Implementation
   protected File getExternalFilesDir(String type) {
-    return Environment.getExternalStoragePublicDirectory(type);
+    File externalDir = Environment.getExternalStoragePublicDirectory(/* type= */ null);
+    if (externalDir == null) {
+      return null;
+    }
+
+    File externalFilesDir =
+        new File(externalDir, "Android/data/" + realContextImpl.getPackageName());
+    if (type != null) {
+      externalFilesDir = new File(externalFilesDir, type);
+    }
+    externalFilesDir.mkdirs();
+    return externalFilesDir;
   }
 
-  @Implementation(minSdk = KITKAT)
+  @Implementation
   protected File[] getExternalFilesDirs(String type) {
-    return new File[] {Environment.getExternalStoragePublicDirectory(type)};
+    return new File[] {getExternalFilesDir(type)};
   }
 
   @Resetter
   public static void reset() {
     String prefsCacheFieldName =
         RuntimeEnvironment.getApiLevel() >= N ? "sSharedPrefsCache" : "sSharedPrefs";
-    Object prefsDefaultValue = RuntimeEnvironment.getApiLevel() >= KITKAT ? null : new HashMap<>();
     Class<?> contextImplClass =
         ReflectionHelpers.loadClass(
             ShadowContextImpl.class.getClassLoader(), "android.app.ContextImpl");
-    ReflectionHelpers.setStaticField(contextImplClass, prefsCacheFieldName, prefsDefaultValue);
+    ReflectionHelpers.setStaticField(contextImplClass, prefsCacheFieldName, null);
 
     if (RuntimeEnvironment.getApiLevel() <= VERSION_CODES.LOLLIPOP_MR1) {
       HashMap<String, Object> fetchers =
@@ -407,12 +450,9 @@ public class ShadowContextImpl {
         }
       }
 
-      if (RuntimeEnvironment.getApiLevel() >= KITKAT) {
-
-        Object windowServiceFetcher = fetchers.get(Context.WINDOW_SERVICE);
-        ReflectionHelpers.setField(
-            windowServiceFetcher.getClass(), windowServiceFetcher, "mDefaultDisplay", null);
-      }
+      Object windowServiceFetcher = fetchers.get(Context.WINDOW_SERVICE);
+      ReflectionHelpers.setField(
+          windowServiceFetcher.getClass(), windowServiceFetcher, "mDefaultDisplay", null);
     }
   }
 
@@ -466,14 +506,11 @@ public class ShadowContextImpl {
         int displayId,
         Configuration overrideConfiguration);
 
-    IBinder getActivityToken();
-
     void setOuterContext(Context context);
 
     @Direct
     Object getSystemService(String name);
 
-    @Direct
     void startActivity(Intent intent, Bundle options);
 
     @Direct

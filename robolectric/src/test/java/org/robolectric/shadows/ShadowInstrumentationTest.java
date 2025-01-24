@@ -1,6 +1,5 @@
 package org.robolectric.shadows;
 
-import static android.os.Build.VERSION_CODES.JELLY_BEAN_MR1;
 import static android.os.Build.VERSION_CODES.N;
 import static android.os.Build.VERSION_CODES.N_MR1;
 import static com.google.common.truth.Truth.assertThat;
@@ -18,12 +17,15 @@ import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.IBinder;
 import android.os.UserHandle;
+import android.view.View;
 import androidx.test.core.app.ApplicationProvider;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
+import androidx.test.platform.app.InstrumentationRegistry;
 import java.lang.reflect.Method;
 import java.util.concurrent.CountDownLatch;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.robolectric.Robolectric;
 import org.robolectric.RuntimeEnvironment;
 import org.robolectric.annotation.Config;
 
@@ -32,7 +34,7 @@ import org.robolectric.annotation.Config;
 public class ShadowInstrumentationTest {
 
   @Test
-  @Config(minSdk = JELLY_BEAN_MR1, maxSdk = N_MR1)
+  @Config(maxSdk = N_MR1)
   public void testExecStartActivity_handledProperlyForSDK17to25() throws Exception {
     Instrumentation instrumentation =
         ((ActivityThread) RuntimeEnvironment.getActivityThread()).getInstrumentation();
@@ -119,5 +121,30 @@ public class ShadowInstrumentationTest {
     }
 
     assertThat(intentCount).isEqualTo(20000);
+  }
+
+  @Test
+  public void setInTouchMode_setFalse() {
+    InstrumentationRegistry.getInstrumentation().setInTouchMode(false);
+
+    View decorView =
+        Robolectric.buildActivity(Activity.class).setup().get().getWindow().getDecorView();
+
+    assertThat(decorView.isInTouchMode()).isFalse();
+  }
+
+  @Test
+  public void setInTouchMode_setTrue() {
+    InstrumentationRegistry.getInstrumentation().setInTouchMode(true);
+
+    View decorView =
+        Robolectric.buildActivity(Activity.class).setup().get().getWindow().getDecorView();
+
+    assertThat(decorView.isInTouchMode()).isTrue();
+  }
+
+  @Test
+  public void getUiAutomation() {
+    assertThat(InstrumentationRegistry.getInstrumentation().getUiAutomation()).isNotNull();
   }
 }

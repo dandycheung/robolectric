@@ -14,8 +14,10 @@ import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.ProgressBar;
 import android.widget.TextView;
+import com.google.common.collect.ImmutableList;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
+import java.util.List;
 import org.robolectric.RuntimeEnvironment;
 import org.robolectric.annotation.Implements;
 import org.robolectric.annotation.RealObject;
@@ -25,8 +27,7 @@ import org.robolectric.shadow.api.Shadow;
 @SuppressLint("NewApi")
 public class ShadowNotification {
 
-  @RealObject
-  Notification realNotification;
+  @RealObject Notification realNotification;
 
   public CharSequence getContentTitle() {
     return RuntimeEnvironment.getApiLevel() >= Build.VERSION_CODES.N
@@ -49,7 +50,8 @@ public class ShadowNotification {
   }
 
   public boolean isOngoing() {
-    return ((realNotification.flags & Notification.FLAG_ONGOING_EVENT) == Notification.FLAG_ONGOING_EVENT);
+    return ((realNotification.flags & Notification.FLAG_ONGOING_EVENT)
+        == Notification.FLAG_ONGOING_EVENT);
   }
 
   public CharSequence getBigText() {
@@ -72,8 +74,17 @@ public class ShadowNotification {
     if (getApiLevel() >= N) {
       return realNotification.extras.getCharSequence(Notification.EXTRA_SUMMARY_TEXT);
     } else {
-      return findText(applyBigContentView(),  "text");
+      return findText(applyBigContentView(), "text");
     }
+  }
+
+  public List<CharSequence> getTextLines() {
+    CharSequence[] linesArray =
+        realNotification.extras.getCharSequenceArray(Notification.EXTRA_TEXT_LINES);
+    if (linesArray == null) {
+      return ImmutableList.of();
+    }
+    return ImmutableList.copyOf(linesArray);
   }
 
   public Bitmap getBigPicture() {
@@ -81,9 +92,10 @@ public class ShadowNotification {
       return realNotification.extras.getParcelable(Notification.EXTRA_PICTURE);
     } else {
       ImageView imageView =
-          (ImageView) applyBigContentView().findViewById(getInternalResourceId("big_picture"));
+          applyBigContentView().findViewById(getInternalResourceId("big_picture"));
       return imageView != null && imageView.getDrawable() != null
-          ? ((BitmapDrawable) imageView.getDrawable()).getBitmap() : null;
+          ? ((BitmapDrawable) imageView.getDrawable()).getBitmap()
+          : null;
     }
   }
 
@@ -91,7 +103,7 @@ public class ShadowNotification {
     return RuntimeEnvironment.getApiLevel() >= Build.VERSION_CODES.N
         ? realNotification.extras.getBoolean(Notification.EXTRA_SHOW_WHEN)
         : findView(applyContentView(), "chronometer").getVisibility() == View.VISIBLE
-        || findView(applyContentView(), "time").getVisibility() == View.VISIBLE;
+            || findView(applyContentView(), "time").getVisibility() == View.VISIBLE;
   }
 
   private ProgressBar getProgressBar_PreN() {

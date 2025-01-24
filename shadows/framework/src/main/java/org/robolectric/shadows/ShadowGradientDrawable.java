@@ -3,6 +3,7 @@ package org.robolectric.shadows;
 import static org.robolectric.util.reflector.Reflector.reflector;
 
 import android.graphics.drawable.GradientDrawable;
+import android.os.Build;
 import org.robolectric.annotation.Implementation;
 import org.robolectric.annotation.Implements;
 import org.robolectric.annotation.RealObject;
@@ -15,6 +16,7 @@ public class ShadowGradientDrawable extends ShadowDrawable {
   @RealObject private GradientDrawable realGradientDrawable;
 
   private int color;
+  private int shape;
   private int strokeColor;
   private int strokeWidth;
 
@@ -25,12 +27,17 @@ public class ShadowGradientDrawable extends ShadowDrawable {
   }
 
   @Implementation
+  protected void setShape(int shape) {
+    this.shape = shape;
+    reflector(GradientDrawableReflector.class, realGradientDrawable).setShape(shape);
+  }
+
+  @Implementation
   protected void setStroke(int width, int color) {
     this.strokeWidth = width;
     this.strokeColor = color;
     reflector(GradientDrawableReflector.class, realGradientDrawable).setStroke(width, color);
   }
-
 
   /**
    * Returns the color of this drawable as set by the last call to {@link #setColor(int color)}.
@@ -40,6 +47,15 @@ public class ShadowGradientDrawable extends ShadowDrawable {
    */
   public int getLastSetColor() {
     return color;
+  }
+
+  @Implementation(minSdk = Build.VERSION_CODES.N)
+  protected int getShape() {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) {
+      return shape;
+    }
+
+    return reflector(GradientDrawableReflector.class, realGradientDrawable).getShape();
   }
 
   public int getStrokeWidth() {
@@ -54,7 +70,13 @@ public class ShadowGradientDrawable extends ShadowDrawable {
   interface GradientDrawableReflector {
 
     @Direct
+    int getShape();
+
+    @Direct
     void setColor(int color);
+
+    @Direct
+    void setShape(int shape);
 
     @Direct
     void setStroke(int width, int color);

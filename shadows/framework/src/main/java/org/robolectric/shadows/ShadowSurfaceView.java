@@ -1,6 +1,7 @@
 package org.robolectric.shadows;
 
 import android.graphics.Canvas;
+import android.graphics.PixelFormat;
 import android.graphics.Rect;
 import android.view.Surface;
 import android.view.SurfaceHolder;
@@ -27,11 +28,11 @@ public class ShadowSurfaceView extends ShadowView {
     return fakeSurfaceHolder;
   }
 
-  /**
-   * Robolectric implementation of {@link android.view.SurfaceHolder}.
-   */
+  /** Robolectric implementation of {@link android.view.SurfaceHolder}. */
   public static class FakeSurfaceHolder implements SurfaceHolder {
     private final Set<Callback> callbacks = new HashSet<>();
+    // The default format is RGB_565.
+    private int requestedFormat = PixelFormat.RGB_565;
 
     @Override
     public void addCallback(Callback callback) {
@@ -53,24 +54,25 @@ public class ShadowSurfaceView extends ShadowView {
     }
 
     @Override
-    public void setType(int i) {
+    public void setType(int i) {}
+
+    @Override
+    public void setFixedSize(int i, int i1) {}
+
+    @Override
+    public void setSizeFromLayout() {}
+
+    @Override
+    public void setFormat(int format) {
+      if (format == PixelFormat.OPAQUE) {
+        requestedFormat = PixelFormat.RGB_565;
+      } else {
+        requestedFormat = format;
+      }
     }
 
     @Override
-    public void setFixedSize(int i, int i1) {
-    }
-
-    @Override
-    public void setSizeFromLayout() {
-    }
-
-    @Override
-    public void setFormat(int i) {
-    }
-
-    @Override
-    public void setKeepScreenOn(boolean b) {
-    }
+    public void setKeepScreenOn(boolean b) {}
 
     @Override
     public Canvas lockCanvas() {
@@ -83,8 +85,7 @@ public class ShadowSurfaceView extends ShadowView {
     }
 
     @Override
-    public void unlockCanvasAndPost(Canvas canvas) {
-    }
+    public void unlockCanvasAndPost(Canvas canvas) {}
 
     @Override
     public Rect getSurfaceFrame() {
@@ -94,6 +95,16 @@ public class ShadowSurfaceView extends ShadowView {
     @Override
     public Surface getSurface() {
       return null;
+    }
+
+    /**
+     * Retrieve the requested format by the developers or by Android Frameworks internal logic.
+     *
+     * @return The requested format, and the default value is {@link PixelFormat#RGB_565}.
+     * @see PixelFormat
+     */
+    public int getRequestedFormat() {
+      return requestedFormat;
     }
   }
 }

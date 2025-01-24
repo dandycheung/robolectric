@@ -20,7 +20,6 @@ import org.junit.runner.RunWith;
 /** Unit test for {@link ShadowGeocoder}. */
 @RunWith(AndroidJUnit4.class)
 public class ShadowGeocoderTest {
-
   private Geocoder geocoder;
 
   @Before
@@ -43,14 +42,15 @@ public class ShadowGeocoderTest {
 
   @Test
   public void getFromLocationReturnsAnEmptyArrayByDefault() throws IOException {
-    assertThat(geocoder.getFromLocation(90.0,90.0,1)).hasSize(0);
+    assertThat(geocoder.getFromLocation(90.0, 90.0, 1)).isEmpty();
   }
 
   @Test
   public void getFromLocationReturnsTheOverwrittenListLimitingByMaxResults() throws IOException {
     ShadowGeocoder shadowGeocoder = shadowOf(geocoder);
 
-    List<Address> list = Arrays.asList(new Address(Locale.getDefault()), new Address(Locale.CANADA));
+    List<Address> list =
+        Arrays.asList(new Address(Locale.getDefault()), new Address(Locale.CANADA));
     shadowGeocoder.setFromLocation(list);
 
     List<Address> result = geocoder.getFromLocation(90.0, 90.0, 1);

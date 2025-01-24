@@ -1,6 +1,5 @@
 package org.robolectric.shadows;
 
-import static android.os.Build.VERSION_CODES.JELLY_BEAN_MR2;
 import static android.os.Build.VERSION_CODES.Q;
 import static com.google.common.base.Verify.verifyNotNull;
 
@@ -20,6 +19,7 @@ import java.util.function.Supplier;
 import org.robolectric.annotation.Implementation;
 import org.robolectric.annotation.Implements;
 import org.robolectric.annotation.Resetter;
+import org.robolectric.versioning.AndroidVersions.U;
 
 /**
  * Shadow implementation for {@link Trace}, which stores the traces locally in arrays (unlike the
@@ -51,7 +51,7 @@ public class ShadowTrace {
   private static long tags = TRACE_TAG_APP;
 
   /** Starts a new trace section with given name. */
-  @Implementation(minSdk = JELLY_BEAN_MR2)
+  @Implementation
   protected static void beginSection(String sectionName) {
     if (tags == 0) {
       return;
@@ -63,7 +63,7 @@ public class ShadowTrace {
   }
 
   /** Ends the most recent active trace section. */
-  @Implementation(minSdk = JELLY_BEAN_MR2)
+  @Implementation
   protected static void endSection() {
     if (tags == 0) {
       return;
@@ -112,12 +112,12 @@ public class ShadowTrace {
     previousAsyncSections.add(section);
   }
 
-  @Implementation(minSdk = JELLY_BEAN_MR2)
+  @Implementation(maxSdk = U.SDK_INT)
   protected static long nativeGetEnabledTags() {
     return tags;
   }
 
-  @Implementation(minSdk = JELLY_BEAN_MR2)
+  @Implementation
   protected static void setAppTracingAllowed(boolean appTracingAllowed) {
     tags = appTracingAllowed ? TRACE_TAG_APP : 0;
   }
@@ -210,7 +210,7 @@ public class ShadowTrace {
 
     public abstract String getSectionName();
 
-    public abstract Integer getCookie();
+    public abstract int getCookie();
 
     public static Builder newBuilder() {
       return new AutoValue_ShadowTrace_AsyncTraceSection.Builder();
@@ -221,7 +221,7 @@ public class ShadowTrace {
     public abstract static class Builder {
       public abstract Builder setSectionName(String sectionName);
 
-      public abstract Builder setCookie(Integer cookie);
+      public abstract Builder setCookie(int cookie);
 
       public abstract AsyncTraceSection build();
     }

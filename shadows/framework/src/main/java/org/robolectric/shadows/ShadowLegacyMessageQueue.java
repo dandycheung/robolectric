@@ -1,11 +1,6 @@
 package org.robolectric.shadows;
 
-import static android.os.Build.VERSION_CODES.JELLY_BEAN_MR2;
-import static android.os.Build.VERSION_CODES.KITKAT;
-import static android.os.Build.VERSION_CODES.KITKAT_WATCH;
-import static android.os.Build.VERSION_CODES.LOLLIPOP;
 import static android.os.Build.VERSION_CODES.LOLLIPOP_MR1;
-import static org.robolectric.RuntimeEnvironment.getApiLevel;
 import static org.robolectric.util.ReflectionHelpers.getField;
 import static org.robolectric.util.ReflectionHelpers.setField;
 import static org.robolectric.util.reflector.Reflector.reflector;
@@ -49,27 +44,14 @@ public class ShadowLegacyMessageQueue extends ShadowMessageQueue {
   // rather than automatic.
   @HiddenApi
   @Implementation
-  @SuppressWarnings("robolectric.ShadowReturnTypeMismatch")
-  public static Number nativeInit() {
+  public static long nativeInit() {
     return 1;
   }
 
-  @HiddenApi
-  @Implementation(minSdk = JELLY_BEAN_MR2, maxSdk = KITKAT_WATCH)
-  public static void nativeDestroy(int ptr) {
-    nativeDestroy((long) ptr);
-  }
-
-  @Implementation(minSdk = LOLLIPOP)
+  @Implementation
   protected static void nativeDestroy(long ptr) {}
 
-  @HiddenApi
-  @Implementation(minSdk = KITKAT, maxSdk = KITKAT_WATCH)
-  public static boolean nativeIsIdling(int ptr) {
-    return nativeIsIdling((long) ptr);
-  }
-
-  @Implementation(minSdk = LOLLIPOP, maxSdk = LOLLIPOP_MR1)
+  @Implementation(maxSdk = LOLLIPOP_MR1)
   protected static boolean nativeIsIdling(long ptr) {
     return false;
   }
@@ -107,33 +89,31 @@ public class ShadowLegacyMessageQueue extends ShadowMessageQueue {
     final boolean retval =
         reflector(MessageQueueReflector.class, realQueue).enqueueMessage(msg, when);
     if (retval) {
-      final Runnable callback = new Runnable() {
-        @Override
-        public void run() {
-          synchronized (realQueue) {
-            Message m = getHead();
-            if (m == null) {
-              return;
-            }
+      final Runnable callback =
+          () -> {
+            synchronized (realQueue) {
+              Message m = getHead();
+              if (m == null) {
+                return;
+              }
 
-            Message n = shadowOf(m).getNext();
-            if (m == msg) {
-              setHead(n);
-            } else {
-              while (n != null) {
-                if (n == msg) {
-                  n = shadowOf(n).getNext();
-                  shadowOf(m).setNext(n);
-                  break;
+              Message n = shadowOf(m).getNext();
+              if (m == msg) {
+                setHead(n);
+              } else {
+                while (n != null) {
+                  if (n == msg) {
+                    n = shadowOf(n).getNext();
+                    shadowOf(m).setNext(n);
+                    break;
+                  }
+                  m = n;
+                  n = shadowOf(m).getNext();
                 }
-                m = n;
-                n = shadowOf(m).getNext();
               }
             }
-          }
-          dispatchMessage(msg);
-        }
-      };
+            dispatchMessage(msg);
+          };
       shadowOf(msg).setScheduledRunnable(callback);
       if (when == 0) {
         scheduler.postAtFrontOfQueue(callback);
@@ -155,11 +135,7 @@ public class ShadowLegacyMessageQueue extends ShadowMessageQueue {
       msgProxy.markInUse();
       target.dispatchMessage(msg);
 
-      if (getApiLevel() >= LOLLIPOP) {
-        msgProxy.recycleUnchecked();
-      } else {
-        msgProxy.recycle();
-      }
+      msgProxy.recycleUnchecked();
     }
   }
 
@@ -176,7 +152,7 @@ public class ShadowLegacyMessageQueue extends ShadowMessageQueue {
   }
 
   private static ShadowLegacyMessage shadowOf(Message actual) {
-    return (ShadowLegacyMessage) Shadow.extract(actual);
+    return Shadow.extract(actual);
   }
 
   /** Reflector interface for {@link MessageQueue}'s internals. */

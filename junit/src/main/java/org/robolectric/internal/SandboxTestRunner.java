@@ -1,8 +1,11 @@
 package org.robolectric.internal;
 
 import static java.util.Arrays.asList;
+import static java.util.Arrays.stream;
 
+import com.google.common.base.Splitter;
 import java.lang.reflect.Method;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -10,6 +13,9 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Queue;
+import java.util.WeakHashMap;
 import javax.annotation.Nonnull;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
@@ -42,7 +48,12 @@ import org.robolectric.util.PerfStatsCollector.Event;
 import org.robolectric.util.Util;
 import org.robolectric.util.inject.Injector;
 
-@SuppressWarnings("NewApi")
+/**
+ * Sandbox test runner that runs each test in a sandboxed class loader environment. Typically this
+ * runner should not be directly accessed, use {@link org.robolectric.RobolectricTestRunner}
+ * instead.
+ */
+@SuppressWarnings({"NewApi", "AndroidJdkLibsChecker"})
 public class SandboxTestRunner extends BlockJUnit4ClassRunner {
 
   private static final Injector DEFAULT_INJECTOR = defaultInjector().build();
@@ -58,6 +69,8 @@ public class SandboxTestRunner extends BlockJUnit4ClassRunner {
 
   private final List<PerfStatsReporter> perfStatsReporters;
   private final HashMap<Class<?>, Sandbox> loadedTestClasses = new HashMap<>();
+  private final HashMap<Class<?>, HelperTestRunner> helperRunners = new HashMap<>();
+  private final WeakHashMap<Sandbox, LinkageError> firstLinkageErrors = new WeakHashMap<>();
 
   public SandboxTestRunner(Class<?> klass) throws InitializationError {
     this(klass, DEFAULT_INJECTOR);
@@ -115,7 +128,7 @@ public class SandboxTestRunner extends BlockJUnit4ClassRunner {
     };
   }
 
-  private void invokeBeforeClass(final Class clazz, final Sandbox sandbox) throws Throwable {
+  private void invokeBeforeClass(final Class<?> clazz, final Sandbox sandbox) throws Throwable {
     if (!loadedTestClasses.containsKey(clazz)) {
       loadedTestClasses.put(clazz, sandbox);
 
@@ -155,19 +168,10 @@ public class SandboxTestRunner extends BlockJUnit4ClassRunner {
    */
   @Nonnull
   protected InstrumentationConfiguration createClassLoaderConfig(FrameworkMethod method) {
-    InstrumentationConfiguration.Builder builder =
-        InstrumentationConfiguration.newBuilder()
-            .doNotAcquirePackage("java.")
-            .doNotAcquirePackage("jdk.internal.")
-            .doNotAcquirePackage("sun.")
-            .doNotAcquirePackage("org.robolectric.annotation.")
-            .doNotAcquirePackage("org.robolectric.internal.")
-            .doNotAcquirePackage("org.robolectric.pluginapi.")
-            .doNotAcquirePackage("org.robolectric.util.")
-            .doNotAcquirePackage("org.junit");
+    InstrumentationConfiguration.Builder builder = InstrumentationConfiguration.newBuilder();
 
     String customPackages = System.getProperty("org.robolectric.packagesToNotAcquire", "");
-    for (String pkg : customPackages.split(",")) {
+    for (String pkg : Splitter.on(',').split(customPackages)) {
       if (!pkg.isEmpty()) {
         builder.doNotAcquirePackage(pkg);
       }
@@ -223,12 +227,12 @@ public class SandboxTestRunner extends BlockJUnit4ClassRunner {
   }
 
   @Override
+  @SuppressWarnings("CatchAndPrintStackTrace")
   protected Statement methodBlock(final FrameworkMethod method) {
     return new Statement() {
       @Override
       public void evaluate() throws Throwable {
         PerfStatsCollector perfStatsCollector = PerfStatsCollector.getInstance();
-        perfStatsCollector.reset();
         perfStatsCollector.setEnabled(!perfStatsReporters.isEmpty());
 
         Event initialization = perfStatsCollector.startEvent("initialization");
@@ -245,18 +249,28 @@ public class SandboxTestRunner extends BlockJUnit4ClassRunner {
               ClassLoader priorContextClassLoader = Thread.currentThread().getContextClassLoader();
               Thread.currentThread().setContextClassLoader(sandbox.getRobolectricClassLoader());
 
-              Class bootstrappedTestClass =
+              Class<?> bootstrappedTestClass =
                   sandbox.bootstrappedClass(getTestClass().getJavaClass());
-              HelperTestRunner helperTestRunner = getHelperTestRunner(bootstrappedTestClass);
+              HelperTestRunner helperTestRunner = getCachedHelperTestRunner(bootstrappedTestClass);
               helperTestRunner.frameworkMethod = method;
 
+              // The method class may be different than the test class if the method annotated @Test
+              // is declared on a superclass of the test.
+              Class<?> bootstrappedMethodClass =
+                  sandbox.bootstrappedClass(method.getMethod().getDeclaringClass());
               final Method bootstrappedMethod;
               try {
-                //noinspection unchecked
-                bootstrappedMethod = bootstrappedTestClass.getMethod(method.getMethod().getName());
+                Class<?>[] parameterTypes =
+                    stream(method.getMethod().getParameterTypes())
+                        .map(type -> type.isPrimitive() ? type : sandbox.bootstrappedClass(type))
+                        .toArray(Class[]::new);
+                bootstrappedMethod =
+                    bootstrappedMethodClass.getMethod(method.getMethod().getName(), parameterTypes);
               } catch (NoSuchMethodException e) {
                 throw new RuntimeException(e);
               }
+
+              Queue<Throwable> thrown = new ArrayDeque<>();
 
               try {
                 // Only invoke @BeforeClass once per class
@@ -268,31 +282,79 @@ public class SandboxTestRunner extends BlockJUnit4ClassRunner {
 
                 Statement statement =
                     helperTestRunner.methodBlock(new FrameworkMethod(bootstrappedMethod));
-
-                // todo: this try/finally probably isn't right -- should mimic RunAfters? [xw]
-                try {
-                  statement.evaluate();
-                } finally {
-                  afterTest(method, bootstrappedMethod);
-                }
+                statement.evaluate();
               } catch (Throwable throwable) {
-                throw Util.sneakyThrow(throwable);
-              } finally {
+                thrown.add(throwable);
+              }
+
+              try {
+                afterTest(method, bootstrappedMethod);
+              } catch (Throwable throwable) {
+                thrown.add(throwable);
+              }
+
+              try {
                 Thread.currentThread().setContextClassLoader(priorContextClassLoader);
-                try {
-                  finallyAfterTest(method);
-                } catch (Exception e) {
-                  e.printStackTrace();
+                finallyAfterTest(method);
+                reportPerfStats(perfStatsCollector);
+                perfStatsCollector.reset();
+              } catch (Throwable throwable) {
+                thrown.add(throwable);
+              }
+
+              Throwable first = thrown.poll();
+              if (first != null) {
+                if (first instanceof LinkageError) {
+                  // Potentially upgrade the LinkageError with a potentially more complete
+                  // descriptive exception.
+                  first = handleLinkageError(first, sandbox);
                 }
+                while (!thrown.isEmpty()) {
+                  first.addSuppressed(thrown.remove());
+                }
+                throw Util.sneakyThrow(first);
               }
             });
-
-        reportPerfStats(perfStatsCollector);
-        perfStatsCollector.reset();
       }
     };
   }
 
+  /**
+   * If an exception occurs when a class is being loaded (e.g. an exception during static
+   * initialization), the initial LinkageError is complete and informative. However, in subsequent
+   * tests, if the same class is attempted to be loaded, the JVM throws an error that is a truncated
+   * and incomplete NoClassDefError. This logic attempts to cache initial LinkageErrors and replace
+   * incomplete NoClassDefError with the original and more descriptive LinkageErrors.
+   */
+  private Throwable handleLinkageError(Throwable throwable, Sandbox sandbox) {
+    if (!firstLinkageErrors.containsKey(sandbox)) {
+      firstLinkageErrors.put(sandbox, (LinkageError) throwable);
+      return throwable;
+    }
+
+    if (throwable instanceof NoClassDefFoundError
+        && firstLinkageErrors.containsKey(sandbox)
+        && linkageErrorsMatch((NoClassDefFoundError) throwable, firstLinkageErrors.get(sandbox))) {
+      return firstLinkageErrors.get(sandbox);
+    }
+
+    return throwable;
+  }
+
+  private boolean linkageErrorsMatch(NoClassDefFoundError error, LinkageError first) {
+    if (error.getStackTrace().length == 0 || first.getStackTrace().length == 0) {
+      return false;
+    }
+    StackTraceElement firstElement = error.getStackTrace()[0];
+    for (StackTraceElement element : first.getStackTrace()) {
+      if (Objects.equals(firstElement, element)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  @SuppressWarnings("CatchAndPrintStackTrace")
   private void reportPerfStats(PerfStatsCollector perfStatsCollector) {
     if (perfStatsReporters.isEmpty()) {
       return;
@@ -317,12 +379,21 @@ public class SandboxTestRunner extends BlockJUnit4ClassRunner {
 
   protected void finallyAfterTest(FrameworkMethod method) {}
 
-  protected HelperTestRunner getHelperTestRunner(Class bootstrappedTestClass) {
-    try {
-      return new HelperTestRunner(bootstrappedTestClass);
-    } catch (InitializationError initializationError) {
-      throw new RuntimeException(initializationError);
-    }
+  protected HelperTestRunner getHelperTestRunner(Class<?> bootstrappedTestClass)
+      throws InitializationError {
+    return new HelperTestRunner(bootstrappedTestClass);
+  }
+
+  private HelperTestRunner getCachedHelperTestRunner(Class<?> bootstrappedTestClass) {
+    return helperRunners.computeIfAbsent(
+        bootstrappedTestClass,
+        klass -> {
+          try {
+            return getHelperTestRunner(klass);
+          } catch (InitializationError e) {
+            throw new RuntimeException(e);
+          }
+        });
   }
 
   protected static class HelperTestRunner extends BlockJUnit4ClassRunner {
@@ -374,6 +445,11 @@ public class SandboxTestRunner extends BlockJUnit4ClassRunner {
       }
       return annotation.timeout();
     }
+
+    @Override
+    protected String testName(FrameworkMethod method) {
+      return frameworkMethod.getName();
+    }
   }
 
   @Nonnull
@@ -381,7 +457,7 @@ public class SandboxTestRunner extends BlockJUnit4ClassRunner {
     List<Class<?>> shadowClasses = new ArrayList<>();
     addShadows(shadowClasses, getTestClass().getJavaClass().getAnnotation(SandboxConfig.class));
     addShadows(shadowClasses, method.getAnnotation(SandboxConfig.class));
-    return shadowClasses.toArray(new Class[shadowClasses.size()]);
+    return shadowClasses.toArray(new Class[0]);
   }
 
   private void addShadows(List<Class<?>> shadowClasses, SandboxConfig annotation) {

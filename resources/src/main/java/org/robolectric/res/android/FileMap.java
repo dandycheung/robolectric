@@ -7,6 +7,7 @@ import static org.robolectric.res.android.Util.ALOGV;
 
 import com.google.common.collect.ImmutableMap;
 import com.google.common.primitives.Ints;
+import com.google.common.primitives.Longs;
 import com.google.common.primitives.Shorts;
 import java.io.File;
 import java.io.FileInputStream;
@@ -23,27 +24,37 @@ public class FileMap {
   /** ZIP archive central directory end header signature. */
   private static final int ENDSIG = 0x6054b50;
 
-  private static final int ENDHDR = 22;
+  private static final int EOCD_SIZE = 22;
+
+  private static final int ZIP64_EOCD_SIZE = 56;
+
+  private static final int ZIP64_EOCD_LOCATOR_SIZE = 20;
+
   /** ZIP64 archive central directory end header signature. */
   private static final int ENDSIG64 = 0x6064b50;
-  /** the maximum size of the end of central directory section in bytes */
-  private static final int MAXIMUM_ZIP_EOCD_SIZE = 64 * 1024 + ENDHDR;
+
+  private static final int MAX_COMMENT_SIZE = 64 * 1024; // 64k
+
+  /** the maximum size of the end of central directory sections in bytes */
+  private static final int MAXIMUM_ZIP_EOCD_SIZE =
+      MAX_COMMENT_SIZE + EOCD_SIZE + ZIP64_EOCD_SIZE + ZIP64_EOCD_LOCATOR_SIZE;
 
   private ZipFile zipFile;
   private ZipEntry zipEntry;
+
+  @SuppressWarnings("unused")
   private boolean readOnly;
+
   private int fd;
   private boolean isFromZip;
 
   // Create a new mapping on an open file.
-//
-// Closing the file descriptor does not unmap the pages, so we don't
-// claim ownership of the fd.
-//
-// Returns "false" on failure.
-  boolean create(String origFileName, int fd, long offset, int length,
-      boolean readOnly)
-  {
+  //
+  // Closing the file descriptor does not unmap the pages, so we don't
+  // claim ownership of the fd.
+  //
+  // Returns "false" on failure.
+  boolean create(String origFileName, int fd, long offset, int length, boolean readOnly) {
     this.mFileName = origFileName;
     this.fd = fd;
     this.mDataOffset = offset;
@@ -51,95 +62,95 @@ public class FileMap {
     return true;
   }
 
-// #if defined(__MINGW32__)
-//     int     adjust;
-//     off64_t adjOffset;
-//     size_t  adjLength;
-//
-//     if (mPageSize == -1) {
-//       SYSTEM_INFO  si;
-//
-//       GetSystemInfo( &si );
-//       mPageSize = si.dwAllocationGranularity;
-//     }
-//
-//     DWORD  protect = readOnly ? PAGE_READONLY : PAGE_READWRITE;
-//
-//     mFileHandle  = (HANDLE) _get_osfhandle(fd);
-//     mFileMapping = CreateFileMapping( mFileHandle, NULL, protect, 0, 0, NULL);
-//     if (mFileMapping == NULL) {
-//       ALOGE("CreateFileMapping(%s, %" PRIx32 ") failed with error %" PRId32 "\n",
-//           mFileHandle, protect, GetLastError() );
-//       return false;
-//     }
-//
-//     adjust    = offset % mPageSize;
-//     adjOffset = offset - adjust;
-//     adjLength = length + adjust;
-//
-//     mBasePtr = MapViewOfFile( mFileMapping,
-//         readOnly ? FILE_MAP_READ : FILE_MAP_ALL_ACCESS,
-//         0,
-//         (DWORD)(adjOffset),
-//         adjLength );
-//     if (mBasePtr == NULL) {
-//       ALOGE("MapViewOfFile(%" PRId64 ", 0x%x) failed with error %" PRId32 "\n",
-//           adjOffset, adjLength, GetLastError() );
-//       CloseHandle(mFileMapping);
-//       mFileMapping = INVALID_HANDLE_VALUE;
-//       return false;
-//     }
-// #else // !defined(__MINGW32__)
-//     int     prot, flags, adjust;
-//     off64_t adjOffset;
-//     size_t  adjLength;
-//
-//     void* ptr;
-//
-//     assert(fd >= 0);
-//     assert(offset >= 0);
-//     assert(length > 0);
-//
-//     // init on first use
-//     if (mPageSize == -1) {
-//       mPageSize = sysconf(_SC_PAGESIZE);
-//       if (mPageSize == -1) {
-//         ALOGE("could not get _SC_PAGESIZE\n");
-//         return false;
-//       }
-//     }
-//
-//     adjust = offset % mPageSize;
-//     adjOffset = offset - adjust;
-//     adjLength = length + adjust;
-//
-//     flags = MAP_SHARED;
-//     prot = PROT_READ;
-//     if (!readOnly)
-//       prot |= PROT_WRITE;
-//
-//     ptr = mmap(NULL, adjLength, prot, flags, fd, adjOffset);
-//     if (ptr == MAP_FAILED) {
-//       ALOGE("mmap(%lld,0x%x) failed: %s\n",
-//           (long long)adjOffset, adjLength, strerror(errno));
-//       return false;
-//     }
-//     mBasePtr = ptr;
-// #endif // !defined(__MINGW32__)
-//
-//       mFileName = origFileName != NULL ? strdup(origFileName) : NULL;
-//     mBaseLength = adjLength;
-//     mDataOffset = offset;
-//     mDataPtr = (char*) mBasePtr + adjust;
-//     mDataLength = length;
-//
-//     assert(mBasePtr != NULL);
-//
-//     ALOGV("MAP: base %s/0x%x data %s/0x%x\n",
-//         mBasePtr, mBaseLength, mDataPtr, mDataLength);
-//
-//     return true;
-//   }
+  // #if defined(__MINGW32__)
+  //     int     adjust;
+  //     off64_t adjOffset;
+  //     size_t  adjLength;
+  //
+  //     if (mPageSize == -1) {
+  //       SYSTEM_INFO  si;
+  //
+  //       GetSystemInfo( &si );
+  //       mPageSize = si.dwAllocationGranularity;
+  //     }
+  //
+  //     DWORD  protect = readOnly ? PAGE_READONLY : PAGE_READWRITE;
+  //
+  //     mFileHandle  = (HANDLE) _get_osfhandle(fd);
+  //     mFileMapping = CreateFileMapping( mFileHandle, NULL, protect, 0, 0, NULL);
+  //     if (mFileMapping == NULL) {
+  //       ALOGE("CreateFileMapping(%s, %" PRIx32 ") failed with error %" PRId32 "\n",
+  //           mFileHandle, protect, GetLastError() );
+  //       return false;
+  //     }
+  //
+  //     adjust    = offset % mPageSize;
+  //     adjOffset = offset - adjust;
+  //     adjLength = length + adjust;
+  //
+  //     mBasePtr = MapViewOfFile( mFileMapping,
+  //         readOnly ? FILE_MAP_READ : FILE_MAP_ALL_ACCESS,
+  //         0,
+  //         (DWORD)(adjOffset),
+  //         adjLength );
+  //     if (mBasePtr == NULL) {
+  //       ALOGE("MapViewOfFile(%" PRId64 ", 0x%x) failed with error %" PRId32 "\n",
+  //           adjOffset, adjLength, GetLastError() );
+  //       CloseHandle(mFileMapping);
+  //       mFileMapping = INVALID_HANDLE_VALUE;
+  //       return false;
+  //     }
+  // #else // !defined(__MINGW32__)
+  //     int     prot, flags, adjust;
+  //     off64_t adjOffset;
+  //     size_t  adjLength;
+  //
+  //     void* ptr;
+  //
+  //     assert(fd >= 0);
+  //     assert(offset >= 0);
+  //     assert(length > 0);
+  //
+  //     // init on first use
+  //     if (mPageSize == -1) {
+  //       mPageSize = sysconf(_SC_PAGESIZE);
+  //       if (mPageSize == -1) {
+  //         ALOGE("could not get _SC_PAGESIZE\n");
+  //         return false;
+  //       }
+  //     }
+  //
+  //     adjust = offset % mPageSize;
+  //     adjOffset = offset - adjust;
+  //     adjLength = length + adjust;
+  //
+  //     flags = MAP_SHARED;
+  //     prot = PROT_READ;
+  //     if (!readOnly)
+  //       prot |= PROT_WRITE;
+  //
+  //     ptr = mmap(NULL, adjLength, prot, flags, fd, adjOffset);
+  //     if (ptr == MAP_FAILED) {
+  //       ALOGE("mmap(%lld,0x%x) failed: %s\n",
+  //           (long long)adjOffset, adjLength, strerror(errno));
+  //       return false;
+  //     }
+  //     mBasePtr = ptr;
+  // #endif // !defined(__MINGW32__)
+  //
+  //       mFileName = origFileName != NULL ? strdup(origFileName) : NULL;
+  //     mBaseLength = adjLength;
+  //     mDataOffset = offset;
+  //     mDataPtr = (char*) mBasePtr + adjust;
+  //     mDataLength = length;
+  //
+  //     assert(mBasePtr != NULL);
+  //
+  //     ALOGV("MAP: base %s/0x%x data %s/0x%x\n",
+  //         mBasePtr, mBaseLength, mDataPtr, mDataLength);
+  //
+  //     return true;
+  //   }
 
   boolean createFromZip(
       String origFileName,
@@ -152,32 +163,26 @@ public class FileMap {
     this.zipFile = zipFile;
     this.zipEntry = entry;
 
-    int     prot, flags, adjust;
-    long adjOffset;
-    int  adjLength;
-
-    int ptr;
-
-    assert(fd >= 0);
-    assert(offset >= 0);
+    assert (fd >= 0);
+    assert (offset >= 0);
     // assert(length > 0);
 
     // init on first use
-//    if (mPageSize == -1) {
-//      mPageSize = sysconf(_SC_PAGESIZE);
-//      if (mPageSize == -1) {
-//        ALOGE("could not get _SC_PAGESIZE\n");
-//        return false;
-//      }
-//    }
+    //    if (mPageSize == -1) {
+    //      mPageSize = sysconf(_SC_PAGESIZE);
+    //      if (mPageSize == -1) {
+    //        ALOGE("could not get _SC_PAGESIZE\n");
+    //        return false;
+    //      }
+    //    }
 
     // adjust = Math.toIntExact(offset % mPageSize);
     // adjOffset = offset - adjust;
     // adjLength = length + adjust;
 
-    //flags = MAP_SHARED;
-    //prot = PROT_READ;
-    //if (!readOnly)
+    // flags = MAP_SHARED;
+    // prot = PROT_READ;
+    // if (!readOnly)
     //  prot |= PROT_WRITE;
 
     // ptr = mmap(null, adjLength, prot, flags, fd, adjOffset);
@@ -188,16 +193,15 @@ public class FileMap {
     // }
     // mBasePtr = ptr;
 
-    mFileName = origFileName != null ? origFileName : null;
-    //mBaseLength = adjLength;
+    mFileName = origFileName;
+    // mBaseLength = adjLength;
     mDataOffset = offset;
-    //mDataPtr = mBasePtr + adjust;
+    // mDataPtr = mBasePtr + adjust;
     mDataLength = toIntExact(entry.getSize());
 
-    //assert(mBasePtr != 0);
+    // assert(mBasePtr != 0);
 
-    ALOGV("MAP: base %s/0x%x data %s/0x%x\n",
-        mBasePtr, mBaseLength, mDataPtr, mDataLength);
+    ALOGV("MAP: base %s/0x%x data %s/0x%x\n", mBasePtr, mBaseLength, mDataPtr, mDataLength);
 
     return true;
   }
@@ -212,7 +216,6 @@ public class FileMap {
 
       // First read the 'end of central directory record' in order to find the start of the central
       // directory
-      // The end of central directory record (EOCD) is max comment length (64K) + 22 bytes
       int endOfCdSize = Math.min(MAXIMUM_ZIP_EOCD_SIZE, length);
       int endofCdOffset = length - endOfCdSize;
       randomAccessFile.seek(endofCdOffset);
@@ -220,7 +223,11 @@ public class FileMap {
       randomAccessFile.readFully(buffer);
 
       int centralDirOffset = findCentralDir(buffer);
-
+      if (centralDirOffset == -1) {
+        // If the zip file contains > 2^16 entries, a Zip64 EOCD is written, and the central
+        // dir offset in the regular EOCD may be -1.
+        centralDirOffset = findCentralDir64(buffer);
+      }
       int offset = centralDirOffset - endofCdOffset;
       if (offset < 0) {
         // read the entire central directory record into memory
@@ -287,7 +294,7 @@ public class FileMap {
 
   private static int findCentralDir(byte[] buffer) throws IOException {
     // find start of central directory by scanning backwards
-    int scanOffset = buffer.length - ENDHDR;
+    int scanOffset = buffer.length - EOCD_SIZE;
 
     while (true) {
       int val = readInt(buffer, scanOffset);
@@ -304,14 +311,49 @@ public class FileMap {
     }
     // scanOffset is now start of end of central directory record
     // the 'offset to central dir' data is at position 16 in the record
-    int offsetToCentralDir = readInt(buffer, scanOffset + 16);
-    return offsetToCentralDir;
+    return readInt(buffer, scanOffset + 16);
+  }
+
+  private static int findCentralDir64(byte[] buffer) throws IOException {
+    // find start of central directory by scanning backwards
+    int scanOffset = buffer.length - EOCD_SIZE - ZIP64_EOCD_LOCATOR_SIZE - ZIP64_EOCD_SIZE;
+
+    while (true) {
+      int val = readInt(buffer, scanOffset);
+      if (val == ENDSIG64) {
+        break;
+      }
+
+      // Ok, keep backing up looking for the ZIP end central directory
+      // signature.
+      --scanOffset;
+      if (scanOffset < 0) {
+        throw new ZipException("ZIP directory not found, not a ZIP archive.");
+      }
+    }
+    // scanOffset is now start of end of central directory record
+    // the 'offset to central dir' data is at position 16 in the record
+    long offsetToCentralDir = readLong(buffer, scanOffset + 48);
+    return (int) offsetToCentralDir;
   }
 
   /** Read a 32-bit integer from a bytebuffer in little-endian order. */
   private static int readInt(byte[] buffer, int offset) {
     return Ints.fromBytes(
         buffer[offset + 3], buffer[offset + 2], buffer[offset + 1], buffer[offset]);
+  }
+
+  /** Read a 64-bit integer from a bytebuffer in little-endian order. */
+  private static long readLong(byte[] buffer, int offset) {
+    return Longs.fromBytes(
+        buffer[offset + 7],
+        buffer[offset + 6],
+        buffer[offset + 5],
+        buffer[offset + 4],
+        buffer[offset + 3],
+        buffer[offset + 2],
+        buffer[offset + 1],
+        buffer[offset]);
   }
 
   /** Read a 16-bit short from a bytebuffer in little-endian order. */
@@ -352,16 +394,18 @@ public class FileMap {
   //     long offset, int length, boolean readOnly) {
   // }
 
-    // ~FileMap(void);
+  // ~FileMap(void);
 
-    /*
-     * Return the name of the file this map came from, if known.
-     */
-    String getFileName() { return mFileName; }
+  /*
+   * Return the name of the file this map came from, if known.
+   */
+  String getFileName() {
+    return mFileName;
+  }
 
-    /*
-     * Get a pointer to the piece of the file we requested.
-     */
+  /*
+   * Get a pointer to the piece of the file we requested.
+   */
   synchronized byte[] getDataPtr() {
     if (mDataPtr == null) {
       mDataPtr = new byte[mDataLength];
@@ -405,58 +449,57 @@ public class FileMap {
   /*
    * Get the length we requested.
    */
-  int getDataLength() { return mDataLength; }
+  int getDataLength() {
+    return mDataLength;
+  }
 
   /*
    * Get the data offset used to create this map.
    */
-  long getDataOffset() { return mDataOffset; }
+  long getDataOffset() {
+    return mDataOffset;
+  }
 
   public ZipEntry getZipEntry() {
     return zipEntry;
   }
 
   //   /*
-//    * This maps directly to madvise() values, but allows us to avoid
-//    * including <sys/mman.h> everywhere.
-//    */
-//   enum MapAdvice {
-//     NORMAL, RANDOM, SEQUENTIAL, WILLNEED, DONTNEED
-//   };
-//
-//   /*
-//    * Apply an madvise() call to the entire file.
-//    *
-//    * Returns 0 on success, -1 on failure.
-//    */
-//   int advise(MapAdvice advice);
-//
-//   protected:
-//
-//   private:
-//   // these are not implemented
-//   FileMap(const FileMap& src);
-//     const FileMap& operator=(const FileMap& src);
-//
-  String       mFileName;      // original file name, if known
-  int       mBasePtr;       // base of mmap area; page aligned
-  int      mBaseLength;    // length, measured from "mBasePtr"
-  long     mDataOffset;    // offset used when map was created
-  byte[]       mDataPtr;       // start of requested data, offset from base
-  int      mDataLength;    // length, measured from "mDataPtr"
+  //    * This maps directly to madvise() values, but allows us to avoid
+  //    * including <sys/mman.h> everywhere.
+  //    */
+  //   enum MapAdvice {
+  //     NORMAL, RANDOM, SEQUENTIAL, WILLNEED, DONTNEED
+  //   };
+  //
+  //   /*
+  //    * Apply an madvise() call to the entire file.
+  //    *
+  //    * Returns 0 on success, -1 on failure.
+  //    */
+  //   int advise(MapAdvice advice);
+  //
+  //   protected:
+  //
+  //   private:
+  //   // these are not implemented
+  //   FileMap(const FileMap& src);
+  //     const FileMap& operator=(const FileMap& src);
+  //
+  String mFileName; // original file name, if known
+  int mBasePtr; // base of mmap area; page aligned
+  int mBaseLength; // length, measured from "mBasePtr"
+  long mDataOffset; // offset used when map was created
+  byte[] mDataPtr; // start of requested data, offset from base
+  int mDataLength; // length, measured from "mDataPtr"
   static long mPageSize;
 
   @Override
   public String toString() {
     if (isFromZip) {
-      return "FileMap{" +
-          "zipFile=" + zipFile.getName() +
-          ", zipEntry=" + zipEntry +
-          '}';
+      return "FileMap{" + "zipFile=" + zipFile.getName() + ", zipEntry=" + zipEntry + '}';
     } else {
-      return "FileMap{" +
-          "mFileName='" + mFileName + '\'' +
-          '}';
+      return "FileMap{" + "mFileName='" + mFileName + '\'' + '}';
     }
   }
 }

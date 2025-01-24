@@ -1,6 +1,5 @@
 package org.robolectric.shadows;
 
-import static android.os.Build.VERSION_CODES.JELLY_BEAN;
 import static com.google.common.truth.Truth.assertThat;
 import static org.robolectric.shadows.ShadowLooper.shadowMainLooper;
 
@@ -13,19 +12,13 @@ import java.util.List;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.robolectric.Shadows;
-import org.robolectric.annotation.Config;
-import org.robolectric.util.TimeUtils;
 
 @RunWith(AndroidJUnit4.class)
-@Config(minSdk = JELLY_BEAN)
 public class ShadowValueAnimatorTest {
 
   @Test
   public void start_shouldRunAnimation() {
     final List<Integer> values = new ArrayList<>();
-
-    ShadowChoreographer.setFrameInterval(100 * TimeUtils.NANOS_PER_MS);
-
 
     final ValueAnimator animator = ValueAnimator.ofInt(0, 10);
     animator.setDuration(1000);
@@ -46,7 +39,6 @@ public class ShadowValueAnimatorTest {
 
   @Test
   public void test_WhenInfiniteAnimationIsPlayed_AnimationIsOnlyPlayedOnce() {
-    ShadowChoreographer.setFrameInterval(100 * TimeUtils.NANOS_PER_MS);
     final ValueAnimator animator = ValueAnimator.ofInt(0, 10);
     animator.setDuration(200);
     animator.setRepeatCount(ValueAnimator.INFINITE);

@@ -1,12 +1,12 @@
 package org.robolectric.shadows;
 
-import static android.os.Build.VERSION_CODES.LOLLIPOP;
 import static android.os.Build.VERSION_CODES.O_MR1;
 import static android.os.Build.VERSION_CODES.P;
 import static android.os.Build.VERSION_CODES.Q;
 import static com.google.common.truth.Truth.assertThat;
 import static org.junit.Assert.fail;
 import static org.robolectric.Shadows.shadowOf;
+import static org.robolectric.annotation.Config.OLDEST_SDK;
 
 import android.graphics.Typeface;
 import android.graphics.fonts.Font;
@@ -20,11 +20,16 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.robolectric.annotation.Config;
+import org.robolectric.annotation.GraphicsMode;
+import org.robolectric.annotation.GraphicsMode.Mode;
+import org.robolectric.annotation.ResourcesMode;
 import org.robolectric.shadows.ShadowLog.LogItem;
 import org.robolectric.util.ReflectionHelpers;
 import org.robolectric.util.TestUtil;
 
 @RunWith(AndroidJUnit4.class)
+@GraphicsMode(Mode.LEGACY)
+@ResourcesMode(ResourcesMode.Mode.BINARY)
 public class ShadowTypefaceTest {
 
   private File fontFile;
@@ -146,7 +151,7 @@ public class ShadowTypefaceTest {
 
   /** Check that there is no spurious error message about /system/etc/fonts.xml */
   @Test
-  @Config(minSdk = LOLLIPOP, maxSdk = O_MR1)
+  @Config(minSdk = OLDEST_SDK, maxSdk = O_MR1)
   public void init_shouldNotComplainAboutSystemFonts() {
     ShadowLog.clear();
     ReflectionHelpers.callStaticMethod(Typeface.class, "init");
@@ -162,9 +167,21 @@ public class ShadowTypefaceTest {
     // This invokes the Typeface static initializer, which creates some default typefaces.
     Typeface.create("roboto", Typeface.BOLD);
     // Call the resetter to clear the FONTS map in Typeface
-    ShadowTypeface.reset();
+    ShadowLegacyTypeface.reset();
     Typeface typeface =
         new Typeface.CustomFallbackBuilder(family).setStyle(font.getStyle()).build();
     assertThat(typeface).isNotNull();
+  }
+
+  @Test
+  @Config(minSdk = Q)
+  public void createTypeface_withCustomFallbackBuilder() throws IOException {
+    Font font = new Font.Builder(fontFile).build();
+    FontFamily family = new FontFamily.Builder(font).build();
+    Typeface typeface =
+        new Typeface.CustomFallbackBuilder(family).setStyle(font.getStyle()).build();
+    Typeface typeface2 = Typeface.create(typeface, Typeface.BOLD);
+    assertThat(typeface2).isNotNull();
+    assertThat(typeface2.toString()).isNotEmpty();
   }
 }

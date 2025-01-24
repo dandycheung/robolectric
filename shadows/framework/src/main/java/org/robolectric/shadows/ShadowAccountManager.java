@@ -1,7 +1,5 @@
 package org.robolectric.shadows;
 
-import static android.os.Build.VERSION_CODES.JELLY_BEAN_MR2;
-import static android.os.Build.VERSION_CODES.LOLLIPOP;
 import static android.os.Build.VERSION_CODES.LOLLIPOP_MR1;
 import static android.os.Build.VERSION_CODES.O;
 
@@ -19,7 +17,6 @@ import android.content.Context;
 import android.content.Intent;
 import android.os.Bundle;
 import android.os.Handler;
-import androidx.annotation.Nullable;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -33,44 +30,57 @@ import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import javax.annotation.Nullable;
 import org.robolectric.annotation.Implementation;
 import org.robolectric.annotation.Implements;
+import org.robolectric.annotation.Resetter;
 import org.robolectric.util.Scheduler.IdleState;
 
 @Implements(AccountManager.class)
 public class ShadowAccountManager {
 
-  private List<Account> accounts = new ArrayList<>();
-  private Map<Account, Map<String, String>> authTokens = new HashMap<>();
-  private Map<String, AuthenticatorDescription> authenticators = new LinkedHashMap<>();
+  private final List<Account> accounts = new ArrayList<>();
+  private final Map<Account, Map<String, String>> authTokens = new HashMap<>();
+  private final Map<String, AuthenticatorDescription> authenticators = new LinkedHashMap<>();
+
   /**
    * Maps listeners to a set of account types. If null, the listener should be notified for changes
    * to accounts of any type. Otherwise, the listener is only notified of changes to accounts of the
    * given type.
    */
-  private Map<OnAccountsUpdateListener, Set<String>> listeners = new LinkedHashMap<>();
+  private final Map<OnAccountsUpdateListener, Set<String>> listeners = new LinkedHashMap<>();
 
-  private Map<Account, Map<String, String>> userData = new HashMap<>();
-  private Map<Account, String> passwords = new HashMap<>();
-  private Map<Account, Set<String>> accountFeatures = new HashMap<>();
-  private Map<Account, Set<String>> packageVisibileAccounts = new HashMap<>();
+  private final Map<Account, Map<String, String>> userData = new HashMap<>();
+  private final Map<Account, String> passwords = new HashMap<>();
+  private final Map<Account, Set<String>> accountFeatures = new HashMap<>();
+  private final Map<Account, Set<String>> packageVisibleAccounts = new HashMap<>();
 
-  private List<Bundle> addAccountOptionsList = new ArrayList<>();
-  private Handler mainHandler;
-  private RoboAccountManagerFuture pendingAddFuture;
-  private boolean authenticationErrorOnNextResponse = false;
-  private Intent removeAccountIntent;
+  private final List<Bundle> addAccountOptionsList = new ArrayList<>();
+  private static Handler mainHandler;
+  private static RoboAccountManagerFuture pendingAddFuture;
+  private static boolean authenticationErrorOnNextResponse = false;
+  private static Intent removeAccountIntent;
+
+  @Resetter
+  public static void reset() {
+    if (mainHandler != null) {
+      mainHandler.removeCallbacksAndMessages(null);
+      mainHandler = null;
+    }
+
+    if (pendingAddFuture != null) {
+      pendingAddFuture.cancel(true);
+      pendingAddFuture = null;
+    }
+    authenticationErrorOnNextResponse = false;
+    removeAccountIntent = null;
+  }
 
   @Implementation
   protected void __constructor__(Context context, IAccountManager service) {
     mainHandler = new Handler(context.getMainLooper());
   }
 
-  /**
-   * @deprecated This method will be removed in Robolectric 3.4 Use {@link
-   *     AccountManager#get(Context)} instead.
-   */
-  @Deprecated
   @Implementation
   protected static AccountManager get(Context context) {
     return (AccountManager) context.getSystemService(Context.ACCOUNT_SERVICE);
@@ -178,8 +188,7 @@ public class ShadowAccountManager {
     return start(
         new BaseRoboAccountManagerFuture<Boolean>(callback, handler) {
           @Override
-          public Boolean doWork()
-              throws OperationCanceledException, IOException, AuthenticatorException {
+          public Boolean doWork() {
             return removeAccountExplicitly(account);
           }
         });
@@ -201,8 +210,7 @@ public class ShadowAccountManager {
     return start(
         new BaseRoboAccountManagerFuture<Bundle>(callback, handler) {
           @Override
-          public Bundle doWork()
-              throws OperationCanceledException, IOException, AuthenticatorException {
+          public Bundle doWork() {
             Bundle result = new Bundle();
             if (removeAccountIntent == null) {
               result.putBoolean(
@@ -227,9 +235,7 @@ public class ShadowAccountManager {
     return false;
   }
 
-  /**
-   * Removes all accounts that have been added.
-   */
+  /** Removes all accounts that have been added. */
   public void removeAllAccounts() {
     passwords.clear();
     userData.clear();
@@ -303,7 +309,7 @@ public class ShadowAccountManager {
     }
 
     if (!userData.containsKey(account)) {
-      userData.put(account, new HashMap<String, String>());
+      userData.put(account, new HashMap<>());
     }
 
     Map<String, String> userDataMap = userData.get(account);
@@ -391,8 +397,7 @@ public class ShadowAccountManager {
     return start(
         new BaseRoboAccountManagerFuture<Bundle>(callback, handler) {
           @Override
-          public Bundle doWork()
-              throws OperationCanceledException, IOException, AuthenticatorException {
+          public Bundle doWork() throws AuthenticatorException {
             if (!authenticators.containsKey(accountType)) {
               throw new AuthenticatorException("No authenticator specified for " + accountType);
             }
@@ -433,8 +438,7 @@ public class ShadowAccountManager {
     return start(
         new BaseRoboAccountManagerFuture<Bundle>(callback, handler) {
           @Override
-          public Bundle doWork()
-              throws OperationCanceledException, IOException, AuthenticatorException {
+          public Bundle doWork() {
             // Just return sessionBundle as the result since it's not really used, allowing it to
             // be easily controlled in tests.
             return sessionBundle;
@@ -488,16 +492,17 @@ public class ShadowAccountManager {
   }
 
   /**
-   * Adds an account to the AccountManager but when {@link AccountManager#getAccountsByTypeForPackage(String, String)}
-   * is called will be included if is in one of the #visibileToPackages
+   * Adds an account to the AccountManager but when {@link
+   * AccountManager#getAccountsByTypeForPackage(String, String)} is called will be included if is in
+   * one of the #visibleToPackages
    *
    * @param account User account.
    */
-  public void addAccount(Account account, String... visibileToPackages) {
+  public void addAccount(Account account, String... visibleToPackages) {
     addAccount(account);
     HashSet<String> value = new HashSet<>();
-    Collections.addAll(value, visibileToPackages);
-    packageVisibileAccounts.put(account, value);
+    Collections.addAll(value, visibleToPackages);
+    packageVisibleAccounts.put(account, value);
   }
 
   /**
@@ -531,7 +536,11 @@ public class ShadowAccountManager {
     private final Activity activity;
     private final Bundle resultBundle;
 
-    RoboAccountManagerFuture(AccountManagerCallback<Bundle> callback, Handler handler, String accountType, Activity activity) {
+    RoboAccountManagerFuture(
+        AccountManagerCallback<Bundle> callback,
+        Handler handler,
+        String accountType,
+        Activity activity) {
       super(callback, handler);
 
       this.accountType = accountType;
@@ -540,7 +549,7 @@ public class ShadowAccountManager {
     }
 
     @Override
-    public Bundle doWork() throws OperationCanceledException, IOException, AuthenticatorException {
+    public Bundle doWork() throws AuthenticatorException {
       if (!authenticators.containsKey(accountType)) {
         throw new AuthenticatorException("No authenticator specified for " + accountType);
       }
@@ -599,10 +608,11 @@ public class ShadowAccountManager {
     addAuthenticator(AuthenticatorDescription.newKey(type));
   }
 
-  private Map<Account, String> previousNames = new HashMap<Account, String>();
+  private final Map<Account, String> previousNames = new HashMap<>();
 
   /**
-   * Sets the previous name for an account, which will be returned by {@link AccountManager#getPreviousName(Account)}.
+   * Sets the previous name for an account, which will be returned by {@link
+   * AccountManager#getPreviousName(Account)}.
    *
    * @param account User account.
    * @param previousName Previous account name.
@@ -611,8 +621,10 @@ public class ShadowAccountManager {
     previousNames.put(account, previousName);
   }
 
-  /** @see #setPreviousAccountName(Account, String) */
-  @Implementation(minSdk = LOLLIPOP)
+  /**
+   * @see #setPreviousAccountName(Account, String)
+   */
+  @Implementation
   protected String getPreviousName(Account account) {
     return previousNames.get(account);
   }
@@ -629,8 +641,7 @@ public class ShadowAccountManager {
     return start(
         new BaseRoboAccountManagerFuture<Bundle>(callback, handler) {
           @Override
-          public Bundle doWork()
-              throws OperationCanceledException, IOException, AuthenticatorException {
+          public Bundle doWork() throws AuthenticatorException {
             return getAuthToken(account, authTokenType);
           }
         });
@@ -645,17 +656,16 @@ public class ShadowAccountManager {
       final AccountManagerCallback<Bundle> callback,
       Handler handler) {
 
-    return start(new BaseRoboAccountManagerFuture<Bundle>(callback, handler) {
-      @Override
-      public Bundle doWork()
-          throws OperationCanceledException, IOException, AuthenticatorException {
-        return getAuthToken(account, authTokenType);
-      }
-    });
+    return start(
+        new BaseRoboAccountManagerFuture<Bundle>(callback, handler) {
+          @Override
+          public Bundle doWork() throws AuthenticatorException {
+            return getAuthToken(account, authTokenType);
+          }
+        });
   }
 
-  private Bundle getAuthToken(Account account, String authTokenType)
-      throws OperationCanceledException, IOException, AuthenticatorException {
+  private Bundle getAuthToken(Account account, String authTokenType) throws AuthenticatorException {
     Bundle result = new Bundle();
 
     String authToken = blockingGetAuthToken(account, authTokenType, false);
@@ -683,18 +693,19 @@ public class ShadowAccountManager {
       final String[] features,
       AccountManagerCallback<Boolean> callback,
       Handler handler) {
-    return start(new BaseRoboAccountManagerFuture<Boolean>(callback, handler) {
-      @Override
-      public Boolean doWork() throws OperationCanceledException, IOException, AuthenticatorException {
-        Set<String> availableFeatures = accountFeatures.get(account);
-        for (String feature : features) {
-          if (!availableFeatures.contains(feature)) {
-            return false;
+    return start(
+        new BaseRoboAccountManagerFuture<Boolean>(callback, handler) {
+          @Override
+          public Boolean doWork() {
+            Set<String> availableFeatures = accountFeatures.get(account);
+            for (String feature : features) {
+              if (!availableFeatures.contains(feature)) {
+                return false;
+              }
+            }
+            return true;
           }
-        }
-        return true;
-      }
-    });
+        });
   }
 
   @Implementation
@@ -706,8 +717,7 @@ public class ShadowAccountManager {
     return start(
         new BaseRoboAccountManagerFuture<Account[]>(callback, handler) {
           @Override
-          public Account[] doWork()
-              throws OperationCanceledException, IOException, AuthenticatorException {
+          public Account[] doWork() throws AuthenticatorException {
 
             if (authenticationErrorOnNextResponse) {
               setAuthenticationErrorOnNextResponse(false);
@@ -734,13 +744,14 @@ public class ShadowAccountManager {
     return future;
   }
 
-  @Implementation(minSdk = JELLY_BEAN_MR2)
+  @Implementation
   protected Account[] getAccountsByTypeForPackage(String type, String packageName) {
     List<Account> result = new ArrayList<>();
 
     Account[] accountsByType = getAccountsByType(type);
     for (Account account : accountsByType) {
-      if (packageVisibileAccounts.containsKey(account) && packageVisibileAccounts.get(account).contains(packageName)) {
+      if (packageVisibleAccounts.containsKey(account)
+          && packageVisibleAccounts.get(account).contains(packageName)) {
         result.add(account);
       }
     }
@@ -794,13 +805,7 @@ public class ShadowAccountManager {
       }
 
       if (callback != null) {
-        handler.post(
-            new Runnable() {
-              @Override
-              public void run() {
-                callback.run(BaseRoboAccountManagerFuture.this);
-              }
-            });
+        handler.post(() -> callback.run(BaseRoboAccountManagerFuture.this));
       }
     }
 
@@ -834,10 +839,12 @@ public class ShadowAccountManager {
     }
 
     @Override
-    public T getResult(long timeout, TimeUnit unit) throws OperationCanceledException, IOException, AuthenticatorException {
+    public T getResult(long timeout, TimeUnit unit)
+        throws OperationCanceledException, IOException, AuthenticatorException {
       return getResult();
     }
 
-    public abstract T doWork() throws OperationCanceledException, IOException, AuthenticatorException;
+    public abstract T doWork()
+        throws OperationCanceledException, IOException, AuthenticatorException;
   }
 }

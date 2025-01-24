@@ -7,7 +7,7 @@ import org.robolectric.res.android.ConfigDescription;
 import org.robolectric.res.android.ResTable_config;
 
 /**
- * Android qualifers as defined by
+ * Android qualifiers as defined by
  * https://developer.android.com/guide/topics/resources/providing-resources.html
  */
 @SuppressWarnings("NewApi")
@@ -99,24 +99,6 @@ public class Qualifiers {
   }
 
   /**
-   * If the Config already has a version qualifier, do nothing. Otherwise, add a version
-   * qualifier for the target api level (which comes from the manifest or Config.sdk()).
-   *
-   * @deprecated Figure something else out.
-   */
-  @Deprecated
-  public static String addPlatformVersion(String qualifiers, int apiLevel) {
-    int versionQualifierApiLevel = Qualifiers.getPlatformVersion(qualifiers);
-    if (versionQualifierApiLevel == -1) {
-      if (qualifiers.length() > 0) {
-        qualifiers += "-";
-      }
-      qualifiers += "v" + apiLevel;
-    }
-    return qualifiers;
-  }
-
-  /**
    * If the Config already has a {@code sw} qualifier, do nothing. Otherwise, add a {@code sw}
    * qualifier for the given width.
    *
@@ -126,7 +108,7 @@ public class Qualifiers {
   public static String addSmallestScreenWidth(String qualifiers, int smallestScreenWidth) {
     int qualifiersSmallestScreenWidth = Qualifiers.getSmallestScreenWidth(qualifiers);
     if (qualifiersSmallestScreenWidth == -1) {
-      if (qualifiers.length() > 0) {
+      if (!qualifiers.isEmpty()) {
         qualifiers += "-";
       }
       qualifiers += "sw" + smallestScreenWidth + "dp";
@@ -156,7 +138,7 @@ public class Qualifiers {
   public static String addScreenWidth(String qualifiers, int screenWidth) {
     int qualifiersScreenWidth = Qualifiers.getScreenWidth(qualifiers);
     if (qualifiersScreenWidth == -1) {
-      if (qualifiers.length() > 0) {
+      if (!qualifiers.isEmpty()) {
         qualifiers += "-";
       }
       qualifiers += "w" + screenWidth + "dp";

@@ -13,6 +13,8 @@ import android.os.Message;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
+import javax.annotation.Nonnull;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -32,7 +34,7 @@ public class ShadowHandlerTest {
   private final Handler.Callback callback =
       new Handler.Callback() {
         @Override
-        public boolean handleMessage(Message msg) {
+        public boolean handleMessage(@Nonnull Message msg) {
           hasHandlerCallbackHandledMessage = true;
           return false;
         }
@@ -255,7 +257,7 @@ public class ShadowHandlerTest {
     handler.sendEmptyMessage(123);
     assertThat(handler.hasMessages(456)).isFalse();
     assertThat(handler.hasMessages(123)).isTrue();
-    ShadowLooper.idleMainLooper(0);
+    ShadowLooper.idleMainLooper(0, TimeUnit.MILLISECONDS);
     assertThat(handler.hasMessages(123)).isFalse();
   }
 
@@ -265,9 +267,9 @@ public class ShadowHandlerTest {
     Handler handler = new Handler();
     handler.sendEmptyMessageDelayed(123, 500);
     assertThat(handler.hasMessages(123)).isTrue();
-    ShadowLooper.idleMainLooper(100);
+    ShadowLooper.idleMainLooper(100, TimeUnit.MILLISECONDS);
     assertThat(handler.hasMessages(123)).isTrue();
-    ShadowLooper.idleMainLooper(400);
+    ShadowLooper.idleMainLooper(400, TimeUnit.MILLISECONDS);
     assertThat(handler.hasMessages(123)).isFalse();
   }
 
@@ -278,9 +280,9 @@ public class ShadowHandlerTest {
     Message message = handler.obtainMessage(123);
     handler.sendMessageAtTime(message, 500);
     assertThat(handler.hasMessages(123)).isTrue();
-    ShadowLooper.idleMainLooper(100);
+    ShadowLooper.idleMainLooper(100, TimeUnit.MILLISECONDS);
     assertThat(handler.hasMessages(123)).isTrue();
-    ShadowLooper.idleMainLooper(400);
+    ShadowLooper.idleMainLooper(400, TimeUnit.MILLISECONDS);
     assertThat(handler.hasMessages(123)).isFalse();
   }
 
@@ -347,7 +349,7 @@ public class ShadowHandlerTest {
     Handler handler =
         new Handler() {
           @Override
-          public void handleMessage(Message msg) {
+          public void handleMessage(@Nonnull Message msg) {
             wasRun[0] = true;
           }
         };
@@ -364,7 +366,7 @@ public class ShadowHandlerTest {
     Handler handler =
         new Handler() {
           @Override
-          public void handleMessage(Message msg) {
+          public void handleMessage(@Nonnull Message msg) {
             runAt.add(shadowOf(Looper.myLooper()).getScheduler().getCurrentTime());
           }
         };
@@ -389,7 +391,7 @@ public class ShadowHandlerTest {
     Handler handler =
         new Handler() {
           @Override
-          public void handleMessage(Message msg) {
+          public void handleMessage(@Nonnull Message msg) {
             wasRun[0] = true;
           }
         };
@@ -464,7 +466,7 @@ public class ShadowHandlerTest {
 
     Message m2 = new Handler().obtainMessage(1, "foo");
     assertThat(m2.what).isEqualTo(1);
-    assertThat(m2.obj).isEqualTo((Object) "foo");
+    assertThat(m2.obj).isEqualTo("foo");
 
     Message m3 = new Handler().obtainMessage(1, 2, 3);
     assertThat(m3.what).isEqualTo(1);
@@ -476,7 +478,7 @@ public class ShadowHandlerTest {
     assertThat(m4.what).isEqualTo(1);
     assertThat(m4.arg1).isEqualTo(2);
     assertThat(m4.arg2).isEqualTo(3);
-    assertThat(m4.obj).isEqualTo((Object) "foo");
+    assertThat(m4.obj).isEqualTo("foo");
   }
 
   @Test
@@ -506,7 +508,7 @@ public class ShadowHandlerTest {
     Handler h =
         new Handler(Looper.myLooper()) {
           @Override
-          public void handleMessage(Message msg) {
+          public void handleMessage(@Nonnull Message msg) {
             assertFalse(hasMessages(0));
           }
         };
@@ -515,7 +517,7 @@ public class ShadowHandlerTest {
   }
 
   private class Say implements Runnable {
-    private String event;
+    private final String event;
 
     public Say(String event) {
       this.event = event;

@@ -1,11 +1,13 @@
 package org.robolectric.shadows;
 
-import static android.os.Build.VERSION_CODES.LOLLIPOP;
+import static android.os.Build.VERSION.SDK_INT;
 import static android.os.Build.VERSION_CODES.LOLLIPOP_MR1;
 import static android.os.Build.VERSION_CODES.M;
 import static android.os.Build.VERSION_CODES.N;
 import static android.os.Build.VERSION_CODES.O;
+import static android.os.Build.VERSION_CODES.Q;
 import static android.os.Build.VERSION_CODES.R;
+import static android.os.Build.VERSION_CODES.UPSIDE_DOWN_CAKE;
 import static com.google.common.base.Verify.verifyNotNull;
 
 import android.annotation.SystemApi;
@@ -27,7 +29,6 @@ import android.telecom.TelecomManager;
 import android.telecom.VideoProfile;
 import android.text.TextUtils;
 import android.util.ArrayMap;
-import androidx.annotation.Nullable;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
 import java.util.ArrayList;
@@ -37,14 +38,16 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import javax.annotation.Nullable;
 import org.robolectric.android.controller.ServiceController;
 import org.robolectric.annotation.HiddenApi;
 import org.robolectric.annotation.Implementation;
 import org.robolectric.annotation.Implements;
 import org.robolectric.annotation.RealObject;
+import org.robolectric.annotation.Resetter;
 import org.robolectric.util.ReflectionHelpers;
 
-@Implements(value = TelecomManager.class, minSdk = LOLLIPOP)
+@Implements(value = TelecomManager.class)
 public class ShadowTelecomManager {
 
   /**
@@ -72,22 +75,59 @@ public class ShadowTelecomManager {
     MANUAL,
   }
 
-  @RealObject
-  private TelecomManager realObject;
+  @RealObject private TelecomManager realObject;
 
-  private final LinkedHashMap<PhoneAccountHandle, PhoneAccount> accounts = new LinkedHashMap<>();
-  private final List<IncomingCallRecord> incomingCalls = new ArrayList<>();
-  private final List<OutgoingCallRecord> outgoingCalls = new ArrayList<>();
-  private final List<UnknownCallRecord> unknownCalls = new ArrayList<>();
-  private final Map<String, PhoneAccountHandle> defaultOutgoingPhoneAccounts = new ArrayMap<>();
-  private Intent manageBlockNumbersIntent;
-  private CallRequestMode callRequestMode = CallRequestMode.MANUAL;
-  private PhoneAccountHandle simCallManager;
-  private String defaultDialerPackageName;
-  private String systemDefaultDialerPackageName;
-  private boolean isInCall;
-  private boolean ttySupported;
-  private PhoneAccountHandle userSelectedOutgoingPhoneAccount;
+  private static final LinkedHashMap<PhoneAccountHandle, PhoneAccount> accounts =
+      new LinkedHashMap<>();
+  private static final LinkedHashMap<PhoneAccountHandle, String> voicemailNumbers =
+      new LinkedHashMap<>();
+  private static final LinkedHashMap<PhoneAccountHandle, String> line1Numbers =
+      new LinkedHashMap<>();
+
+  private static final List<IncomingCallRecord> incomingCalls = new ArrayList<>();
+  private static final List<OutgoingCallRecord> outgoingCalls = new ArrayList<>();
+  private static final List<UnknownCallRecord> unknownCalls = new ArrayList<>();
+  private static final Map<String, PhoneAccountHandle> defaultOutgoingPhoneAccounts =
+      new ArrayMap<>();
+  private static Intent manageBlockNumbersIntent;
+  private static CallRequestMode callRequestMode = CallRequestMode.MANUAL;
+  private static PhoneAccountHandle simCallManager;
+  private static String defaultDialerPackageName;
+  private static String systemDefaultDialerPackageName;
+  private static boolean isInCall;
+  private static boolean isInEmergencyCall;
+  private static boolean ttySupported;
+  private static PhoneAccountHandle userSelectedOutgoingPhoneAccount;
+  private static boolean readPhoneStatePermission = true;
+  private static boolean callPhonePermission = true;
+  private static boolean handleMmiValue = false;
+  private static ConnectionService connectionService;
+  private static boolean isOutgoingCallPermitted = false;
+
+  @Resetter
+  public static void reset() {
+    accounts.clear();
+    voicemailNumbers.clear();
+    line1Numbers.clear();
+    incomingCalls.clear();
+    outgoingCalls.clear();
+    unknownCalls.clear();
+    defaultOutgoingPhoneAccounts.clear();
+    manageBlockNumbersIntent = null;
+    callRequestMode = CallRequestMode.MANUAL;
+    simCallManager = null;
+    defaultDialerPackageName = null;
+    systemDefaultDialerPackageName = null;
+    isInCall = false;
+    isInEmergencyCall = false;
+    ttySupported = false;
+    userSelectedOutgoingPhoneAccount = null;
+    readPhoneStatePermission = true;
+    callPhonePermission = true;
+    handleMmiValue = false;
+    connectionService = null;
+    isOutgoingCallPermitted = false;
+  }
 
   public CallRequestMode getCallRequestMode() {
     return callRequestMode;
@@ -108,6 +148,11 @@ public class ShadowTelecomManager {
   /** Remove default outgoing phone account for corresponding {@code uriScheme}. */
   public void removeDefaultOutgoingPhoneAccount(String uriScheme) {
     defaultOutgoingPhoneAccounts.remove(uriScheme);
+  }
+
+  /** Sets the result of {@link TelecomManager#isOutgoingCallPermitted(PhoneAccountHandle)}. */
+  public void setIsOutgoingCallPermitted(boolean isOutgoingCallPermitted) {
+    this.isOutgoingCallPermitted = isOutgoingCallPermitted;
   }
 
   /**
@@ -156,7 +201,7 @@ public class ShadowTelecomManager {
 
     for (PhoneAccountHandle handle : accounts.keySet()) {
       PhoneAccount phoneAccount = accounts.get(handle);
-      if(phoneAccount.getSupportedUriSchemes().contains(uriScheme)) {
+      if (phoneAccount.getSupportedUriSchemes().contains(uriScheme)) {
         result.add(handle);
       }
     }
@@ -165,6 +210,7 @@ public class ShadowTelecomManager {
 
   @Implementation(minSdk = M)
   protected List<PhoneAccountHandle> getCallCapablePhoneAccounts() {
+    checkReadPhoneStatePermission();
     return this.getCallCapablePhoneAccounts(false);
   }
 
@@ -175,10 +221,24 @@ public class ShadowTelecomManager {
 
     for (PhoneAccountHandle handle : accounts.keySet()) {
       PhoneAccount phoneAccount = accounts.get(handle);
-      if(!phoneAccount.isEnabled() && !includeDisabledAccounts) {
+      if (!phoneAccount.isEnabled() && !includeDisabledAccounts) {
         continue;
       }
       result.add(handle);
+    }
+    return result;
+  }
+
+  @Implementation(minSdk = O)
+  public List<PhoneAccountHandle> getSelfManagedPhoneAccounts() {
+    List<PhoneAccountHandle> result = new ArrayList<>();
+
+    for (PhoneAccountHandle handle : accounts.keySet()) {
+      PhoneAccount phoneAccount = accounts.get(handle);
+      if ((phoneAccount.getCapabilities() & PhoneAccount.CAPABILITY_SELF_MANAGED)
+          == PhoneAccount.CAPABILITY_SELF_MANAGED) {
+        result.add(handle);
+      }
     }
     return result;
   }
@@ -199,6 +259,7 @@ public class ShadowTelecomManager {
 
   @Implementation
   protected PhoneAccount getPhoneAccount(PhoneAccountHandle account) {
+    checkReadPhoneStatePermission();
     return accounts.get(account);
   }
 
@@ -222,7 +283,20 @@ public class ShadowTelecomManager {
 
   @Implementation
   protected void registerPhoneAccount(PhoneAccount account) {
+    account = adjustCapabilities(account);
     accounts.put(account.getAccountHandle(), account);
+  }
+
+  private PhoneAccount adjustCapabilities(PhoneAccount account) {
+    // Mirror the capabilities adjustments done in com.android.server.telecom.PhoneAccountRegistrar.
+    if (SDK_INT >= UPSIDE_DOWN_CAKE
+        && account.hasCapabilities(PhoneAccount.CAPABILITY_SUPPORTS_TRANSACTIONAL_OPERATIONS)
+        && !account.hasCapabilities(PhoneAccount.CAPABILITY_SELF_MANAGED)) {
+      return account.toBuilder()
+          .setCapabilities(account.getCapabilities() | PhoneAccount.CAPABILITY_SELF_MANAGED)
+          .build();
+    }
+    return account;
   }
 
   @Implementation
@@ -230,14 +304,15 @@ public class ShadowTelecomManager {
     accounts.remove(accountHandle);
   }
 
-  /** @deprecated */
+  /**
+   * @deprecated
+   */
   @Deprecated
   @Implementation
   @HiddenApi
   public void clearAccounts() {
     accounts.clear();
   }
-
 
   @Implementation(minSdk = LOLLIPOP_MR1)
   @HiddenApi
@@ -255,7 +330,9 @@ public class ShadowTelecomManager {
     }
   }
 
-  /** @deprecated */
+  /**
+   * @deprecated
+   */
   @Deprecated
   @Implementation
   @HiddenApi
@@ -268,7 +345,9 @@ public class ShadowTelecomManager {
     return defaultDialerPackageName;
   }
 
-  /** @deprecated API deprecated since Q, for testing, use setDefaultDialerPackage instead */
+  /**
+   * @deprecated API deprecated since Q, for testing, use setDefaultDialerPackage instead
+   */
   @Deprecated
   @Implementation(minSdk = M)
   @HiddenApi
@@ -293,19 +372,28 @@ public class ShadowTelecomManager {
     this.systemDefaultDialerPackageName = packageName;
   }
 
-  @Implementation(minSdk = LOLLIPOP_MR1)
+  public void setVoicemailNumber(PhoneAccountHandle accountHandle, String number) {
+    voicemailNumbers.put(accountHandle, number);
+  }
+
+  @Implementation(minSdk = M)
   protected boolean isVoiceMailNumber(PhoneAccountHandle accountHandle, String number) {
-    return false;
+    return TextUtils.equals(number, voicemailNumbers.get(accountHandle));
   }
 
   @Implementation(minSdk = M)
   protected String getVoiceMailNumber(PhoneAccountHandle accountHandle) {
-    return null;
+    return voicemailNumbers.get(accountHandle);
   }
 
   @Implementation(minSdk = LOLLIPOP_MR1)
   protected String getLine1Number(PhoneAccountHandle accountHandle) {
-    return null;
+    checkReadPhoneStatePermission();
+    return line1Numbers.get(accountHandle);
+  }
+
+  public void setLine1Number(PhoneAccountHandle accountHandle, String number) {
+    line1Numbers.put(accountHandle, number);
   }
 
   /** Sets the return value for {@link TelecomManager#isInCall}. */
@@ -316,12 +404,34 @@ public class ShadowTelecomManager {
   /**
    * Overrides behavior of {@link TelecomManager#isInCall} to return pre-set result.
    *
-   * @return Value set by calling {@link ShadowTelecomManager#setIsInCall}. If setIsInCall has not
-   *     previously been called, will return false.
+   * @return Value set by calling {@link ShadowTelecomManager#setIsInCall} or {@link
+   *     ShadowTelecomManager#setIsInEmergencyCall}. If neither has previously been called, will
+   *     return false.
    */
   @Implementation
   protected boolean isInCall() {
     return isInCall;
+  }
+
+  /**
+   * Sets the return value for {@link TelecomManager#isInEmergencyCall} and {@link
+   * TelecomManager#isInCall}.
+   */
+  public void setIsInEmergencyCall(boolean isInEmergencyCall) {
+    this.isInEmergencyCall = isInEmergencyCall;
+    this.isInCall = isInEmergencyCall;
+  }
+
+  /**
+   * Overrides behavior of {@link TelecomManager#isInEmergencyCall} to return pre-set result.
+   *
+   * @return Value set by calling {@link ShadowTelecomManager#setIsInEmergencyCall}. If
+   *     setIsInEmergencyCall has not previously been called, will return false.
+   */
+  @Implementation(minSdk = Q)
+  @SystemApi
+  protected boolean isInEmergencyCall() {
+    return isInEmergencyCall;
   }
 
   @Implementation
@@ -367,6 +477,7 @@ public class ShadowTelecomManager {
 
   @Implementation
   protected boolean isTtySupported() {
+    checkReadPhoneStatePermission();
     return ttySupported;
   }
 
@@ -426,7 +537,7 @@ public class ShadowTelecomManager {
 
     PhoneAccountHandle phoneAccount = verifyNotNull(call.phoneAccount);
     ConnectionRequest request = buildConnectionRequestForIncomingCall(call);
-    ConnectionService service = setupConnectionService(phoneAccount);
+    ConnectionService service = getConnectionService(phoneAccount);
     return service.onCreateIncomingConnection(phoneAccount, request);
   }
 
@@ -445,7 +556,7 @@ public class ShadowTelecomManager {
 
     PhoneAccountHandle phoneAccount = verifyNotNull(call.phoneAccount);
     ConnectionRequest request = buildConnectionRequestForIncomingCall(call);
-    ConnectionService service = setupConnectionService(phoneAccount);
+    ConnectionService service = getConnectionService(phoneAccount);
     service.onCreateIncomingConnectionFailed(phoneAccount, request);
   }
 
@@ -461,6 +572,7 @@ public class ShadowTelecomManager {
 
   @Implementation(minSdk = M)
   protected void placeCall(Uri address, Bundle extras) {
+    checkCallPhonePermission();
     OutgoingCallRecord call = new OutgoingCallRecord(address, extras);
     outgoingCalls.add(call);
 
@@ -504,7 +616,7 @@ public class ShadowTelecomManager {
 
     PhoneAccountHandle phoneAccount = verifyNotNull(call.phoneAccount);
     ConnectionRequest request = buildConnectionRequestForOutgoingCall(call);
-    ConnectionService service = setupConnectionService(phoneAccount);
+    ConnectionService service = getConnectionService(phoneAccount);
     return service.onCreateOutgoingConnection(phoneAccount, request);
   }
 
@@ -523,7 +635,7 @@ public class ShadowTelecomManager {
 
     PhoneAccountHandle phoneAccount = verifyNotNull(call.phoneAccount);
     ConnectionRequest request = buildConnectionRequestForOutgoingCall(call);
-    ConnectionService service = setupConnectionService(phoneAccount);
+    ConnectionService service = getConnectionService(phoneAccount);
     service.onCreateOutgoingConnectionFailed(phoneAccount, request);
   }
 
@@ -560,6 +672,25 @@ public class ShadowTelecomManager {
     return Iterables.getOnlyElement(unknownCalls);
   }
 
+  /**
+   * Set connection service.
+   *
+   * <p>This method can be used in case, when you already created connection service and would like
+   * to use it in telecom manager instead of creating new one.
+   *
+   * @param service existing connection service
+   */
+  public void setConnectionService(ConnectionService service) {
+    connectionService = service;
+  }
+
+  private ConnectionService getConnectionService(PhoneAccountHandle phoneAccount) {
+    if (connectionService == null) {
+      connectionService = setupConnectionService(phoneAccount);
+    }
+    return connectionService;
+  }
+
   private static ConnectionService setupConnectionService(PhoneAccountHandle phoneAccount) {
     ComponentName service = phoneAccount.getComponentName();
     Class<? extends ConnectionService> clazz;
@@ -572,14 +703,18 @@ public class ShadowTelecomManager {
         ServiceController.of(ReflectionHelpers.callConstructor(clazz), null).create().get());
   }
 
+  public void setHandleMmiValue(boolean handleMmiValue) {
+    this.handleMmiValue = handleMmiValue;
+  }
+
   @Implementation
   protected boolean handleMmi(String dialString) {
-    return false;
+    return handleMmiValue;
   }
 
   @Implementation(minSdk = M)
   protected boolean handleMmi(String dialString, PhoneAccountHandle accountHandle) {
-    return false;
+    return handleMmiValue;
   }
 
   @Implementation(minSdk = LOLLIPOP_MR1)
@@ -596,6 +731,10 @@ public class ShadowTelecomManager {
   @Implementation(minSdk = M)
   @HiddenApi
   public void enablePhoneAccount(PhoneAccountHandle handle, boolean isEnabled) {
+    if (getPhoneAccount(handle) == null) {
+      return;
+    }
+    getPhoneAccount(handle).setIsEnabled(isEnabled);
   }
 
   /**
@@ -614,6 +753,7 @@ public class ShadowTelecomManager {
     this.manageBlockNumbersIntent = intent;
   }
 
+  @Implementation(maxSdk = LOLLIPOP_MR1)
   public void setSimCallManager(PhoneAccountHandle simCallManager) {
     this.simCallManager = simCallManager;
   }
@@ -654,6 +794,11 @@ public class ShadowTelecomManager {
     return intent;
   }
 
+  @Implementation(minSdk = O)
+  protected boolean isOutgoingCallPermitted(PhoneAccountHandle phoneAccountHandle) {
+    return this.isOutgoingCallPermitted;
+  }
+
   /**
    * Details about a call request made via {@link TelecomManager#addNewIncomingCall} or {@link
    * TelecomManager#addNewUnknownCall}.
@@ -666,7 +811,9 @@ public class ShadowTelecomManager {
     public final Bundle extras;
     protected boolean isRinging = true;
 
-    /** @deprecated Use {@link extras} instead. */
+    /**
+     * @deprecated Use {@link extras} instead.
+     */
     @Deprecated public final Bundle bundle;
 
     public CallRecord(PhoneAccountHandle phoneAccount, Bundle extras) {
@@ -675,6 +822,36 @@ public class ShadowTelecomManager {
 
       // Keep the deprecated "bundle" name around for a while.
       this.bundle = this.extras;
+    }
+  }
+
+  /**
+   * When set to false methods requiring {@link android.Manifest.permission.READ_PHONE_STATE}
+   * permission will throw a {@link SecurityException}. By default it's set to true for backwards
+   * compatibility.
+   */
+  public void setReadPhoneStatePermission(boolean readPhoneStatePermission) {
+    this.readPhoneStatePermission = readPhoneStatePermission;
+  }
+
+  private void checkReadPhoneStatePermission() {
+    if (!readPhoneStatePermission) {
+      throw new SecurityException();
+    }
+  }
+
+  /**
+   * When set to false methods requiring {@link android.Manifest.permission.CALL_PHONE} permission
+   * will throw a {@link SecurityException}. By default it's set to true for backwards
+   * compatibility.
+   */
+  public void setCallPhonePermission(boolean callPhonePermission) {
+    this.callPhonePermission = callPhonePermission;
+  }
+
+  private void checkCallPhonePermission() {
+    if (!callPhonePermission) {
+      throw new SecurityException();
     }
   }
 

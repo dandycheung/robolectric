@@ -13,9 +13,9 @@ import android.net.Uri;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.Message;
-import androidx.annotation.Nullable;
 import androidx.test.core.app.ApplicationProvider;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
+import javax.annotation.Nullable;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.robolectric.annotation.Config;
@@ -56,7 +56,7 @@ public class ShadowIconTest {
     Bitmap bitmap = Bitmap.createBitmap(100, 100, Bitmap.Config.ARGB_8888);
     Icon icon = Icon.createWithBitmap(bitmap);
     assertThat(shadowOf(icon).getType()).isEqualTo(TYPE_BITMAP);
-    assertThat(shadowOf(icon).getBitmap()).isEqualTo(bitmap);
+    assertThat(shadowOf(icon).getBitmap().sameAs(bitmap)).isTrue();
   }
 
   @Test

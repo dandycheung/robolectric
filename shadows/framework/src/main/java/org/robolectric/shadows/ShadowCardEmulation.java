@@ -2,16 +2,17 @@ package org.robolectric.shadows;
 
 import static org.robolectric.util.reflector.Reflector.reflector;
 
-import android.annotation.Nullable;
 import android.app.Activity;
 import android.content.ComponentName;
 import android.content.Context;
 import android.nfc.INfcCardEmulation;
 import android.nfc.cardemulation.CardEmulation;
-import android.os.Build;
 import android.provider.Settings;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
+import javax.annotation.Nullable;
 import org.robolectric.RuntimeEnvironment;
 import org.robolectric.annotation.Implementation;
 import org.robolectric.annotation.Implements;
@@ -20,30 +21,43 @@ import org.robolectric.annotation.Resetter;
 import org.robolectric.util.reflector.Accessor;
 import org.robolectric.util.reflector.ForType;
 import org.robolectric.util.reflector.Static;
+import org.robolectric.versioning.AndroidVersions.V;
 
 /** Shadow implementation of {@link CardEmulation}. */
 @Implements(CardEmulation.class)
 public class ShadowCardEmulation {
 
+  private static final Set<ComponentName> defaultObserveModeEnabledServices = new HashSet<>();
   private static Map<String, ComponentName> defaultServiceForCategoryMap = new HashMap<>();
   private static ComponentName preferredService = null;
 
   @RealObject CardEmulation cardEmulation;
 
-  @Implementation(minSdk = Build.VERSION_CODES.KITKAT)
+  @Implementation
   public boolean isDefaultServiceForCategory(ComponentName service, String category) {
     return service.equals(defaultServiceForCategoryMap.get(category));
   }
 
-  @Implementation(minSdk = Build.VERSION_CODES.LOLLIPOP)
+  @Implementation
   public boolean setPreferredService(Activity activity, ComponentName service) {
     preferredService = service;
     return true;
   }
 
-  @Implementation(minSdk = Build.VERSION_CODES.LOLLIPOP)
+  @Implementation
   public boolean unsetPreferredService(Activity activity) {
     preferredService = null;
+    return true;
+  }
+
+  @Implementation(minSdk = V.SDK_INT)
+  protected boolean setShouldDefaultToObserveModeForService(
+      ComponentName service, boolean shouldDefaultToObserveMode) {
+    if (shouldDefaultToObserveMode) {
+      defaultObserveModeEnabledServices.add(service);
+    } else {
+      defaultObserveModeEnabledServices.remove(service);
+    }
     return true;
   }
 
@@ -71,22 +85,27 @@ public class ShadowCardEmulation {
   public static void setCategoryPaymentAllowsForegroundPreference(boolean value) {
     Settings.Secure.putInt(
         RuntimeEnvironment.getApplication().getContentResolver(),
-        "nfc_payment_foreground",
+        Settings.Secure.NFC_PAYMENT_FOREGROUND,
         value ? 1 : 0);
+  }
+
+  /**
+   * Returns whether the given service has dynamically set observe mode to be enabled by default.
+   */
+  public static boolean getShouldDefaultToObserveModeForService(ComponentName service) {
+    return defaultObserveModeEnabledServices.contains(service);
   }
 
   @Resetter
   public static void reset() {
     defaultServiceForCategoryMap = new HashMap<>();
     preferredService = null;
-    if (RuntimeEnvironment.getApiLevel() >= Build.VERSION_CODES.KITKAT) {
-      CardEmulationReflector reflector = reflector(CardEmulationReflector.class);
-      reflector.setIsInitialized(false);
-      reflector.setService(null);
-      Map<Context, CardEmulation> cardEmus = reflector.getCardEmus();
-      if (cardEmus != null) {
-        cardEmus.clear();
-      }
+    CardEmulationReflector reflector = reflector(CardEmulationReflector.class);
+    reflector.setIsInitialized(false);
+    reflector.setService(null);
+    Map<Context, CardEmulation> cardEmus = reflector.getCardEmus();
+    if (cardEmus != null) {
+      cardEmus.clear();
     }
   }
 

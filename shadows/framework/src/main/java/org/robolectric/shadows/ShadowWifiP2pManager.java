@@ -1,7 +1,5 @@
 package org.robolectric.shadows;
 
-import static android.os.Build.VERSION_CODES.KITKAT;
-
 import android.content.Context;
 import android.net.wifi.p2p.WifiP2pGroup;
 import android.net.wifi.p2p.WifiP2pManager;
@@ -14,6 +12,7 @@ import java.util.HashMap;
 import java.util.Map;
 import org.robolectric.annotation.Implementation;
 import org.robolectric.annotation.Implements;
+import org.robolectric.annotation.Resetter;
 import org.robolectric.util.ReflectionHelpers;
 
 @Implements(WifiP2pManager.class)
@@ -21,12 +20,12 @@ public class ShadowWifiP2pManager {
 
   private static final int NO_FAILURE = -1;
 
-  private int listeningChannel;
-  private int operatingChannel;
-  private WifiP2pManager.GroupInfoListener groupInfoListener;
-  private Handler handler;
-  private int nextActionFailure = NO_FAILURE;
-  private Map<Channel, WifiP2pGroup> p2pGroupmap = new HashMap<>();
+  private static int listeningChannel;
+  private static int operatingChannel;
+  private static WifiP2pManager.GroupInfoListener groupInfoListener;
+  private static Handler handler;
+  private static int nextActionFailure = NO_FAILURE;
+  private static final Map<Channel, WifiP2pGroup> p2pGroupmap = new HashMap<>();
 
   public int getListeningChannel() {
     return listeningChannel;
@@ -40,7 +39,7 @@ public class ShadowWifiP2pManager {
     return groupInfoListener;
   }
 
-  @Implementation(minSdk = KITKAT)
+  @Implementation
   protected void setWifiP2pChannels(
       Channel c, int listeningChannel, int operatingChannel, ActionListener al) {
     Preconditions.checkNotNull(c);
@@ -66,17 +65,15 @@ public class ShadowWifiP2pManager {
       return;
     }
 
-    handler.post(new Runnable() {
-      @Override
-      public void run() {
-        if (nextActionFailure == -1) {
-          al.onSuccess();
-        } else {
-          al.onFailure(nextActionFailure);
-        }
-        nextActionFailure = NO_FAILURE;
-      }
-    });
+    handler.post(
+        () -> {
+          if (nextActionFailure == -1) {
+            al.onSuccess();
+          } else {
+            al.onFailure(nextActionFailure);
+          }
+          nextActionFailure = NO_FAILURE;
+        });
   }
 
   @Implementation
@@ -85,12 +82,7 @@ public class ShadowWifiP2pManager {
       return;
     }
 
-    handler.post(new Runnable() {
-      @Override
-      public void run() {
-        gl.onGroupInfoAvailable(p2pGroupmap.get(c));
-      }
-    });
+    handler.post(() -> gl.onGroupInfoAvailable(p2pGroupmap.get(c)));
   }
 
   @Implementation
@@ -104,5 +96,15 @@ public class ShadowWifiP2pManager {
 
   public void setGroupInfo(Channel channel, WifiP2pGroup wifiP2pGroup) {
     p2pGroupmap.put(channel, wifiP2pGroup);
+  }
+
+  @Resetter
+  public static void reset() {
+    listeningChannel = 0;
+    operatingChannel = 0;
+    groupInfoListener = null;
+    handler = null;
+    nextActionFailure = NO_FAILURE;
+    p2pGroupmap.clear();
   }
 }

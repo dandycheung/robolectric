@@ -12,13 +12,15 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.robolectric.annotation.Config;
+import org.robolectric.annotation.GraphicsMode;
+import org.robolectric.annotation.GraphicsMode.Mode;
 import org.robolectric.util.TestUtil;
 
 /** Tests for {@link org.robolectric.shadows.ShadowFontBuilder} */
 @RunWith(AndroidJUnit4.class)
 @Config(minSdk = Q)
+@GraphicsMode(Mode.LEGACY)
 public class ShadowFontBuilderTest {
-
   private File fontFile;
 
   @Before
@@ -31,5 +33,11 @@ public class ShadowFontBuilderTest {
     Font font = new Font.Builder(fontFile).build();
     assertThat(font.getStyle().getWeight()).isEqualTo(FontStyle.FONT_WEIGHT_NORMAL);
     assertThat(font.getStyle().getSlant()).isEqualTo(FontStyle.FONT_SLANT_UPRIGHT);
+  }
+
+  @Test
+  public void fontBuilder_toString() throws IOException {
+    Font font = new Font.Builder(fontFile).build();
+    assertThat(font.toString()).isNotNull();
   }
 }

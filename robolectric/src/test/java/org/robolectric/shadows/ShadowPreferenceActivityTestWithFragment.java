@@ -21,13 +21,15 @@ import org.robolectric.Robolectric;
  */
 @RunWith(AndroidJUnit4.class)
 public class ShadowPreferenceActivityTestWithFragment {
-  private TestPreferenceActivity activity = Robolectric.setupActivity(TestPreferenceActivity.class);
+  private final TestPreferenceActivity activity =
+      Robolectric.setupActivity(TestPreferenceActivity.class);
   private TestPreferenceFragment fragment;
   private static final String FRAGMENT_TAG = "fragmentPreferenceTag";
 
   @Before
   public void before() {
-    this.fragment = (TestPreferenceFragment) this.activity.getFragmentManager().findFragmentByTag(FRAGMENT_TAG);
+    this.fragment =
+        (TestPreferenceFragment) this.activity.getFragmentManager().findFragmentByTag(FRAGMENT_TAG);
   }
 
   @Test
@@ -50,7 +52,10 @@ public class ShadowPreferenceActivityTestWithFragment {
 
       FragmentManager fragmentManager = this.getFragmentManager();
       TestPreferenceFragment fragment = new TestPreferenceFragment();
-      fragmentManager.beginTransaction().replace(android.R.id.content, fragment, FRAGMENT_TAG).commit();
+      fragmentManager
+          .beginTransaction()
+          .replace(android.R.id.content, fragment, FRAGMENT_TAG)
+          .commit();
     }
   }
 

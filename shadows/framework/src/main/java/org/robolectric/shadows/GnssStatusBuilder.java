@@ -2,12 +2,12 @@ package org.robolectric.shadows;
 
 import android.location.GnssStatus;
 import android.os.Build;
-import androidx.annotation.Nullable;
 import com.google.auto.value.AutoValue;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
+import javax.annotation.Nullable;
 import org.robolectric.util.ReflectionHelpers;
 import org.robolectric.util.ReflectionHelpers.ClassParameter;
 

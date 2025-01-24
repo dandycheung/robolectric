@@ -5,7 +5,6 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
-import static org.robolectric.annotation.LooperMode.Mode.PAUSED;
 import static org.robolectric.shadows.ShadowLooper.shadowMainLooper;
 
 import android.os.AsyncTask;
@@ -22,14 +21,10 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.robolectric.android.util.concurrent.PausedExecutorService;
-import org.robolectric.annotation.LooperMode;
 import org.robolectric.util.Join;
 
-/**
- * Unit tests for {@link ShadowPausedAsyncTask}.
- */
+/** Unit tests for {@link ShadowPausedAsyncTask}. */
 @RunWith(AndroidJUnit4.class)
-@LooperMode(PAUSED)
 public class ShadowPausedAsyncTaskTest {
   private List<String> transcript;
 
@@ -38,7 +33,7 @@ public class ShadowPausedAsyncTaskTest {
     transcript = new ArrayList<>();
   }
 
-  /** Test uses AsyncTask without overridding executor. */
+  /** Test uses AsyncTask without overriding executor. */
   @Test
   public void testNormalFlow() throws Exception {
     AsyncTask<String, String, String> asyncTask = new RecordingAsyncTask();
@@ -186,7 +181,7 @@ public class ShadowPausedAsyncTaskTest {
           @Override
           protected Void doInBackground(Void... params) {
             boolean isMainLooper = Looper.getMainLooper().getThread() == Thread.currentThread();
-            transcript.add("doInBackground on main looper " + Boolean.toString(isMainLooper));
+            transcript.add("doInBackground on main looper " + isMainLooper);
             return null;
           }
         };
@@ -249,7 +244,7 @@ public class ShadowPausedAsyncTaskTest {
 
   private static class BlockingAsyncTask extends AsyncTask<Void, Void, Void> {
 
-    private CountDownLatch latch = new CountDownLatch(1);
+    private final CountDownLatch latch = new CountDownLatch(1);
 
     @Override
     protected Void doInBackground(Void... voids) {

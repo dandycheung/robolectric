@@ -3,17 +3,17 @@ package org.robolectric.shadows;
 import static android.os.Build.VERSION_CODES.P;
 import static android.os.Build.VERSION_CODES.Q;
 import static android.os.Build.VERSION_CODES.R;
+import static org.robolectric.util.reflector.Reflector.reflector;
 
 import android.content.res.AssetManager;
 import android.content.res.AssetManager.AssetInputStream;
-import android.content.res.Resources;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.ColorSpace;
+import android.graphics.ColorSpace.Named;
 import android.graphics.ImageDecoder;
 import android.graphics.ImageDecoder.DecodeException;
 import android.graphics.ImageDecoder.Source;
-import android.graphics.Point;
 import android.graphics.Rect;
 import android.util.Size;
 import java.io.ByteArrayInputStream;
@@ -21,12 +21,15 @@ import java.io.FileDescriptor;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.ByteBuffer;
+import libcore.io.IoUtils;
 import org.robolectric.annotation.Implementation;
 import org.robolectric.annotation.Implements;
 import org.robolectric.res.android.NativeObjRegistry;
 import org.robolectric.shadow.api.Shadow;
 import org.robolectric.util.ReflectionHelpers;
 import org.robolectric.util.ReflectionHelpers.ClassParameter;
+import org.robolectric.util.reflector.Accessor;
+import org.robolectric.util.reflector.ForType;
 
 // transliterated from
 // https://android.googlesource.com/platform/frameworks/base/+/android-9.0.0_r12/core/jni/android/graphics/ImageDecoder.cpp
@@ -42,12 +45,14 @@ public class ShadowImageDecoder {
     private final int height;
     private final boolean animated = false;
     private final boolean ninePatch;
+    private final String mimeType;
 
     ImgStream() {
       InputStream inputStream = getInputStream();
-      final Point size = ImageUtil.getImageSizeFromStream(inputStream);
-      this.width = size == null ? 10 : size.x;
-      this.height = size == null ? 10 : size.y;
+      final ImageUtil.ImageInfo info = ImageUtil.getImageInfoFromStream(inputStream);
+      this.width = info == null ? 10 : info.width;
+      this.height = info == null ? 10 : info.height;
+      this.mimeType = info == null ? "image/unknown" : info.mimeType;
       if (inputStream instanceof AssetManager.AssetInputStream) {
         ShadowAssetInputStream sis = Shadow.extract(inputStream);
         this.ninePatch = sis.isNinePatch();
@@ -73,6 +78,10 @@ public class ShadowImageDecoder {
     boolean isNinePatch() {
       return ninePatch;
     }
+
+    String mimeType() {
+      return mimeType;
+    }
   }
 
   private static final class CppImageDecoder {
@@ -83,6 +92,9 @@ public class ShadowImageDecoder {
       this.imgStream = imgStream;
     }
 
+    public String getMimeType() {
+      return imgStream.mimeType();
+    }
   }
 
   private static final NativeObjRegistry<CppImageDecoder> NATIVE_IMAGE_DECODER_REGISTRY =
@@ -132,22 +144,21 @@ public class ShadowImageDecoder {
     //     SkCodec.MinBufferedBytesNeeded()));
     // return native_create(bufferedStream, source);
 
-    return jniCreateDecoder(new ImgStream() {
-      @Override
-      protected InputStream getInputStream() {
-        return is;
-      }
-    });
+    return jniCreateDecoder(
+        new ImgStream() {
+          @Override
+          protected InputStream getInputStream() {
+            return is;
+          }
+        });
   }
 
-  protected static ImageDecoder ImageDecoder_nCreateAsset(long asset_ptr, Source source)
-      throws DecodeException {
+  protected static ImageDecoder ImageDecoder_nCreateAsset(
+      AssetInputStream assetInputStream /*long asset_ptr*/, Source source) throws DecodeException {
     // Asset* asset = reinterpret_cast<Asset*>(assetPtr);
     // SkStream stream = new AssetStreamAdaptor(asset);
     // return jniCreateDecoder(stream, source);
-    Resources resources = ReflectionHelpers.getField(source, "mResources");
-    AssetInputStream assetInputStream = ShadowAssetInputStream.createAssetInputStream(
-        null, asset_ptr, resources.getAssets());
+
     return jniCreateDecoder(
         new ImgStream() {
           @Override
@@ -167,33 +178,40 @@ public class ShadowImageDecoder {
     //       null, source);
     // }
     // return native_create(stream, source);
-    return jniCreateDecoder(new ImgStream() {
-      @Override
-      protected InputStream getInputStream() {
-        return new ByteArrayInputStream(jbyteBuffer.array());
-      }
-    });
+    return jniCreateDecoder(
+        new ImgStream() {
+          @Override
+          protected InputStream getInputStream() {
+            return new ByteArrayInputStream(jbyteBuffer.array());
+          }
+        });
   }
 
   protected static ImageDecoder ImageDecoder_nCreateByteArray(
       byte[] byteArray, int offset, int length, Source source) {
     // SkStream stream = CreateByteArrayStreamAdaptor(byteArray, offset, length);
     // return native_create(stream, source);
-    return jniCreateDecoder(new ImgStream() {
-      @Override
-      protected InputStream getInputStream() {
-        return new ByteArrayInputStream(byteArray);
-      }
-    });
+    return jniCreateDecoder(
+        new ImgStream() {
+          @Override
+          protected InputStream getInputStream() {
+            return new ByteArrayInputStream(byteArray);
+          }
+        });
   }
 
-  protected static Bitmap ImageDecoder_nDecodeBitmap(long nativePtr,
+  protected static Bitmap ImageDecoder_nDecodeBitmap(
+      long nativePtr,
       ImageDecoder decoder,
       boolean doPostProcess,
-      int width, int height,
-      Rect cropRect, boolean mutable,
-      int allocator, boolean unpremulRequired,
-      boolean conserveMemory, boolean decodeAsAlphaMask,
+      int width,
+      int height,
+      Rect cropRect,
+      boolean mutable,
+      int allocator,
+      boolean unpremulRequired,
+      boolean conserveMemory,
+      boolean decodeAsAlphaMask,
       ColorSpace desiredColorSpace)
       throws IOException {
     CppImageDecoder cppImageDecoder = NATIVE_IMAGE_DECODER_REGISTRY.getNativeObject(nativePtr);
@@ -219,8 +237,7 @@ public class ShadowImageDecoder {
     return bitmap;
   }
 
-  static Size ImageDecoder_nGetSampledSize(long nativePtr,
-      int sampleSize) {
+  static Size ImageDecoder_nGetSampledSize(long nativePtr, int sampleSize) {
     CppImageDecoder decoder = NATIVE_IMAGE_DECODER_REGISTRY.getNativeObject(nativePtr);
     // SkISize size = decoder.mCodec.getSampledDimensions(sampleSize);
     // return env.NewObject(gSize_class, gSize_constructorMethodID, size.width(), size.height());
@@ -228,8 +245,7 @@ public class ShadowImageDecoder {
     throw new UnsupportedOperationException();
   }
 
-  static void ImageDecoder_nGetPadding(long nativePtr,
-      Rect outPadding) {
+  static void ImageDecoder_nGetPadding(long nativePtr, Rect outPadding) {
     CppImageDecoder decoder = NATIVE_IMAGE_DECODER_REGISTRY.getNativeObject(nativePtr);
     // decoder.mPeeker.getPadding(outPadding);
     if (decoder.imgStream.isNinePatch()) {
@@ -246,23 +262,18 @@ public class ShadowImageDecoder {
 
   static String ImageDecoder_nGetMimeType(long nativePtr) {
     CppImageDecoder decoder = NATIVE_IMAGE_DECODER_REGISTRY.getNativeObject(nativePtr);
-    // return encodedFormatToString(decoder.mCodec.getEncodedFormat());
-    throw new UnsupportedOperationException();
+    return decoder.getMimeType();
   }
 
   static ColorSpace ImageDecoder_nGetColorSpace(long nativePtr) {
     // auto colorType = codec.computeOutputColorType(codec.getInfo().colorType());
     // sk_sp<SkColorSpace> colorSpace = codec.computeOutputColorSpace(colorType);
     // return GraphicsJNI.getColorSpace(colorSpace, colorType);
-    throw new UnsupportedOperationException();
+    // TODO: fix this properly. Just hardcode to SRGB for now or just remove GraphicsMode.LEGACY
+    return ColorSpace.get(Named.SRGB);
   }
 
   // native method implementations...
-
-  @Implementation(maxSdk = Q)
-  protected static ImageDecoder nCreate(long asset, Source source) throws IOException {
-    return ImageDecoder_nCreateAsset(asset, source);
-  }
 
   @Implementation(maxSdk = Q)
   protected static ImageDecoder nCreate(ByteBuffer buffer, int position, int limit, Source src)
@@ -287,10 +298,28 @@ public class ShadowImageDecoder {
     return ImageDecoder_nCreateFd(fd, src);
   }
 
-  @Implementation(minSdk = R)
-  protected static ImageDecoder nCreate(long asset, boolean preferAnimation, Source source)
+  @Implementation(maxSdk = Q)
+  protected static ImageDecoder createFromAsset(AssetInputStream ais, Source source)
       throws IOException {
-    return ImageDecoder_nCreateAsset(asset, source);
+    return createFromAsset(ais, false, source);
+  }
+
+  @Implementation(minSdk = R)
+  protected static ImageDecoder createFromAsset(
+      AssetInputStream ais, boolean preferAnimation, Source source) throws IOException {
+    // copy the real android implementation to retain access to the AssetInputStream
+    ImageDecoder decoder = null;
+    try {
+      decoder = ImageDecoder_nCreateAsset(ais, source);
+    } finally {
+      if (decoder == null) {
+        IoUtils.closeQuietly(ais);
+      } else {
+        reflector(ImageDecoderReflector.class, decoder).setInputStream(ais);
+        reflector(ImageDecoderReflector.class, decoder).setOwnsInputStream(true);
+      }
+    }
+    return decoder;
   }
 
   @Implementation(minSdk = R)
@@ -334,13 +363,18 @@ public class ShadowImageDecoder {
       boolean decodeAsAlphaMask,
       android.graphics.ColorSpace desiredColorSpace)
       throws IOException {
-    return ImageDecoder_nDecodeBitmap(nativePtr,
+    return ImageDecoder_nDecodeBitmap(
+        nativePtr,
         decoder,
         doPostProcess,
-        width, height,
-        cropRect, mutable,
-        allocator, unpremulRequired,
-        conserveMemory, decodeAsAlphaMask,
+        width,
+        height,
+        cropRect,
+        mutable,
+        allocator,
+        unpremulRequired,
+        conserveMemory,
+        decodeAsAlphaMask,
         desiredColorSpace);
   }
 
@@ -360,19 +394,23 @@ public class ShadowImageDecoder {
       long desiredColorSpace,
       boolean extended)
       throws IOException {
-    return ImageDecoder_nDecodeBitmap(nativePtr,
+    return ImageDecoder_nDecodeBitmap(
+        nativePtr,
         decoder,
         doPostProcess,
-        width, height,
-        cropRect, mutable,
-        allocator, unpremulRequired,
-        conserveMemory, decodeAsAlphaMask,
+        width,
+        height,
+        cropRect,
+        mutable,
+        allocator,
+        unpremulRequired,
+        conserveMemory,
+        decodeAsAlphaMask,
         null);
   }
 
   @Implementation
-  protected static Size nGetSampledSize(long nativePtr,
-      int sampleSize) {
+  protected static Size nGetSampledSize(long nativePtr, int sampleSize) {
     return ImageDecoder_nGetSampledSize(nativePtr, sampleSize);
   }
 
@@ -394,5 +432,14 @@ public class ShadowImageDecoder {
   @Implementation
   protected static ColorSpace nGetColorSpace(long nativePtr) {
     return ImageDecoder_nGetColorSpace(nativePtr);
+  }
+
+  @ForType(ImageDecoder.class)
+  interface ImageDecoderReflector {
+    @Accessor("mInputStream")
+    void setInputStream(InputStream is);
+
+    @Accessor("mOwnsInputStream")
+    void setOwnsInputStream(boolean value);
   }
 }

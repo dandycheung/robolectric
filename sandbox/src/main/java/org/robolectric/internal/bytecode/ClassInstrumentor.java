@@ -2,6 +2,7 @@ package org.robolectric.internal.bytecode;
 
 import static java.lang.invoke.MethodType.methodType;
 
+import com.google.common.collect.Iterables;
 import java.lang.invoke.CallSite;
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
@@ -9,8 +10,10 @@ import java.lang.invoke.MethodType;
 import java.lang.reflect.Modifier;
 import java.util.List;
 import java.util.ListIterator;
+import java.util.Objects;
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.ClassWriter;
+import org.objectweb.asm.ConstantDynamic;
 import org.objectweb.asm.Handle;
 import org.objectweb.asm.Label;
 import org.objectweb.asm.MethodVisitor;
@@ -28,6 +31,9 @@ import org.objectweb.asm.tree.FieldNode;
 import org.objectweb.asm.tree.InsnList;
 import org.objectweb.asm.tree.InsnNode;
 import org.objectweb.asm.tree.InvokeDynamicInsnNode;
+import org.objectweb.asm.tree.JumpInsnNode;
+import org.objectweb.asm.tree.LabelNode;
+import org.objectweb.asm.tree.LdcInsnNode;
 import org.objectweb.asm.tree.MethodInsnNode;
 import org.objectweb.asm.tree.MethodNode;
 import org.objectweb.asm.tree.TypeInsnNode;
@@ -44,7 +50,7 @@ public class ClassInstrumentor {
   private static final Handle BOOTSTRAP_STATIC;
   private static final Handle BOOTSTRAP_INTRINSIC;
   private static final String ROBO_INIT_METHOD_NAME = "$$robo$init";
-  static final Type OBJECT_TYPE = Type.getType(Object.class);
+  protected static final Type OBJECT_TYPE = Type.getType(Object.class);
   private static final ShadowImpl SHADOW_IMPL = new ShadowImpl();
   final Decorator decorator;
 
@@ -53,8 +59,17 @@ public class ClassInstrumentor {
 
     MethodType bootstrap =
         methodType(CallSite.class, MethodHandles.Lookup.class, String.class, MethodType.class);
+
+    /*
+     * There is an additional int.class argument to the invokedynamic bootstrap method. This conveys
+     * whether or not the method invocation represents a native method. A one means the original
+     * method was a native method, and a zero means it was not. It should be boolean.class, but
+     * that is nt possible due to https://bugs.java.com/bugdatabase/view_bug?bug_id=JDK-8322510.
+     */
     String bootstrapMethod =
-        bootstrap.appendParameterTypes(MethodHandle.class).toMethodDescriptorString();
+        bootstrap
+            .appendParameterTypes(MethodHandle.class, /* isNative */ int.class)
+            .toMethodDescriptorString();
     String bootstrapIntrinsic =
         bootstrap.appendParameterTypes(String.class).toMethodDescriptorString();
 
@@ -134,17 +149,18 @@ public class ClassInstrumentor {
     return instrumentedBytes;
   }
 
-  private void recordPackageStats(PerfStatsCollector perfStats, MutableClass mutableClass) {
-    String className = mutableClass.getName();
-    for (int i = className.indexOf('.'); i != -1; i = className.indexOf('.', i + 1)) {
-      perfStats.incrementCount("instrument package " + className.substring(0, i));
-    }
-  }
-
   public void instrument(MutableClass mutableClass) {
+    if (hasAnyJUnitAnnotation(mutableClass)) {
+      // Detected a JUnit related test class, skip instrumentation
+      return;
+    }
     try {
       // Need Java version >=7 to allow invokedynamic
       mutableClass.classNode.version = Math.max(mutableClass.classNode.version, Opcodes.V1_7);
+
+      if (mutableClass.getName().equals("android.util.SparseArray")) {
+        addSetToSparseArray(mutableClass);
+      }
 
       instrumentMethods(mutableClass);
 
@@ -158,15 +174,16 @@ public class ClassInstrumentor {
               .visitAnnotation("Lcom/google/errorprone/annotations/DoNotMock;", true)
               .visit(
                   "value",
-                  "This class is final. Consider using the real thing, or "
-                      + "adding/enhancing a Robolectric shadow for it.");
+                  "This class is final. Consider either:\n"
+                      + "1. Using the real class.\n"
+                      + "2. If it's a pure data class, adding a Robolectric Builder for it.\n"
+                      + "3. If it cannot function on the JVM, adding or enhancing a Robolectric"
+                      + " Shadow for it");
         }
         mutableClass.classNode.access = mutableClass.classNode.access & ~Opcodes.ACC_FINAL;
 
         // If there is no constructor, adds one
         addNoArgsConstructor(mutableClass);
-
-        addDirectCallConstructor(mutableClass);
 
         addRoboInitMethod(mutableClass);
 
@@ -177,6 +194,110 @@ public class ClassInstrumentor {
     } catch (Exception e) {
       throw new RuntimeException("failed to instrument " + mutableClass.getName(), e);
     }
+  }
+
+  private void recordPackageStats(PerfStatsCollector perfStats, MutableClass mutableClass) {
+    String className = mutableClass.getName();
+    for (int i = className.indexOf('.'); i != -1; i = className.indexOf('.', i + 1)) {
+      perfStats.incrementCount("instrument package " + className.substring(0, i));
+    }
+  }
+
+  private static boolean hasAnyJUnitAnnotation(MutableClass mutableClass) {
+    for (MethodNode method : mutableClass.getMethods()) {
+      if (method.visibleAnnotations == null) {
+        continue;
+      }
+      if ((method.access & Opcodes.ACC_PUBLIC) == 0) {
+        // Only check public methods.
+        continue;
+      }
+      // Because robolectric will generate private versions of the method for
+      // internal use and any junit annotated method that is private will cause junit to
+      // throw exceptions
+      if (method.visibleAnnotations.stream()
+          .anyMatch(annotation -> annotation.desc.startsWith("Lorg/junit/"))) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // See https://github.com/robolectric/robolectric/issues/6840
+  // Adds Set(int, object) to android.util.SparseArray.
+  private void addSetToSparseArray(MutableClass mutableClass) {
+    for (MethodNode method : mutableClass.getMethods()) {
+      if ("set".equals(method.name)) {
+        return;
+      }
+    }
+
+    MethodNode setFunction =
+        new MethodNode(
+            Opcodes.ACC_PUBLIC | Opcodes.ACC_SYNTHETIC,
+            "set",
+            "(ILjava/lang/Object;)V",
+            "(ITE;)V",
+            null);
+    RobolectricGeneratorAdapter generator = new RobolectricGeneratorAdapter(setFunction);
+    generator.loadThis();
+    generator.loadArg(0);
+    generator.loadArg(1);
+    generator.invokeVirtual(mutableClass.classType, new Method("put", "(ILjava/lang/Object;)V"));
+    generator.returnValue();
+    mutableClass.addMethod(setFunction);
+  }
+
+  /**
+   * Checks if the first or second instruction is a Jacoco load instruction. Robolectric is not
+   * capable at the moment of re-instrumenting Jacoco-instrumented constructors, so these are
+   * currently skipped.
+   *
+   * @param ctor constructor method node
+   * @return whether or not the constructor can be instrumented
+   */
+  private boolean isJacocoInstrumented(MethodNode ctor) {
+    AbstractInsnNode[] insns = ctor.instructions.toArray();
+    if (insns.length > 1) {
+      AbstractInsnNode node = insns[0];
+      if (node instanceof LabelNode) {
+        node = insns[1];
+      }
+      if ((node instanceof LdcInsnNode && ((LdcInsnNode) node).cst instanceof ConstantDynamic)) {
+        ConstantDynamic cst = (ConstantDynamic) ((LdcInsnNode) node).cst;
+        return cst.getName().equals("$jacocoData");
+      } else if (node instanceof MethodInsnNode) {
+        return Objects.equals(((MethodInsnNode) node).name, "$jacocoInit");
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Adds a call $$robo$init, which instantiates a shadow object if required. This is to support
+   * custom shadows for Jacoco-instrumented classes (except constructor shadows).
+   */
+  protected void addCallToRoboInit(MutableClass mutableClass, MethodNode ctor) {
+    AbstractInsnNode returnNode =
+        Iterables.find(
+            ctor.instructions,
+            node -> {
+              if (node.getOpcode() == Opcodes.INVOKESPECIAL) {
+                MethodInsnNode mNode = (MethodInsnNode) node;
+                return (mNode.owner.equals(mutableClass.internalClassName)
+                    || mNode.owner.equals(mutableClass.classNode.superName));
+              }
+              return false;
+            },
+            null);
+    ctor.instructions.insert(
+        returnNode,
+        new MethodInsnNode(
+            Opcodes.INVOKEVIRTUAL,
+            mutableClass.classType.getInternalName(),
+            ROBO_INIT_METHOD_NAME,
+            "()V"));
+    ctor.instructions.insert(returnNode, new VarInsnNode(Opcodes.ALOAD, 0));
   }
 
   private void instrumentMethods(MutableClass mutableClass) {
@@ -192,7 +313,11 @@ public class ClassInstrumentor {
           method.name = ShadowConstants.STATIC_INITIALIZER_METHOD_NAME;
           mutableClass.addMethod(generateStaticInitializerNotifierMethod(mutableClass));
         } else if (method.name.equals("<init>")) {
-          instrumentConstructor(mutableClass, method);
+          if (isJacocoInstrumented(method)) {
+            addCallToRoboInit(mutableClass, method);
+          } else {
+            instrumentConstructor(mutableClass, method);
+          }
         } else if (!isSyntheticAccessorMethod(method) && !Modifier.isAbstract(method.access)) {
           instrumentNormalMethod(mutableClass, method);
         }
@@ -214,8 +339,6 @@ public class ClassInstrumentor {
       mutableClass.addMethod(defaultConstructor);
     }
   }
-
-  protected void addDirectCallConstructor(MutableClass mutableClass) {}
 
   /**
    * Generates code like this:
@@ -277,58 +400,22 @@ public class ClassInstrumentor {
    * Constructors are instrumented as follows:
    *
    * <ul>
-   *   <li>Code other than a call to the superclass constructor is moved to a new method named
-   *       {@code __constructor__} with the same signature.
-   *   <li>The constructor is modified to call {@link ClassHandler#initializing(Object)} (or {@link
-   *       ClassHandler#getShadowCreator(Class)} for {@code invokedynamic} JVMs).
-   *   <li>The constructor is modified to then call {@link ClassHandler#methodInvoked(String,
-   *       boolean, Class)} (or {@link ClassHandler#findShadowMethodHandle(Class, String,
-   *       MethodType, boolean)} for {@code invokedynamic} JVMs) with the method name {@code
-   *       __constructor__} and the same parameter types.
+   *   <li>The original constructor will be stripped of its instructions leading up to, and
+   *       including, the call to super() or this(). It is also renamed to $$robo$$__constructor__
+   *   <li>A method called __constructor__ is created and its job is to call
+   *       $$robo$$__constructor__. The __constructor__ method is what gets shadowed if a Shadow
+   *       wants to shadow a constructor.
+   *   <li>A new constructor is created and contains the stripped instructions of the original
+   *       constructor leading up to, and including, the call to super() or this(). Then, it has a
+   *       call to $$robo$init to initialize the Class' Shadow Object. Then, it uses invokedynamic
+   *       to call __constructor__. Finally, it contains any instructions that might occur after the
+   *       return statement in the original constructor.
    * </ul>
-   *
-   * Note that most code in the constructor will not be executed unless the {@link ClassHandler}
-   * arranges for it to happen.
-   *
-   * <p>Given a constructor like this:
-   *
-   * <pre>
-   * public ThisClass(String name, int size) {
-   *   super(name, someStaticMethod());
-   *   this.size = size;
-   * }
-   * </pre>
-   *
-   * ... generates code like this:
-   *
-   * <pre>
-   * private $$robo$$__constructor__(String name, int size) {
-   *   this.size = size;
-   * }
-   *
-   * private __constructor__(String name, int size) {
-   *   Plan plan = RobolectricInternals.methodInvoked(
-   *       "pkg/ThisClass/__constructor__(Ljava/lang/String;I)V", true, ThisClass.class);
-   *   if (plan != null) {
-   *     try {
-   *       plan.run(this, new Object[] {name, size});
-   *     } catch (Throwable t) {
-   *       throw RobolectricInternals.cleanStackTrace(t);
-   *     }
-   *   } else {
-   *     $$robo$$__constructor__(name, size);
-   *   }
-   * }
-   *
-   * public ThisClass(String name, int size) {
-   *   super(name, someStaticMethod());
-   *   $$robo$init();
-   * }
-   * </pre>
    *
    * @param method the constructor to instrument
    */
-  private void instrumentConstructor(MutableClass mutableClass, MethodNode method) {
+  protected void instrumentConstructor(MutableClass mutableClass, MethodNode method) {
+    int methodAccess = method.access;
     makeMethodPrivate(method);
 
     InsnList callSuper = extractCallToSuperConstructor(mutableClass, method);
@@ -338,24 +425,65 @@ public class ClassInstrumentor {
 
     String[] exceptions = exceptionArray(method);
     MethodNode initMethodNode =
-        new MethodNode(method.access, "<init>", method.desc, method.signature, exceptions);
-    makeMethodPublic(initMethodNode);
+        new MethodNode(methodAccess, "<init>", method.desc, method.signature, exceptions);
     RobolectricGeneratorAdapter generator = new RobolectricGeneratorAdapter(initMethodNode);
-
-    initMethodNode.instructions = callSuper;
-
+    initMethodNode.instructions.add(callSuper);
     generator.loadThis();
     generator.invokeVirtual(mutableClass.classType, new Method(ROBO_INIT_METHOD_NAME, "()V"));
     generateClassHandlerCall(
-        mutableClass, method, ShadowConstants.CONSTRUCTOR_METHOD_NAME, generator);
+        mutableClass, method, ShadowConstants.CONSTRUCTOR_METHOD_NAME, generator, false);
 
     generator.endMethod();
+
+    InsnList postamble = extractInstructionsAfterReturn(method, initMethodNode);
+    if (postamble.size() > 0) {
+      initMethodNode.instructions.add(postamble);
+    }
     mutableClass.addMethod(initMethodNode);
+  }
+
+  /**
+   * Checks to see if there are instructions after RETURN. If there are, it will check to see if
+   * they belong in the call-to-super, or the shadowable part of the constructor.
+   */
+  private InsnList extractInstructionsAfterReturn(MethodNode method, MethodNode initMethodNode) {
+    InsnList removedInstructions = new InsnList();
+    AbstractInsnNode returnNode =
+        Iterables.find(
+            method.instructions,
+            node -> node instanceof InsnNode && node.getOpcode() == Opcodes.RETURN,
+            null);
+    if (returnNode == null) {
+      return removedInstructions;
+    }
+    if (returnNode.getNext() instanceof LabelNode) {
+      // There are instructions after the return, check where they belong. Note this is a very rare
+      // edge case and only seems to happen with desugared+proguarded classes such as
+      // play-services-basement's ApiException.
+      LabelNode labelAfterReturn = (LabelNode) returnNode.getNext();
+      boolean inInitMethodNode =
+          Iterables.any(
+              initMethodNode.instructions,
+              input ->
+                  input instanceof JumpInsnNode
+                      && ((JumpInsnNode) input).label == labelAfterReturn);
+
+      if (inInitMethodNode) {
+        while (returnNode.getNext() != null) {
+          AbstractInsnNode node = returnNode.getNext();
+          method.instructions.remove(node);
+          removedInstructions.add(node);
+        }
+      }
+    }
+    return removedInstructions;
   }
 
   private static InsnList extractCallToSuperConstructor(
       MutableClass mutableClass, MethodNode ctor) {
     InsnList removedInstructions = new InsnList();
+    // Start removing instructions at the beginning of the method. The first instructions of
+    // constructors may vary.
     int startIndex = 0;
 
     AbstractInsnNode[] insns = ctor.instructions.toArray();
@@ -363,13 +491,6 @@ public class ClassInstrumentor {
       AbstractInsnNode node = insns[i];
 
       switch (node.getOpcode()) {
-        case Opcodes.ALOAD:
-          VarInsnNode vnode = (VarInsnNode) node;
-          if (vnode.var == 0) {
-            startIndex = i;
-          }
-          break;
-
         case Opcodes.INVOKESPECIAL:
           MethodInsnNode mnode = (MethodInsnNode) node;
           if (mnode.owner.equals(mutableClass.internalClassName)
@@ -378,7 +499,7 @@ public class ClassInstrumentor {
               throw new AssertionError("Invalid MethodInsnNode name");
             }
 
-            // remove all instructions in the range startIndex..i, from aload_0 to invokespecial
+            // remove all instructions in the range 0 (the start) to invokespecial
             // <init>
             while (startIndex <= i) {
               ctor.instructions.remove(insns[startIndex]);
@@ -425,7 +546,8 @@ public class ClassInstrumentor {
       instrumentNativeMethod(mutableClass, method);
     }
 
-    // todo figure out
+    // Create delegator method with same name as original method. The delegator method will use
+    // invokedynamic to decide at runtime whether to call original method or shadowed method
     String originalName = method.name;
     method.name = directMethodName(mutableClass, originalName);
 
@@ -438,7 +560,7 @@ public class ClassInstrumentor {
     makeMethodPrivate(method);
 
     RobolectricGeneratorAdapter generator = new RobolectricGeneratorAdapter(delegatorMethodNode);
-    generateClassHandlerCall(mutableClass, method, originalName, generator);
+    generateClassHandlerCall(mutableClass, method, originalName, generator, isNativeMethod);
     generator.endMethod();
     mutableClass.addMethod(delegatorMethodNode);
   }
@@ -450,9 +572,26 @@ public class ClassInstrumentor {
    * @param method Method to be instrumented, must be native
    */
   protected void instrumentNativeMethod(MutableClass mutableClass, MethodNode method) {
+
+    String nativeBindingMethodName =
+        SHADOW_IMPL.directNativeMethodName(mutableClass.getName(), method.name);
+
+    // Generate native binding method
+    MethodNode nativeBindingMethod =
+        new MethodNode(
+            Opcodes.ASM4,
+            nativeBindingMethodName,
+            method.desc,
+            method.signature,
+            exceptionArray(method));
+    nativeBindingMethod.access = method.access | Opcodes.ACC_SYNTHETIC;
+    makeMethodPrivate(nativeBindingMethod);
+    mutableClass.addMethod(nativeBindingMethod);
+
     method.access = method.access & ~Opcodes.ACC_NATIVE;
 
     RobolectricGeneratorAdapter generator = new RobolectricGeneratorAdapter(method);
+
     Type returnType = generator.getReturnType();
     generator.pushDefaultReturnValueToStack(returnType);
     generator.returnValue();
@@ -479,7 +618,7 @@ public class ClassInstrumentor {
 
   protected String[] exceptionArray(MethodNode method) {
     List<String> exceptions = method.exceptions;
-    return exceptions.toArray(new String[exceptions.size()]);
+    return exceptions.toArray(new String[0]);
   }
 
   /** Filters methods that might need special treatment because of various reasons */
@@ -495,22 +634,22 @@ public class ClassInstrumentor {
           break;
 
         case Opcodes.GETFIELD:
-          /* falls through */
+        /* falls through */
         case Opcodes.PUTFIELD:
-          /* falls through */
+        /* falls through */
         case Opcodes.GETSTATIC:
-          /* falls through */
+        /* falls through */
         case Opcodes.PUTSTATIC:
           FieldInsnNode fieldInsnNode = (FieldInsnNode) node;
           fieldInsnNode.desc = mutableClass.config.mappedTypeName(fieldInsnNode.desc); // todo test
           break;
 
         case Opcodes.INVOKESTATIC:
-          /* falls through */
+        /* falls through */
         case Opcodes.INVOKEINTERFACE:
-          /* falls through */
+        /* falls through */
         case Opcodes.INVOKESPECIAL:
-          /* falls through */
+        /* falls through */
         case Opcodes.INVOKEVIRTUAL:
           MethodInsnNode targetMethod = (MethodInsnNode) node;
           targetMethod.desc = mutableClass.config.remapParams(targetMethod.desc);
@@ -597,12 +736,6 @@ public class ClassInstrumentor {
         (clazz.access | Opcodes.ACC_PUBLIC) & ~(Opcodes.ACC_PROTECTED | Opcodes.ACC_PRIVATE);
   }
 
-  /** Replaces protected and private method modifiers with public. */
-  protected void makeMethodPublic(MethodNode method) {
-    method.access =
-        (method.access | Opcodes.ACC_PUBLIC) & ~(Opcodes.ACC_PROTECTED | Opcodes.ACC_PRIVATE);
-  }
-
   /** Replaces protected and public class modifiers with private. */
   protected void makeMethodPrivate(MethodNode method) {
     method.access =
@@ -626,7 +759,8 @@ public class ClassInstrumentor {
       MutableClass mutableClass,
       MethodNode originalMethod,
       String originalMethodName,
-      RobolectricGeneratorAdapter generator) {
+      RobolectricGeneratorAdapter generator,
+      boolean isNativeMethod) {
     Handle original =
         new Handle(
             getTag(originalMethod),
@@ -637,12 +771,13 @@ public class ClassInstrumentor {
 
     if (generator.isStatic()) {
       generator.loadArgs();
-      generator.invokeDynamic(originalMethodName, originalMethod.desc, BOOTSTRAP_STATIC, original);
+      generator.invokeDynamic(
+          originalMethodName, originalMethod.desc, BOOTSTRAP_STATIC, original, isNativeMethod);
     } else {
       String desc = "(" + mutableClass.classType.getDescriptor() + originalMethod.desc.substring(1);
       generator.loadThis();
       generator.loadArgs();
-      generator.invokeDynamic(originalMethodName, desc, BOOTSTRAP, original);
+      generator.invokeDynamic(originalMethodName, desc, BOOTSTRAP, original, isNativeMethod);
     }
 
     generator.returnValue();
@@ -650,6 +785,14 @@ public class ClassInstrumentor {
 
   int getTag(MethodNode m) {
     return Modifier.isStatic(m.access) ? Opcodes.H_INVOKESTATIC : Opcodes.H_INVOKESPECIAL;
+  }
+
+  // implemented in DirectClassInstrumentor
+  public void setAndroidJarSDKVersion(int androidJarSDKVersion) {}
+
+  // implemented in DirectClassInstrumentor
+  protected int getAndroidJarSDKVersion() {
+    return -1;
   }
 
   public interface Decorator {

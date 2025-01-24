@@ -1,6 +1,5 @@
 package org.robolectric.shadows;
 
-import static android.os.Build.VERSION_CODES.KITKAT;
 import static android.os.Build.VERSION_CODES.O;
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkNotNull;
@@ -9,31 +8,45 @@ import android.hardware.Sensor;
 import android.hardware.SensorDirectChannel;
 import android.hardware.SensorEvent;
 import android.hardware.SensorEventListener;
+import android.hardware.SensorEventListener2;
 import android.hardware.SensorManager;
 import android.os.Handler;
+import android.os.Looper;
 import android.os.MemoryFile;
 import com.google.common.collect.HashMultimap;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Multimap;
 import com.google.common.collect.Multimaps;
-import java.util.ArrayList;
-import java.util.HashMap;
+import java.util.Collection;
 import java.util.List;
-import java.util.Map;
+import java.util.Map.Entry;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.stream.Collectors;
+import org.robolectric.annotation.ClassName;
 import org.robolectric.annotation.Implementation;
 import org.robolectric.annotation.Implements;
 import org.robolectric.annotation.RealObject;
+import org.robolectric.annotation.Resetter;
 import org.robolectric.util.ReflectionHelpers;
 import org.robolectric.util.ReflectionHelpers.ClassParameter;
 
-@Implements(value = SensorManager.class, looseSignatures = true)
+/** Shadow for {@link SensorManager}. */
+@Implements(value = SensorManager.class)
 public class ShadowSensorManager {
-  public boolean forceListenersToFail = false;
-  private final Map<Integer, Sensor> sensorMap = new HashMap<>();
-  private final Multimap<SensorEventListener, Sensor> listeners =
-      Multimaps.synchronizedMultimap(HashMultimap.<SensorEventListener, Sensor>create());
+  private static final AtomicBoolean forceListenersToFail = new AtomicBoolean();
+  private static final Multimap<Integer, Sensor> sensorMap =
+      Multimaps.synchronizedMultimap(HashMultimap.create());
+  private static final Multimap<SensorEventListener, Sensor> listeners =
+      Multimaps.synchronizedMultimap(HashMultimap.create());
 
   @RealObject private SensorManager realObject;
+
+  @Resetter
+  public static void reset() {
+    sensorMap.clear();
+    listeners.clear();
+    forceListenersToFail.set(false);
+  }
 
   /**
    * Provide a Sensor for the indicated sensor type.
@@ -58,32 +71,40 @@ public class ShadowSensorManager {
 
   public void removeSensor(Sensor sensor) {
     checkNotNull(sensor);
-    sensorMap.remove(sensor.getType());
+    sensorMap.get(sensor.getType()).remove(sensor);
   }
 
   @Implementation
   protected Sensor getDefaultSensor(int type) {
-    return sensorMap.get(type);
+    Collection<Sensor> sensorsForType = sensorMap.get(type);
+    if (sensorsForType.isEmpty()) {
+      return null;
+    }
+
+    return ((Sensor) sensorsForType.toArray()[0]);
   }
 
   @Implementation
   public List<Sensor> getSensorList(int type) {
-    List<Sensor> sensorList = new ArrayList<>();
-    Sensor sensor = sensorMap.get(type);
-    if (sensor != null) {
-      sensorList.add(sensor);
+    if (type == Sensor.TYPE_ALL) {
+      return ImmutableList.copyOf(sensorMap.values());
     }
-    return sensorList;
+
+    return ImmutableList.copyOf(sensorMap.get(type));
   }
 
-  /** @param handler is ignored. */
+  /**
+   * @param handler is ignored.
+   */
   @Implementation
   protected boolean registerListener(
       SensorEventListener listener, Sensor sensor, int rate, Handler handler) {
     return registerListener(listener, sensor, rate);
   }
 
-  /** @param maxLatency is ignored. */
+  /**
+   * @param maxLatency is ignored.
+   */
   @Implementation
   protected boolean registerListener(
       SensorEventListener listener, Sensor sensor, int rate, int maxLatency) {
@@ -94,15 +115,19 @@ public class ShadowSensorManager {
    * @param maxLatency is ignored.
    * @param handler is ignored
    */
-  @Implementation(minSdk = KITKAT)
+  @Implementation
   protected boolean registerListener(
       SensorEventListener listener, Sensor sensor, int rate, int maxLatency, Handler handler) {
     return registerListener(listener, sensor, rate);
   }
 
+  public void setForceListenersToFail(boolean forceListenersToFail) {
+    this.forceListenersToFail.set(forceListenersToFail);
+  }
+
   @Implementation
   protected boolean registerListener(SensorEventListener listener, Sensor sensor, int rate) {
-    if (forceListenersToFail) {
+    if (this.forceListenersToFail.get()) {
       return false;
     }
     listeners.put(listener, sensor);
@@ -144,6 +169,45 @@ public class ShadowSensorManager {
     }
   }
 
+  /** Propagates the {@code event} to only registered listeners of the given sensor. */
+  @SuppressWarnings("JdkCollectors") // toImmutableList is only supported in Java 8+.
+  public void sendSensorEventToListeners(SensorEvent event, Sensor sensor) {
+    List<SensorEventListener> listenersRegisteredToSensor =
+        listeners.entries().stream()
+            .filter(entry -> entry.getValue() == sensor)
+            .map(Entry::getKey)
+            .collect(Collectors.toList());
+
+    for (SensorEventListener listener : listenersRegisteredToSensor) {
+      listener.onSensorChanged(event);
+    }
+  }
+
+  @Implementation
+  protected boolean flush(SensorEventListener listener) {
+    // ShadowSensorManager doesn't queue up any sensor events, so nothing actually needs to be
+    // flushed. Just call onFlushCompleted for each sensor that would have been flushed.
+    new Handler(Looper.getMainLooper())
+        .post(
+            () -> {
+              // Go through each sensor that the listener is registered for, and call
+              // onFlushCompleted on each listener registered for that sensor.
+              for (Sensor sensor : listeners.get(listener)) {
+                for (SensorEventListener registeredListener : getListeners()) {
+                  if ((registeredListener instanceof SensorEventListener2)
+                      && listeners.containsEntry(registeredListener, sensor)) {
+                    ((SensorEventListener2) registeredListener).onFlushCompleted(sensor);
+                  }
+                }
+              }
+            });
+    return listeners.containsKey(listener);
+  }
+
+  /**
+   * @deprecated Use {@code {@link SensorEventBuilder#newBuilder()}} instead.
+   */
+  @Deprecated
   public SensorEvent createSensorEvent() {
     return ReflectionHelpers.callConstructor(SensorEvent.class);
   }
@@ -160,7 +224,10 @@ public class ShadowSensorManager {
    * }</pre>
    *
    * <p>See {@link SensorEvent#values} for more information about values.
+   *
+   * @deprecated Use {@code {@link SensorEventBuilder#newBuilder()}} instead.
    */
+  @Deprecated
   public static SensorEvent createSensorEvent(int valueArraySize) {
     return createSensorEvent(valueArraySize, Sensor.TYPE_GRAVITY);
   }
@@ -177,7 +244,10 @@ public class ShadowSensorManager {
    * }</pre>
    *
    * <p>See {@link SensorEvent#values} for more information about values.
+   *
+   * @deprecated Use {@code {@link SensorEventBuilder#newBuilder()}} instead.
    */
+  @Deprecated
   public static SensorEvent createSensorEvent(int valueArraySize, int sensorType) {
     checkArgument(valueArraySize > 0);
     ClassParameter<Integer> valueArraySizeParam = new ClassParameter<>(int.class, valueArraySize);
@@ -188,8 +258,10 @@ public class ShadowSensorManager {
   }
 
   @Implementation(minSdk = O)
-  protected Object createDirectChannel(MemoryFile mem) {
-    return ReflectionHelpers.callConstructor(SensorDirectChannel.class,
+  protected @ClassName("android.hardware.SensorDirectChannel") Object createDirectChannel(
+      MemoryFile mem) {
+    return ReflectionHelpers.callConstructor(
+        SensorDirectChannel.class,
         ClassParameter.from(SensorManager.class, realObject),
         ClassParameter.from(int.class, 0),
         ClassParameter.from(int.class, SensorDirectChannel.TYPE_MEMORY_FILE),

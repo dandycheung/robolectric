@@ -1,15 +1,14 @@
 package android.graphics;
 
 import static com.google.common.truth.Truth.assertThat;
+import static org.junit.Assert.assertThrows;
 
 import android.graphics.Matrix.ScaleToFit;
-import androidx.test.runner.AndroidJUnit4;
+import androidx.test.ext.junit.runners.AndroidJUnit4;
 import org.junit.Test;
 import org.junit.runner.RunWith;
-import org.robolectric.annotation.internal.DoNotInstrument;
 
 /** Compatibility test for {@link Matrix} */
-@DoNotInstrument
 @RunWith(AndroidJUnit4.class)
 public final class MatrixTest {
 
@@ -33,9 +32,9 @@ public final class MatrixTest {
     assertThat(value[0]).isEqualTo(100f);
   }
 
-  @Test(expected = Exception.class)
+  @Test
   public void mapPointsNull() {
-    new Matrix().mapPoints(null);
+    assertThrows(Exception.class, () -> new Matrix().mapPoints(null));
   }
 
   @Test
@@ -48,9 +47,9 @@ public final class MatrixTest {
     assertThat(dst[0]).isEqualTo(200f);
   }
 
-  @Test(expected = Exception.class)
+  @Test
   public void mapPointsArraysMismatch() {
-    new Matrix().mapPoints(new float[8], new float[9]);
+    assertThrows(Exception.class, () -> new Matrix().mapPoints(new float[8], new float[9]));
   }
 
   @Test
@@ -63,9 +62,9 @@ public final class MatrixTest {
     assertThat(dst[0]).isEqualTo(200f);
   }
 
-  @Test(expected = Exception.class)
+  @Test
   public void mapPointsWithIndicesNull() {
-    new Matrix().mapPoints(null, 0, new float[9], 0, 1);
+    assertThrows(Exception.class, () -> new Matrix().mapPoints(null, 0, new float[9], 0, 1));
   }
 
   @Test
@@ -118,8 +117,8 @@ public final class MatrixTest {
         .isEqualTo(new float[] {1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f});
   }
 
-  @Test(expected = Exception.class)
+  @Test
   public void testSetRectToRectNull() {
-    new Matrix().setRectToRect(null, null, ScaleToFit.CENTER);
+    assertThrows(Exception.class, () -> new Matrix().setRectToRect(null, null, ScaleToFit.CENTER));
   }
 }

@@ -1,7 +1,5 @@
 package org.robolectric.shadows;
 
-import static android.os.Build.VERSION_CODES.KITKAT_WATCH;
-import static android.os.Build.VERSION_CODES.LOLLIPOP;
 import static org.robolectric.res.android.Util.SIZEOF_INT;
 
 import java.nio.ByteBuffer;
@@ -12,43 +10,30 @@ import org.robolectric.annotation.Resetter;
 import org.robolectric.res.android.ResStringPool;
 import org.robolectric.res.android.ResourceTypes.ResStringPool_span;
 
-@Implements(className = "android.content.res.StringBlock", isInAndroidSdk = false)
-public class ShadowStringBlock {
+@Implements(
+    className = "android.content.res.StringBlock",
+    isInAndroidSdk = false,
+    shadowPicker = ShadowBaseStringBlock.Picker.class)
+public class ShadowStringBlock extends ShadowBaseStringBlock {
 
-  @RealObject
-  Object realObject;
+  @RealObject Object realObject;
 
   @Implementation
-  protected static Number nativeCreate(byte[] data, int offset, int size) {
+  protected static long nativeCreate(byte[] data, int offset, int size) {
     throw new UnsupportedOperationException();
   }
 
-  @Implementation(maxSdk = KITKAT_WATCH)
-  protected static int nativeGetSize(int nativeId) {
-    return nativeGetSize((long) nativeId);
-  }
-
-  @Implementation(minSdk = LOLLIPOP)
+  @Implementation
   protected static int nativeGetSize(long nativeId) {
     return ResStringPool.getNativeObject(nativeId).size();
   }
 
-  @Implementation(maxSdk = KITKAT_WATCH)
-  protected static String nativeGetString(int nativeId, int index) {
-    return nativeGetString((long) nativeId, index);
-  }
-
-  @Implementation(minSdk = LOLLIPOP)
+  @Implementation
   protected static String nativeGetString(long nativeId, int index) {
     return ResStringPool.getNativeObject(nativeId).stringAt(index);
   }
 
-  @Implementation(maxSdk = KITKAT_WATCH)
-  protected static int[] nativeGetStyle(int obj, int idx) {
-    return nativeGetStyle((long) obj, idx);
-  }
-
-  @Implementation(minSdk = LOLLIPOP)
+  @Implementation
   protected static int[] nativeGetStyle(long obj, int idx) {
     ResStringPool osb = ResStringPool.getNativeObject(obj);
 
@@ -90,7 +75,8 @@ public class ShadowStringBlock {
     return array;
   }
 
-  private static void setIntArrayRegion(int[] array, int num, int numInts, ResStringPool_span spans) {
+  private static void setIntArrayRegion(
+      int[] array, int num, int numInts, ResStringPool_span spans) {
     ByteBuffer buf = spans.myBuf();
     int startOffset = spans.myOffset();
 
@@ -100,12 +86,7 @@ public class ShadowStringBlock {
     }
   }
 
-  @Implementation(maxSdk = KITKAT_WATCH)
-  protected static void nativeDestroy(int obj) {
-    nativeDestroy((long) obj);
-  }
-
-  @Implementation(minSdk = LOLLIPOP)
+  @Implementation
   protected static void nativeDestroy(long obj) {
     throw new UnsupportedOperationException();
   }

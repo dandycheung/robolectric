@@ -29,11 +29,6 @@ public class RobolectricTestRunnerSelfTest {
     assertWithMessage("onCreate called")
         .that(((MyTestApplication) ApplicationProvider.getApplicationContext()).onCreateWasCalled)
         .isTrue();
-    if (RuntimeEnvironment.useLegacyResources()) {
-      assertWithMessage("Application resource loader")
-          .that(RuntimeEnvironment.getAppResourceTable())
-          .isNotNull();
-    }
   }
 
   @Test
@@ -79,14 +74,14 @@ public class RobolectricTestRunnerSelfTest {
   }
 
   @Test
-  @Config(sdk = Build.VERSION_CODES.KITKAT)
+  @Config(sdk = Build.VERSION_CODES.LOLLIPOP)
   public void testVersionConfiguration() {
-    assertThat(Build.VERSION.SDK_INT)
-        .isEqualTo(Build.VERSION_CODES.KITKAT);
-    assertThat(Build.VERSION.RELEASE).isEqualTo("4.4");
+    assertThat(Build.VERSION.SDK_INT).isEqualTo(Build.VERSION_CODES.LOLLIPOP);
+    assertThat(Build.VERSION.RELEASE).isEqualTo("5.0.2");
   }
 
-  @Test public void hamcrestMatchersDontBlowUpDuringLinking() throws Exception {
+  @Test
+  public void hamcrestMatchersDontBlowUpDuringLinking() {
     org.hamcrest.MatcherAssert.assertThat(true, CoreMatchers.is(true));
   }
 
@@ -104,11 +99,10 @@ public class RobolectricTestRunnerSelfTest {
     public void onCreate() {
       this.onCreateWasCalled = true;
     }
-    
+
     @Override
     public void onTerminate() {
-      onTerminateCalledFromMain =
-          Boolean.valueOf(Looper.getMainLooper().getThread() == Thread.currentThread());
+      onTerminateCalledFromMain = Looper.getMainLooper().getThread() == Thread.currentThread();
     }
   }
 }

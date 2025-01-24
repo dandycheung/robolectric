@@ -1,12 +1,9 @@
 package org.robolectric.shadows;
 
-import static android.os.Build.VERSION_CODES.JELLY_BEAN_MR1;
-
 import android.annotation.SuppressLint;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothServerSocket;
 import android.bluetooth.BluetoothSocket;
-import android.os.Build;
 import android.os.ParcelUuid;
 import java.io.IOException;
 import java.util.concurrent.BlockingQueue;
@@ -23,20 +20,12 @@ public class ShadowBluetoothServerSocket {
   private boolean closed;
 
   @SuppressLint("PrivateApi")
-  @SuppressWarnings("unchecked")
   public static BluetoothServerSocket newInstance(
       int type, boolean auth, boolean encrypt, ParcelUuid uuid) {
-    if (Build.VERSION.SDK_INT >= JELLY_BEAN_MR1) {
-      return Shadow.newInstance(
-          BluetoothServerSocket.class,
-          new Class<?>[] {Integer.TYPE, Boolean.TYPE, Boolean.TYPE, ParcelUuid.class},
-          new Object[] {type, auth, encrypt, uuid});
-    } else {
-      return Shadow.newInstance(
-          BluetoothServerSocket.class,
-          new Class<?>[] {Integer.TYPE, Boolean.TYPE, Boolean.TYPE, Integer.TYPE},
-          new Object[] {type, auth, encrypt, getPort(uuid)});
-    }
+    return Shadow.newInstance(
+        BluetoothServerSocket.class,
+        new Class<?>[] {Integer.TYPE, Boolean.TYPE, Boolean.TYPE, ParcelUuid.class},
+        new Object[] {type, auth, encrypt, uuid});
   }
 
   // Port ranges are valid from 1 to MAX_RFCOMM_CHANNEL.
@@ -45,12 +34,12 @@ public class ShadowBluetoothServerSocket {
   }
 
   /**
-   * May block the current thread and wait until {@link BluetoothDevice} is offered via
-   * {@link #deviceConnected(BluetoothDevice)} method or timeout occurred.
+   * May block the current thread and wait until {@link BluetoothDevice} is offered via {@link
+   * #deviceConnected(BluetoothDevice)} method or timeout occurred.
    *
    * @return socket of the connected bluetooth device
    * @throws IOException if socket has been closed, thread interrupted while waiting or timeout has
-   *         occurred.
+   *     occurred.
    */
   @Implementation
   protected BluetoothSocket accept(int timeout) throws IOException {
@@ -60,8 +49,7 @@ public class ShadowBluetoothServerSocket {
 
     BluetoothSocket socket;
     try {
-      socket = timeout == -1
-              ? sockets.take() : sockets.poll(timeout, TimeUnit.MILLISECONDS);
+      socket = timeout == -1 ? sockets.take() : sockets.poll(timeout, TimeUnit.MILLISECONDS);
     } catch (InterruptedException e) {
       throw new IOException(e);
     }
@@ -78,8 +66,10 @@ public class ShadowBluetoothServerSocket {
     closed = true;
   }
 
-  /** Creates {@link BluetoothSocket} for the given device and makes this socket available
-   * immediately in the {@link #accept(int)} method. */
+  /**
+   * Creates {@link BluetoothSocket} for the given device and makes this socket available
+   * immediately in the {@link #accept(int)} method.
+   */
   public BluetoothSocket deviceConnected(BluetoothDevice device) {
     BluetoothSocket socket = Shadow.newInstanceOf(BluetoothSocket.class);
     ReflectionHelpers.setField(socket, "mDevice", device);

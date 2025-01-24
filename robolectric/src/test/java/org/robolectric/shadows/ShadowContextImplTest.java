@@ -1,12 +1,10 @@
 package org.robolectric.shadows;
 
-import static android.os.Build.VERSION_CODES.JELLY_BEAN_MR1;
-import static android.os.Build.VERSION_CODES.JELLY_BEAN_MR2;
-import static android.os.Build.VERSION_CODES.KITKAT;
-import static android.os.Build.VERSION_CODES.LOLLIPOP;
 import static android.os.Build.VERSION_CODES.N;
+import static android.os.Build.VERSION_CODES.Q;
+import static android.os.Build.VERSION_CODES.TIRAMISU;
 import static com.google.common.truth.Truth.assertThat;
-import static org.junit.Assert.fail;
+import static org.junit.Assert.assertThrows;
 import static org.robolectric.Shadows.shadowOf;
 
 import android.app.Application;
@@ -32,6 +30,7 @@ import java.io.File;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.robolectric.R;
+import org.robolectric.android.util.concurrent.PausedExecutorService;
 import org.robolectric.annotation.Config;
 import org.robolectric.shadow.api.Shadow;
 
@@ -39,6 +38,7 @@ import org.robolectric.shadow.api.Shadow;
 public class ShadowContextImplTest {
   private final Application context = ApplicationProvider.getApplicationContext();
   private final ShadowContextImpl shadowContext = Shadow.extract(context.getBaseContext());
+  private final PausedExecutorService executorService = new PausedExecutorService();
 
   @Test
   @Config(minSdk = N)
@@ -84,18 +84,26 @@ public class ShadowContextImplTest {
         .isFalse();
   }
 
-  @Config(minSdk = KITKAT)
   @Test
-  public void getExternalFilesDirs() {
+  public void getExternalFilesDirs_withType_returnFolderWithGivenTypeName() {
     File[] dirs = context.getExternalFilesDirs("something");
     assertThat(dirs).asList().hasSize(1);
     assertThat(dirs[0].isDirectory()).isTrue();
     assertThat(dirs[0].canWrite()).isTrue();
     assertThat(dirs[0].getName()).isEqualTo("something");
+    assertThat(dirs[0].getParentFile().getName()).isEqualTo(context.getPackageName());
   }
 
   @Test
-  @Config(minSdk = JELLY_BEAN_MR2)
+  public void getExternalFilesDirs_withNullType_returnFolderWithPackageName() {
+    File[] dirs = context.getExternalFilesDirs(null);
+    assertThat(dirs).asList().hasSize(1);
+    assertThat(dirs[0].isDirectory()).isTrue();
+    assertThat(dirs[0].canWrite()).isTrue();
+    assertThat(dirs[0].getName()).isEqualTo(context.getPackageName());
+  }
+
+  @Test
   public void getSystemService_shouldReturnBluetoothAdapter() {
     assertThat(context.getSystemService(Context.BLUETOOTH_SERVICE))
         .isInstanceOf(BluetoothManager.class);
@@ -178,7 +186,6 @@ public class ShadowContextImplTest {
   }
 
   @Test
-  @Config(minSdk = LOLLIPOP)
   public void bindServiceAsUser() {
     Intent serviceIntent = new Intent().setPackage("dummy.package");
     ServiceConnection serviceConnection = buildServiceConnection();
@@ -193,18 +200,16 @@ public class ShadowContextImplTest {
   }
 
   @Test
-  @Config(minSdk = LOLLIPOP)
   public void bindServiceAsUser_shouldThrowOnImplicitIntent() {
     Intent serviceIntent = new Intent();
     ServiceConnection serviceConnection = buildServiceConnection();
     int flags = 0;
 
-    try {
-      context.bindServiceAsUser(serviceIntent, serviceConnection, flags, Process.myUserHandle());
-      fail("bindServiceAsUser should throw IllegalArgumentException!");
-    } catch (IllegalArgumentException e) {
-      // expected
-    }
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            context.bindServiceAsUser(
+                serviceIntent, serviceConnection, flags, Process.myUserHandle()));
   }
 
   @Test
@@ -219,29 +224,14 @@ public class ShadowContextImplTest {
   }
 
   @Test
-  public void bindService_shouldAllowImplicitIntentPreLollipop() {
-    context.getApplicationInfo().targetSdkVersion = KITKAT;
+  public void bindService_shouldThrowOnImplicitIntent() {
     Intent serviceIntent = new Intent();
     ServiceConnection serviceConnection = buildServiceConnection();
     int flags = 0;
 
-    assertThat(context.bindService(serviceIntent, serviceConnection, flags)).isTrue();
-
-    assertThat(shadowOf(context).getBoundServiceConnections()).hasSize(1);
-  }
-
-  @Test
-  public void bindService_shouldThrowOnImplicitIntentOnLollipop() {
-    Intent serviceIntent = new Intent();
-    ServiceConnection serviceConnection = buildServiceConnection();
-    int flags = 0;
-
-    try {
-      context.bindService(serviceIntent, serviceConnection, flags);
-      fail("bindService should throw IllegalArgumentException!");
-    } catch (IllegalArgumentException e) {
-      // expected
-    }
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> context.bindService(serviceIntent, serviceConnection, flags));
   }
 
   @Test
@@ -256,40 +246,48 @@ public class ShadowContextImplTest {
   }
 
   @Test
-  public void startService_shouldAllowImplicitIntentPreLollipop() {
-    context.getApplicationInfo().targetSdkVersion = KITKAT;
-    context.startService(new Intent("dummy_action"));
-    assertThat(shadowOf(context).getNextStartedService().getAction()).isEqualTo("dummy_action");
+  @Config(minSdk = Q)
+  public void bindService_withExecutor_callsServiceConnectedOnExecutor() {
+    Intent serviceIntent = new Intent().setPackage("dummy.package");
+    TestServiceConnection serviceConnection = buildServiceConnection();
+    int flags = 0;
+
+    assertThat(context.bindService(serviceIntent, flags, executorService, serviceConnection))
+        .isTrue();
+    assertThat(serviceConnection.isConnected).isFalse();
+    executorService.runAll();
+
+    assertThat(shadowOf(context).getBoundServiceConnections()).hasSize(1);
+    assertThat(serviceConnection.isConnected).isTrue();
   }
 
   @Test
-  public void startService_shouldThrowOnImplicitIntentOnLollipop() {
-    try {
-      context.startService(new Intent("dummy_action"));
-      fail("startService should throw IllegalArgumentException!");
-    } catch (IllegalArgumentException e) {
-      // expected
-    }
+  public void bindService_noSpecifiedExecutor_callsServiceConnectedOnHandler() {
+    Intent serviceIntent = new Intent().setPackage("dummy.package");
+    TestServiceConnection serviceConnection = buildServiceConnection();
+    int flags = 0;
+
+    assertThat(context.bindService(serviceIntent, serviceConnection, flags)).isTrue();
+    assertThat(serviceConnection.isConnected).isFalse();
+    ShadowLooper.idleMainLooper();
+
+    assertThat(shadowOf(context).getBoundServiceConnections()).hasSize(1);
+    assertThat(serviceConnection.isConnected).isTrue();
   }
 
   @Test
-  public void stopService_shouldAllowImplicitIntentPreLollipop() {
-    context.getApplicationInfo().targetSdkVersion = KITKAT;
-    context.stopService(new Intent("dummy_action"));
+  public void startService_shouldThrowOnImplicitIntent() {
+    assertThrows(
+        IllegalArgumentException.class, () -> context.startService(new Intent("dummy_action")));
   }
 
   @Test
-  public void stopService_shouldThrowOnImplicitIntentOnLollipop() {
-    try {
-      context.stopService(new Intent("dummy_action"));
-      fail("stopService should throw IllegalArgumentException!");
-    } catch (IllegalArgumentException e) {
-      // expected
-    }
+  public void stopService_shouldThrowOnImplicitIntent() {
+    assertThrows(
+        IllegalArgumentException.class, () -> context.stopService(new Intent("dummy_action")));
   }
 
   @Test
-  @Config(minSdk = JELLY_BEAN_MR1)
   public void sendBroadcastAsUser_sendBroadcast() {
     UserHandle userHandle = Process.myUserHandle();
     String action = "foo-action";
@@ -302,7 +300,18 @@ public class ShadowContextImplTest {
   }
 
   @Test
-  @Config(minSdk = JELLY_BEAN_MR1)
+  @Config(minSdk = TIRAMISU)
+  public void sendBroadcastWithBundle_sendBroadcast() {
+    String action = "foo-action";
+    Bundle options = new Bundle();
+    Intent intent = new Intent(action);
+    context.sendBroadcast(intent, null, options);
+
+    assertThat(shadowOf(context).getBroadcastIntents().get(0).getAction()).isEqualTo(action);
+    assertThat(shadowOf(context).getBroadcastOptions(intent)).isEqualTo(options);
+  }
+
+  @Test
   public void sendOrderedBroadcastAsUser_sendsBroadcast() {
     UserHandle userHandle = Process.myUserHandle();
     String action = "foo-action";
@@ -310,12 +319,12 @@ public class ShadowContextImplTest {
     context.sendOrderedBroadcastAsUser(
         intent,
         userHandle,
-        /*receiverPermission=*/ null,
-        /*resultReceiver=*/ null,
-        /*scheduler=*/ null,
-        /*initialCode=*/ 0,
-        /*initialData=*/ null,
-        /*initialExtras=*/ null);
+        /* receiverPermission= */ null,
+        /* resultReceiver= */ null,
+        /* scheduler= */ null,
+        /* initialCode= */ 0,
+        /* initialData= */ null,
+        /* initialExtras= */ null);
 
     assertThat(shadowOf(context).getBroadcastIntents().get(0).getAction()).isEqualTo(action);
     assertThat(shadowOf(context).getBroadcastIntentsForUser(userHandle).get(0).getAction())
@@ -324,16 +333,11 @@ public class ShadowContextImplTest {
 
   @Test
   public void createPackageContext_absent() {
-    try {
-      context.createPackageContext("doesnt.exist", 0);
-      fail("Should throw NameNotFoundException");
-    } catch (NameNotFoundException e) {
-      // expected
-    }
+    assertThrows(
+        NameNotFoundException.class, () -> context.createPackageContext("does.not.exist", 0));
   }
 
   @Test
-  @Config(minSdk = LOLLIPOP)
   public void startActivityAsUser() {
     Intent intent = new Intent();
     intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
@@ -346,13 +350,11 @@ public class ShadowContextImplTest {
   }
 
   @Test
-  @Config(minSdk = JELLY_BEAN_MR2)
   public void getUserId_returns0() {
     assertThat(context.getUserId()).isEqualTo(0);
   }
 
   @Test
-  @Config(minSdk = JELLY_BEAN_MR2)
   public void getUserId_userIdHasBeenSet_returnsCorrectUserId() {
     int userId = 10;
     shadowContext.setUserId(userId);
@@ -360,13 +362,21 @@ public class ShadowContextImplTest {
     assertThat(context.getUserId()).isEqualTo(userId);
   }
 
-  private ServiceConnection buildServiceConnection() {
-    return new ServiceConnection() {
-      @Override
-      public void onServiceConnected(ComponentName name, IBinder service) {}
+  private TestServiceConnection buildServiceConnection() {
+    return new TestServiceConnection();
+  }
 
-      @Override
-      public void onServiceDisconnected(ComponentName name) {}
-    };
+  private static class TestServiceConnection implements ServiceConnection {
+    boolean isConnected;
+
+    @Override
+    public void onServiceConnected(ComponentName name, IBinder service) {
+      isConnected = true;
+    }
+
+    @Override
+    public void onServiceDisconnected(ComponentName name) {
+      isConnected = false;
+    }
   }
 }

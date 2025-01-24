@@ -5,8 +5,6 @@ import static android.location.LocationManager.MODE_CHANGED_ACTION;
 import static android.location.LocationManager.NETWORK_PROVIDER;
 import static android.location.LocationManager.PASSIVE_PROVIDER;
 import static android.location.LocationManager.PROVIDERS_CHANGED_ACTION;
-import static android.os.Build.VERSION_CODES.N;
-import static android.os.Build.VERSION_CODES.R;
 import static android.provider.Settings.Secure.LOCATION_MODE;
 import static android.provider.Settings.Secure.LOCATION_MODE_BATTERY_SAVING;
 import static android.provider.Settings.Secure.LOCATION_MODE_HIGH_ACCURACY;
@@ -17,6 +15,8 @@ import static androidx.test.ext.truth.location.LocationCorrespondences.equality;
 import static androidx.test.ext.truth.location.LocationSubject.assertThat;
 import static com.google.common.truth.Truth.assertThat;
 import static org.junit.Assert.fail;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.robolectric.Shadows.shadowOf;
 
 import android.app.Application;
@@ -27,8 +27,9 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.location.Criteria;
 import android.location.GnssAntennaInfo;
-import android.location.GnssAntennaInfo.Listener;
 import android.location.GnssAntennaInfo.PhaseCenterOffset;
+import android.location.GnssMeasurementRequest;
+import android.location.GnssMeasurementsEvent;
 import android.location.GnssStatus;
 import android.location.GpsStatus;
 import android.location.Location;
@@ -37,6 +38,7 @@ import android.location.LocationManager;
 import android.location.LocationProvider;
 import android.location.LocationRequest;
 import android.location.OnNmeaMessageListener;
+import android.os.Build.VERSION;
 import android.os.Build.VERSION_CODES;
 import android.os.Bundle;
 import android.os.CancellationSignal;
@@ -45,7 +47,6 @@ import android.os.Looper;
 import android.os.Process;
 import android.provider.Settings.Secure;
 import android.text.TextUtils;
-import androidx.annotation.NonNull;
 import androidx.test.core.app.ApplicationProvider;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import java.util.ArrayList;
@@ -56,13 +57,17 @@ import java.util.List;
 import java.util.Random;
 import java.util.Set;
 import java.util.function.Consumer;
+import javax.annotation.Nonnull;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.mockito.InOrder;
+import org.mockito.Mockito;
 import org.robolectric.annotation.Config;
 import org.robolectric.annotation.LooperMode;
 import org.robolectric.annotation.LooperMode.Mode;
 import org.robolectric.shadows.ShadowLocationManager.ProviderProperties;
+import org.robolectric.shadows.ShadowLocationManager.RoboLocationRequest;
 
 /** Tests for {@link ShadowLocationManager}. */
 @SuppressWarnings("deprecation")
@@ -112,7 +117,6 @@ public class ShadowLocationManagerTest {
   }
 
   @Test
-  @Config(minSdk = VERSION_CODES.KITKAT)
   public void testGetProvider() {
     LocationProvider p;
 
@@ -205,7 +209,6 @@ public class ShadowLocationManagerTest {
     none.setPowerRequirement(Criteria.POWER_LOW);
     none.setAccuracy(Criteria.ACCURACY_FINE);
 
-    shadowLocationManager.setProviderProperties(MY_PROVIDER, new ProviderProperties(all));
     shadowLocationManager.setProviderEnabled(MY_PROVIDER, true);
     shadowLocationManager.setProviderEnabled(NETWORK_PROVIDER, true);
     shadowLocationManager.setProviderEnabled(GPS_PROVIDER, true);
@@ -213,16 +216,92 @@ public class ShadowLocationManagerTest {
     shadowLocationManager.setProviderEnabled(GPS_PROVIDER, false);
     assertThat(locationManager.getBestProvider(all, true)).isEqualTo(NETWORK_PROVIDER);
     shadowLocationManager.setProviderEnabled(NETWORK_PROVIDER, false);
+    shadowLocationManager.setProviderEnabled(PASSIVE_PROVIDER, false);
     assertThat(locationManager.getBestProvider(all, true)).isEqualTo(MY_PROVIDER);
 
     shadowLocationManager.setProviderEnabled(NETWORK_PROVIDER, true);
     shadowLocationManager.setProviderEnabled(GPS_PROVIDER, true);
+    shadowLocationManager.setProviderEnabled(PASSIVE_PROVIDER, true);
     assertThat(locationManager.getBestProvider(none, true)).isEqualTo(GPS_PROVIDER);
     shadowLocationManager.setProviderEnabled(GPS_PROVIDER, false);
     assertThat(locationManager.getBestProvider(none, true)).isEqualTo(NETWORK_PROVIDER);
     shadowLocationManager.setProviderEnabled(NETWORK_PROVIDER, false);
     shadowLocationManager.setProviderEnabled(MY_PROVIDER, false);
     assertThat(locationManager.getBestProvider(none, true)).isEqualTo(PASSIVE_PROVIDER);
+  }
+
+  @Test
+  @Config(minSdk = VERSION_CODES.S)
+  public void testGetProviderProperties() {
+    android.location.provider.ProviderProperties p;
+
+    shadowLocationManager.setProviderProperties(
+        MY_PROVIDER,
+        new ProviderProperties(
+            true,
+            false,
+            true,
+            false,
+            true,
+            false,
+            true,
+            Criteria.POWER_HIGH,
+            Criteria.ACCURACY_COARSE));
+
+    p = locationManager.getProviderProperties(MY_PROVIDER);
+    assertThat(p).isNotNull();
+    assertThat(p.hasNetworkRequirement()).isTrue();
+    assertThat(p.hasSatelliteRequirement()).isFalse();
+    assertThat(p.hasCellRequirement()).isTrue();
+    assertThat(p.hasMonetaryCost()).isFalse();
+    assertThat(p.hasAltitudeSupport()).isTrue();
+    assertThat(p.hasSpeedSupport()).isFalse();
+    assertThat(p.hasBearingSupport()).isTrue();
+    assertThat(p.getPowerUsage()).isEqualTo(Criteria.POWER_HIGH);
+    assertThat(p.getAccuracy()).isEqualTo(Criteria.ACCURACY_COARSE);
+
+    shadowLocationManager.setProviderProperties(
+        MY_PROVIDER,
+        new ProviderProperties(
+            false,
+            true,
+            false,
+            true,
+            false,
+            true,
+            false,
+            android.location.provider.ProviderProperties.POWER_USAGE_LOW,
+            android.location.provider.ProviderProperties.ACCURACY_FINE));
+
+    p = locationManager.getProviderProperties(MY_PROVIDER);
+    assertThat(p).isNotNull();
+    assertThat(p.hasNetworkRequirement()).isFalse();
+    assertThat(p.hasSatelliteRequirement()).isTrue();
+    assertThat(p.hasCellRequirement()).isFalse();
+    assertThat(p.hasMonetaryCost()).isTrue();
+    assertThat(p.hasAltitudeSupport()).isFalse();
+    assertThat(p.hasSpeedSupport()).isTrue();
+    assertThat(p.hasBearingSupport()).isFalse();
+    assertThat(p.getPowerUsage())
+        .isEqualTo(android.location.provider.ProviderProperties.POWER_USAGE_LOW);
+    assertThat(p.getAccuracy())
+        .isEqualTo(android.location.provider.ProviderProperties.ACCURACY_FINE);
+
+    p = locationManager.getProviderProperties("noProvider");
+    assertThat(p).isNull();
+  }
+
+  @Test
+  @Config(minSdk = VERSION_CODES.S)
+  public void testHasProvider() {
+    assertThat(locationManager.hasProvider(GPS_PROVIDER)).isTrue();
+    assertThat(locationManager.hasProvider(NETWORK_PROVIDER)).isTrue();
+    assertThat(locationManager.hasProvider(PASSIVE_PROVIDER)).isTrue();
+
+    assertThat(locationManager.hasProvider(MY_PROVIDER)).isFalse();
+
+    shadowLocationManager.setProviderEnabled(MY_PROVIDER, true);
+    assertThat(locationManager.hasProvider(MY_PROVIDER)).isTrue();
   }
 
   @Test
@@ -301,7 +380,7 @@ public class ShadowLocationManagerTest {
   }
 
   @Test
-  @Config(minSdk = R)
+  @Config(minSdk = VERSION_CODES.R)
   public void testSetProviderEnabled_RPlus() {
     shadowLocationManager.setProviderEnabled(MY_PROVIDER, true);
     assertBroadcast(new Intent(PROVIDERS_CHANGED_ACTION));
@@ -526,7 +605,7 @@ public class ShadowLocationManagerTest {
   }
 
   @Test
-  @Config(minSdk = R)
+  @Config(minSdk = VERSION_CODES.R)
   public void testGetCurrentLocation() {
     Location loc = createLocation(MY_PROVIDER);
 
@@ -546,7 +625,28 @@ public class ShadowLocationManagerTest {
   }
 
   @Test
-  @Config(minSdk = R)
+  @Config(minSdk = VERSION_CODES.S)
+  public void testGetCurrentLocation_LocationRequest() {
+    Location loc = createLocation(MY_PROVIDER);
+
+    TestLocationConsumer consumer = new TestLocationConsumer();
+
+    shadowLocationManager.setProviderEnabled(MY_PROVIDER, true);
+
+    locationManager.getCurrentLocation(
+        MY_PROVIDER, new LocationRequest.Builder(0).build(), null, Runnable::run, consumer);
+
+    shadowLocationManager.simulateLocation(loc);
+    shadowOf(Looper.getMainLooper()).idle();
+
+    assertThat(consumer.locations)
+        .comparingElementsUsing(equality())
+        .containsExactly(loc)
+        .inOrder();
+  }
+
+  @Test
+  @Config(minSdk = VERSION_CODES.R)
   public void testGetCurrentLocation_ProviderDisabled() {
     TestLocationConsumer consumer1 = new TestLocationConsumer();
     TestLocationConsumer consumer2 = new TestLocationConsumer();
@@ -571,7 +671,7 @@ public class ShadowLocationManagerTest {
   }
 
   @Test
-  @Config(minSdk = R)
+  @Config(minSdk = VERSION_CODES.R)
   public void testGetCurrentLocation_Timeout() {
     TestLocationConsumer consumer = new TestLocationConsumer();
 
@@ -589,7 +689,7 @@ public class ShadowLocationManagerTest {
   }
 
   @Test
-  @Config(minSdk = R)
+  @Config(minSdk = VERSION_CODES.R)
   public void testGetCurrentLocation_Cancel() {
     Location loc = createLocation(MY_PROVIDER);
 
@@ -704,7 +804,7 @@ public class ShadowLocationManagerTest {
   }
 
   @Test
-  @Config(minSdk = R)
+  @Config(minSdk = VERSION_CODES.R)
   public void testRequestLocationUpdates_Provider_Listener_Executor() {
     Location loc1 = createLocation(NETWORK_PROVIDER);
     Location loc2 = createLocation(NETWORK_PROVIDER);
@@ -803,7 +903,6 @@ public class ShadowLocationManagerTest {
   }
 
   @Test
-  @Config(minSdk = VERSION_CODES.LOLLIPOP)
   public void testRequestLocationUpdates_LocationRequest() {
     Location loc1 = createLocation(NETWORK_PROVIDER);
     Location loc2 = createLocation(NETWORK_PROVIDER);
@@ -829,7 +928,7 @@ public class ShadowLocationManagerTest {
   }
 
   @Test
-  @Config(minSdk = R)
+  @Config(minSdk = VERSION_CODES.R)
   public void testRequestLocationUpdates_LocationRequest_Executor() {
     Location loc1 = createLocation(NETWORK_PROVIDER);
     Location loc2 = createLocation(NETWORK_PROVIDER);
@@ -851,6 +950,62 @@ public class ShadowLocationManagerTest {
     assertThat(networkListener.locations)
         .comparingElementsUsing(equality())
         .containsExactly(loc1, loc2)
+        .inOrder();
+  }
+
+  @Test
+  @Config(minSdk = VERSION_CODES.S)
+  public void testRequestLocationUpdates_Provider_LocationRequest_Executor() {
+    Location loc1 = createLocation(NETWORK_PROVIDER);
+    Location loc2 = createLocation(NETWORK_PROVIDER);
+    Location loc3 = createLocation(NETWORK_PROVIDER);
+    TestLocationListener networkListener = new TestLocationListener();
+
+    locationManager.requestLocationUpdates(
+        NETWORK_PROVIDER, new LocationRequest.Builder(0).build(), Runnable::run, networkListener);
+
+    shadowLocationManager.simulateLocation(loc1);
+    shadowLocationManager.simulateLocation(loc2);
+    locationManager.removeUpdates(networkListener);
+    shadowLocationManager.simulateLocation(loc3);
+
+    shadowOf(Looper.getMainLooper()).idle();
+
+    assertThat(networkListener.locations)
+        .comparingElementsUsing(equality())
+        .containsExactly(loc1, loc2)
+        .inOrder();
+  }
+
+  @Test
+  @Config(minSdk = VERSION_CODES.S)
+  public void testRequestLocationUpdates_Provider_LocationRequest_PendingIntent() {
+    Location loc1 = createLocation(NETWORK_PROVIDER);
+    Location loc2 = createLocation(NETWORK_PROVIDER);
+    Location loc3 = createLocation(NETWORK_PROVIDER);
+    TestLocationReceiver networkListener = new TestLocationReceiver(context);
+    TestLocationReceiver passiveListener = new TestLocationReceiver(context);
+
+    locationManager.requestLocationUpdates(
+        NETWORK_PROVIDER, new LocationRequest.Builder(0).build(), networkListener.pendingIntent);
+    locationManager.requestLocationUpdates(
+        PASSIVE_PROVIDER, new LocationRequest.Builder(0).build(), passiveListener.pendingIntent);
+
+    shadowLocationManager.simulateLocation(loc1);
+    shadowLocationManager.simulateLocation(loc2);
+    locationManager.removeUpdates(networkListener.pendingIntent);
+    shadowLocationManager.simulateLocation(loc3);
+    locationManager.removeUpdates(passiveListener.pendingIntent);
+
+    shadowOf(Looper.getMainLooper()).idle();
+
+    assertThat(networkListener.locations)
+        .comparingElementsUsing(equality())
+        .containsExactly(loc1, loc2)
+        .inOrder();
+    assertThat(passiveListener.locations)
+        .comparingElementsUsing(equality())
+        .containsExactly(loc1, loc2, loc3)
         .inOrder();
   }
 
@@ -1007,12 +1162,71 @@ public class ShadowLocationManagerTest {
         .inOrder();
   }
 
+  @Config(minSdk = VERSION_CODES.S)
+  @Test
+  public void testRequestFlush_listener() {
+    TestLocationListener listener = new TestLocationListener();
+
+    try {
+      locationManager.requestFlush(GPS_PROVIDER, listener, 0);
+      fail();
+    } catch (IllegalArgumentException e) {
+      assertThat(listener.flushes).isEmpty();
+    }
+
+    locationManager.requestLocationUpdates(GPS_PROVIDER, 0, 0, listener);
+    locationManager.requestFlush(GPS_PROVIDER, listener, 1);
+    shadowOf(Looper.getMainLooper()).idle();
+
+    assertThat(listener.flushes).containsExactly(1);
+  }
+
+  @Config(minSdk = VERSION_CODES.S)
+  @Test
+  public void testRequestFlush_pendingIntent() {
+    TestLocationReceiver listener = new TestLocationReceiver(context);
+
+    try {
+      locationManager.requestFlush(GPS_PROVIDER, listener.pendingIntent, 0);
+      fail();
+    } catch (IllegalArgumentException e) {
+      assertThat(listener.flushes).isEmpty();
+    }
+
+    locationManager.requestLocationUpdates(GPS_PROVIDER, 0, 0, listener.pendingIntent);
+    locationManager.requestFlush(GPS_PROVIDER, listener.pendingIntent, 1);
+    shadowOf(Looper.getMainLooper()).idle();
+
+    assertThat(listener.flushes).containsExactly(1);
+  }
+
+  @Config(minSdk = VERSION_CODES.S)
+  @Test
+  public void testRequestFlush_pendingIntent_canceled() {
+    TestLocationReceiver listener = new TestLocationReceiver(context);
+
+    try {
+      locationManager.requestFlush(GPS_PROVIDER, listener.pendingIntent, 0);
+      fail();
+    } catch (IllegalArgumentException e) {
+      assertThat(listener.flushes).isEmpty();
+    }
+
+    locationManager.requestLocationUpdates(GPS_PROVIDER, 0, 0, listener.pendingIntent);
+    listener.pendingIntent.cancel();
+    locationManager.requestFlush(GPS_PROVIDER, listener.pendingIntent, 1);
+    shadowOf(Looper.getMainLooper()).idle();
+
+    assertThat(shadowLocationManager.getLocationRequests(GPS_PROVIDER)).isEmpty();
+    assertThat(listener.flushes).isEmpty();
+  }
+
   @Test
   public void testSimulateLocation_FastestInterval() {
     Location loc1 = createLocation(MY_PROVIDER);
-    loc1.setTime(1);
+    loc1.setElapsedRealtimeNanos(1000000);
     Location loc2 = createLocation(MY_PROVIDER);
-    loc2.setTime(10);
+    loc2.setElapsedRealtimeNanos(10000000);
 
     TestLocationListener myListener = new TestLocationListener();
 
@@ -1047,6 +1261,26 @@ public class ShadowLocationManagerTest {
     assertThat(myListener.locations)
         .comparingElementsUsing(equality())
         .containsExactly(loc1)
+        .inOrder();
+    assertThat(locationManager.getLastKnownLocation(MY_PROVIDER)).isEqualTo(loc2);
+  }
+
+  @Test
+  public void testSimulateLocation_Batch() {
+    Location loc1 = createLocation(MY_PROVIDER);
+    Location loc2 = createLocation(MY_PROVIDER);
+
+    TestLocationListener myListener = new TestLocationListener();
+
+    locationManager.requestLocationUpdates(MY_PROVIDER, 0, 0, myListener);
+    shadowLocationManager.simulateLocation(MY_PROVIDER, loc1, loc2);
+    locationManager.removeUpdates(myListener);
+
+    shadowOf(Looper.getMainLooper()).idle();
+
+    assertThat(myListener.locations)
+        .comparingElementsUsing(equality())
+        .containsExactly(loc1, loc2)
         .inOrder();
     assertThat(locationManager.getLastKnownLocation(MY_PROVIDER)).isEqualTo(loc2);
   }
@@ -1176,8 +1410,33 @@ public class ShadowLocationManagerTest {
   }
 
   @Test
-  public void testAddGpsStatusListener() {
-    GpsStatus.Listener listener = new TestGpsListener();
+  @Config(minSdk = VERSION_CODES.O)
+  public void testGetGnssBatchSize() {
+    assertThat(locationManager.getGnssBatchSize()).isEqualTo(0);
+    shadowLocationManager.setGnssBatchSize(5);
+    assertThat(locationManager.getGnssBatchSize()).isEqualTo(5);
+  }
+
+  @Test
+  @Config(minSdk = VERSION_CODES.P)
+  public void testGetGnssHardwareModelName() {
+    assertThat(locationManager.getGnssHardwareModelName()).isNull();
+    shadowLocationManager.setGnssHardwareModelName("test");
+    assertThat(locationManager.getGnssHardwareModelName()).isEqualTo("test");
+  }
+
+  @Test
+  @Config(minSdk = VERSION_CODES.P)
+  public void testGetGnssYearOfHardware() {
+    assertThat(locationManager.getGnssYearOfHardware()).isEqualTo(0);
+    shadowLocationManager.setGnssYearOfHardware(3000);
+    assertThat(locationManager.getGnssYearOfHardware()).isEqualTo(3000);
+  }
+
+  @Test
+  @Config(maxSdk = VERSION_CODES.R)
+  public void testGpsStatusListener() {
+    GpsStatus.Listener listener = mock(GpsStatus.Listener.class);
 
     assertThat(shadowLocationManager.getGpsStatusListeners()).isEmpty();
     locationManager.addGpsStatusListener(listener);
@@ -1187,106 +1446,129 @@ public class ShadowLocationManagerTest {
   }
 
   @Test
-  @Config(minSdk = R)
-  public void testRegisterGnssStatusCallback() {
-    TestGnssCallback callback = new TestGnssCallback();
+  @Config(minSdk = VERSION_CODES.R)
+  public void testGnssStatusCallback() {
+    GnssStatus.Callback listener1 = mock(GnssStatus.Callback.class);
+    GnssStatus.Callback listener2 = mock(GnssStatus.Callback.class);
+    InOrder inOrder1 = Mockito.inOrder(listener1);
+    InOrder inOrder2 = Mockito.inOrder(listener2);
+
     GnssStatus status1 = new GnssStatus.Builder().build();
     GnssStatus status2 = new GnssStatus.Builder().build();
 
-    shadowLocationManager.sendGnssStatus(status1);
-    shadowOf(Looper.getMainLooper()).idle();
-    assertThat(callback.gnssStatuses).isEmpty();
+    locationManager.registerGnssStatusCallback(listener1, new Handler(Looper.getMainLooper()));
+    locationManager.registerGnssStatusCallback(Runnable::run, listener2);
 
-    locationManager.registerGnssStatusCallback(callback, new Handler(Looper.getMainLooper()));
-
-    shadowLocationManager.sendGnssStatus(status1);
+    shadowLocationManager.simulateGnssStatusStarted();
     shadowOf(Looper.getMainLooper()).idle();
-    assertThat(callback.gnssStatuses).containsExactly(status1).inOrder();
+    inOrder1.verify(listener1).onStarted();
+    inOrder2.verify(listener2).onStarted();
+
+    shadowLocationManager.simulateGnssStatusFirstFix(1);
+    shadowOf(Looper.getMainLooper()).idle();
+    inOrder1.verify(listener1).onFirstFix(1);
+    inOrder2.verify(listener2).onFirstFix(1);
+
+    shadowLocationManager.simulateGnssStatus(status1);
+    shadowOf(Looper.getMainLooper()).idle();
+    inOrder1.verify(listener1).onSatelliteStatusChanged(status1);
+    inOrder2.verify(listener2).onSatelliteStatusChanged(status1);
+
+    locationManager.unregisterGnssStatusCallback(listener2);
 
     shadowLocationManager.sendGnssStatus(status2);
     shadowOf(Looper.getMainLooper()).idle();
-    assertThat(callback.gnssStatuses).containsExactly(status1, status2).inOrder();
+    inOrder1.verify(listener1).onSatelliteStatusChanged(status2);
+    inOrder2.verify(listener2, never()).onSatelliteStatusChanged(status2);
 
-    locationManager.unregisterGnssStatusCallback(callback);
-    shadowLocationManager.sendGnssStatus(status1);
+    shadowLocationManager.simulateGnssStatusStopped();
     shadowOf(Looper.getMainLooper()).idle();
-    assertThat(callback.gnssStatuses).containsExactly(status1, status2).inOrder();
-  }
+    inOrder1.verify(listener1).onStopped();
+    inOrder2.verify(listener2, never()).onStopped();
 
-  @Test
-  @Config(minSdk = R)
-  public void testRegisterGnssStatusCallback_executor() {
-    TestGnssCallback callback = new TestGnssCallback();
-    GnssStatus status1 = new GnssStatus.Builder().build();
-    GnssStatus status2 = new GnssStatus.Builder().build();
-
-    shadowLocationManager.sendGnssStatus(status1);
-    assertThat(callback.gnssStatuses).isEmpty();
-
-    locationManager.registerGnssStatusCallback(Runnable::run, callback);
-
-    shadowLocationManager.sendGnssStatus(status1);
-    assertThat(callback.gnssStatuses).containsExactly(status1).inOrder();
+    locationManager.unregisterGnssStatusCallback(listener1);
 
     shadowLocationManager.sendGnssStatus(status2);
-    assertThat(callback.gnssStatuses).containsExactly(status1, status2).inOrder();
-
-    locationManager.unregisterGnssStatusCallback(callback);
-    assertThat(callback.gnssStatuses).containsExactly(status1, status2).inOrder();
+    shadowOf(Looper.getMainLooper()).idle();
+    inOrder1.verify(listener1, never()).onSatelliteStatusChanged(status2);
+    inOrder2.verify(listener2, never()).onSatelliteStatusChanged(status2);
   }
 
   @Test
-  @Config(minSdk = N)
-  public void testAddNmeaListener() {
-    TestOnNmeaMessageListener callback = new TestOnNmeaMessageListener();
+  @Config(minSdk = VERSION_CODES.N)
+  public void testGnssNmeaMessageListener() {
+    OnNmeaMessageListener listener1 = mock(OnNmeaMessageListener.class);
+    OnNmeaMessageListener listener2 = mock(OnNmeaMessageListener.class);
+    InOrder inOrder1 = Mockito.inOrder(listener1);
+    InOrder inOrder2 = Mockito.inOrder(listener2);
 
-    shadowLocationManager.sendNmeaMessage("message", 0);
+    locationManager.addNmeaListener(listener1, new Handler(Looper.getMainLooper()));
+    if (VERSION.SDK_INT >= VERSION_CODES.R) {
+      locationManager.addNmeaListener(Runnable::run, listener2);
+    } else {
+      locationManager.addNmeaListener(listener2, new Handler(Looper.getMainLooper()));
+    }
+
+    shadowLocationManager.simulateNmeaMessage("message1", 1);
     shadowOf(Looper.getMainLooper()).idle();
-    assertThat(callback.nmeaMessages).isEmpty();
+    inOrder1.verify(listener1).onNmeaMessage("message1", 1);
+    inOrder2.verify(listener2).onNmeaMessage("message1", 1);
 
-    locationManager.addNmeaListener(callback, new Handler(Looper.getMainLooper()));
+    locationManager.removeNmeaListener(listener2);
 
-    shadowLocationManager.sendNmeaMessage("message1", 0);
+    shadowLocationManager.simulateNmeaMessage("message2", 2);
     shadowOf(Looper.getMainLooper()).idle();
-    assertThat(callback.nmeaMessages).containsExactly("message1").inOrder();
+    inOrder1.verify(listener1).onNmeaMessage("message2", 2);
+    inOrder2.verify(listener2, never()).onNmeaMessage("message2", 2);
 
-    shadowLocationManager.sendNmeaMessage("message2", 0);
+    locationManager.removeNmeaListener(listener1);
+
+    shadowLocationManager.simulateNmeaMessage("message3", 3);
     shadowOf(Looper.getMainLooper()).idle();
-    assertThat(callback.nmeaMessages).containsExactly("message1", "message2").inOrder();
-
-    locationManager.removeNmeaListener(callback);
-
-    shadowLocationManager.sendNmeaMessage("message1", 0);
-    shadowOf(Looper.getMainLooper()).idle();
-    assertThat(callback.nmeaMessages).containsExactly("message1", "message2").inOrder();
+    inOrder1.verify(listener1, never()).onNmeaMessage("message3", 3);
+    inOrder2.verify(listener2, never()).onNmeaMessage("message3", 3);
   }
 
   @Test
-  @Config(minSdk = R)
-  public void testAddNmeaListener_executor() {
-    TestOnNmeaMessageListener callback = new TestOnNmeaMessageListener();
+  @Config(minSdk = VERSION_CODES.TIRAMISU)
+  public void testGnssMeasurementsCallback() {
+    GnssMeasurementsEvent.Callback listener1 = mock(GnssMeasurementsEvent.Callback.class);
+    GnssMeasurementsEvent.Callback listener2 = mock(GnssMeasurementsEvent.Callback.class);
+    InOrder inOrder1 = Mockito.inOrder(listener1);
+    InOrder inOrder2 = Mockito.inOrder(listener2);
 
-    shadowLocationManager.sendNmeaMessage("message", 0);
-    assertThat(callback.nmeaMessages).isEmpty();
+    GnssMeasurementsEvent events1 = new GnssMeasurementsEvent.Builder().build();
+    GnssMeasurementsEvent events2 = new GnssMeasurementsEvent.Builder().build();
 
-    locationManager.addNmeaListener(Runnable::run, callback);
+    locationManager.registerGnssMeasurementsCallback(Runnable::run, listener1);
+    locationManager.registerGnssMeasurementsCallback(
+        new GnssMeasurementRequest.Builder().build(), Runnable::run, listener2);
 
-    shadowLocationManager.sendNmeaMessage("message1", 0);
-    assertThat(callback.nmeaMessages).containsExactly("message1").inOrder();
+    shadowLocationManager.simulateGnssMeasurementsEvent(events1);
+    inOrder1.verify(listener1).onGnssMeasurementsReceived(events1);
+    inOrder2.verify(listener2).onGnssMeasurementsReceived(events1);
 
-    shadowLocationManager.sendNmeaMessage("message2", 0);
-    assertThat(callback.nmeaMessages).containsExactly("message1", "message2").inOrder();
+    locationManager.unregisterGnssMeasurementsCallback(listener2);
 
-    locationManager.removeNmeaListener(callback);
+    shadowLocationManager.simulateGnssMeasurementsEvent(events2);
+    inOrder1.verify(listener1).onGnssMeasurementsReceived(events2);
+    inOrder2.verify(listener2, never()).onGnssMeasurementsReceived(events2);
 
-    shadowLocationManager.sendNmeaMessage("message1", 0);
-    assertThat(callback.nmeaMessages).containsExactly("message1", "message2").inOrder();
+    locationManager.unregisterGnssMeasurementsCallback(listener1);
+
+    shadowLocationManager.simulateGnssMeasurementsEvent(events1);
+    inOrder1.verify(listener1, never()).onGnssMeasurementsReceived(events1);
+    inOrder2.verify(listener2, never()).onGnssMeasurementsReceived(events1);
   }
 
   @Test
-  @Config(minSdk = R)
-  public void testRegisterAntennaInfoListener() {
-    TestGnssAntennaInfoListener callback = new TestGnssAntennaInfoListener();
+  @Config(minSdk = VERSION_CODES.R)
+  public void testGnssAntennaInfoListener() {
+    GnssAntennaInfo.Listener listener1 = mock(GnssAntennaInfo.Listener.class);
+    GnssAntennaInfo.Listener listener2 = mock(GnssAntennaInfo.Listener.class);
+    InOrder inOrder1 = Mockito.inOrder(listener1);
+    InOrder inOrder2 = Mockito.inOrder(listener2);
+
     List<GnssAntennaInfo> events1 =
         Collections.singletonList(
             new GnssAntennaInfo.Builder()
@@ -1295,24 +1577,96 @@ public class ShadowLocationManagerTest {
     List<GnssAntennaInfo> events2 =
         Collections.singletonList(
             new GnssAntennaInfo.Builder()
-                .setPhaseCenterOffset(new PhaseCenterOffset(0, 0, 0, 0, 0, 0))
+                .setPhaseCenterOffset(new PhaseCenterOffset(1, 1, 1, 1, 1, 1))
                 .build());
 
-    shadowLocationManager.sendGnssAntennaInfo(events1);
-    assertThat(callback.antennaInfos).isEmpty();
+    locationManager.registerAntennaInfoListener(Runnable::run, listener1);
+    locationManager.registerAntennaInfoListener(Runnable::run, listener2);
 
-    locationManager.registerAntennaInfoListener(Runnable::run, callback);
+    shadowLocationManager.simulateGnssAntennaInfo(events1);
+    inOrder1.verify(listener1).onGnssAntennaInfoReceived(events1);
+    inOrder2.verify(listener2).onGnssAntennaInfoReceived(events1);
 
-    shadowLocationManager.sendGnssAntennaInfo(events1);
-    assertThat(callback.antennaInfos).containsExactly(events1).inOrder();
+    locationManager.unregisterAntennaInfoListener(listener2);
 
-    shadowLocationManager.sendGnssAntennaInfo(events2);
-    assertThat(callback.antennaInfos).containsExactly(events1, events2).inOrder();
+    shadowLocationManager.simulateGnssAntennaInfo(events2);
+    inOrder1.verify(listener1).onGnssAntennaInfoReceived(events2);
+    inOrder2.verify(listener2, never()).onGnssAntennaInfoReceived(events2);
 
-    locationManager.unregisterAntennaInfoListener(callback);
+    locationManager.unregisterAntennaInfoListener(listener1);
 
-    shadowLocationManager.sendGnssAntennaInfo(events1);
-    assertThat(callback.antennaInfos).containsExactly(events1, events2).inOrder();
+    shadowLocationManager.simulateGnssAntennaInfo(events1);
+    inOrder1.verify(listener1, never()).onGnssAntennaInfoReceived(events1);
+    inOrder2.verify(listener2, never()).onGnssAntennaInfoReceived(events1);
+  }
+
+  @Test
+  public void testRoboLocationRequest_legacyConstructor() {
+    RoboLocationRequest r = new RoboLocationRequest(GPS_PROVIDER, 0, 0, false);
+    assertThat(r.getIntervalMillis()).isEqualTo(0);
+    assertThat(r.getMinUpdateDistanceMeters()).isEqualTo(0);
+    assertThat(r.getMaxUpdates()).isEqualTo(Integer.MAX_VALUE);
+
+    r = new RoboLocationRequest(GPS_PROVIDER, 10000, 10, true);
+    assertThat(r.getIntervalMillis()).isEqualTo(10000);
+    assertThat(r.getMinUpdateDistanceMeters()).isEqualTo(10);
+    assertThat(r.getMaxUpdates()).isEqualTo(1);
+  }
+
+  @Test
+  @Config(minSdk = VERSION_CODES.S)
+  public void testRoboLocationRequest_constructor() {
+    RoboLocationRequest r = new RoboLocationRequest(new LocationRequest.Builder(0).build());
+    assertThat(r.getIntervalMillis()).isEqualTo(0);
+    assertThat(r.getMinUpdateDistanceMeters()).isEqualTo(0);
+    assertThat(r.getMaxUpdates()).isEqualTo(Integer.MAX_VALUE);
+
+    r =
+        new RoboLocationRequest(
+            new LocationRequest.Builder(10000)
+                .setMinUpdateDistanceMeters(10)
+                .setMaxUpdates(1)
+                .build());
+    assertThat(r.getIntervalMillis()).isEqualTo(10000);
+    assertThat(r.getMinUpdateDistanceMeters()).isEqualTo(10);
+    assertThat(r.getMaxUpdates()).isEqualTo(1);
+  }
+
+  @Test
+  public void testRoboLocationRequest_legacyEquality() {
+    RoboLocationRequest r1 = new RoboLocationRequest(GPS_PROVIDER, 0, 0, false);
+    RoboLocationRequest r2 = new RoboLocationRequest(GPS_PROVIDER, 0, 0, false);
+    RoboLocationRequest r3 = new RoboLocationRequest(GPS_PROVIDER, 10000, 10, true);
+    RoboLocationRequest r4 = new RoboLocationRequest(GPS_PROVIDER, 10000, 10, true);
+
+    assertThat(r1).isEqualTo(r2);
+    assertThat(r3).isEqualTo(r4);
+    assertThat(r1).isNotEqualTo(r3);
+    assertThat(r4).isNotEqualTo(r2);
+  }
+
+  @Test
+  @Config(minSdk = VERSION_CODES.S)
+  public void testRoboLocationRequest_equality() {
+    RoboLocationRequest r1 = new RoboLocationRequest(new LocationRequest.Builder(0).build());
+    RoboLocationRequest r2 = new RoboLocationRequest(new LocationRequest.Builder(0).build());
+    RoboLocationRequest r3 =
+        new RoboLocationRequest(
+            new LocationRequest.Builder(10000)
+                .setMinUpdateDistanceMeters(10)
+                .setMaxUpdates(1)
+                .build());
+    RoboLocationRequest r4 =
+        new RoboLocationRequest(
+            new LocationRequest.Builder(10000)
+                .setMinUpdateDistanceMeters(10)
+                .setMaxUpdates(1)
+                .build());
+
+    assertThat(r1).isEqualTo(r2);
+    assertThat(r3).isEqualTo(r4);
+    assertThat(r1).isNotEqualTo(r3);
+    assertThat(r4).isNotEqualTo(r2);
   }
 
   private static final Random random = new Random(101);
@@ -1372,6 +1726,7 @@ public class ShadowLocationManagerTest {
     private final PendingIntent pendingIntent;
     private final ArrayList<Boolean> providerEnableds = new ArrayList<>();
     private final ArrayList<Location> locations = new ArrayList<>();
+    private final ArrayList<Integer> flushes = new ArrayList<>();
 
     private TestLocationReceiver(Context context) {
       Intent intent = new Intent(Integer.toString(random.nextInt()));
@@ -1386,6 +1741,9 @@ public class ShadowLocationManagerTest {
       }
       if (intent.hasExtra(LocationManager.KEY_PROVIDER_ENABLED)) {
         providerEnableds.add(intent.getBooleanExtra(LocationManager.KEY_PROVIDER_ENABLED, false));
+      }
+      if (intent.hasExtra(LocationManager.KEY_FLUSH_COMPLETE)) {
+        flushes.add(intent.getIntExtra(LocationManager.KEY_FLUSH_COMPLETE, -1));
       }
     }
   }
@@ -1402,24 +1760,29 @@ public class ShadowLocationManagerTest {
   private static class TestLocationListener implements LocationListener {
     final ArrayList<Boolean> providerEnableds = new ArrayList<>();
     final ArrayList<Location> locations = new ArrayList<>();
+    final ArrayList<Integer> flushes = new ArrayList<>();
 
     @Override
-    public void onLocationChanged(Location location) {
+    public void onLocationChanged(@Nonnull Location location) {
       locations.add(location);
     }
 
     @Override
-    public void onStatusChanged(String s, int i, Bundle bundle) {
-    }
+    public void onStatusChanged(String s, int i, Bundle bundle) {}
 
     @Override
-    public void onProviderEnabled(String s) {
+    public void onProviderEnabled(@Nonnull String s) {
       providerEnableds.add(true);
     }
 
     @Override
-    public void onProviderDisabled(String s) {
+    public void onProviderDisabled(@Nonnull String s) {
       providerEnableds.add(false);
+    }
+
+    @Override
+    public void onFlushComplete(int requestCode) {
+      flushes.add(requestCode);
     }
   }
 
@@ -1432,42 +1795,9 @@ public class ShadowLocationManagerTest {
     }
 
     @Override
-    public void onLocationChanged(Location location) {
+    public void onLocationChanged(@Nonnull Location location) {
       locationManager.removeUpdates(this);
       super.onLocationChanged(location);
-    }
-  }
-
-  private static class TestGpsListener implements GpsStatus.Listener {
-
-    @Override
-    public void onGpsStatusChanged(int event) {}
-  }
-
-  private static class TestGnssCallback extends GnssStatus.Callback {
-    final ArrayList<GnssStatus> gnssStatuses = new ArrayList<>();
-
-    @Override
-    public void onSatelliteStatusChanged(GnssStatus status) {
-      gnssStatuses.add(status);
-    }
-  }
-
-  private static class TestOnNmeaMessageListener implements OnNmeaMessageListener {
-    final ArrayList<String> nmeaMessages = new ArrayList<>();
-
-    @Override
-    public void onNmeaMessage(String message, long timestamp) {
-      nmeaMessages.add(message);
-    }
-  }
-
-  private static class TestGnssAntennaInfoListener implements Listener {
-    final ArrayList<List<GnssAntennaInfo>> antennaInfos = new ArrayList<>();
-
-    @Override
-    public void onGnssAntennaInfoReceived(@NonNull List<GnssAntennaInfo> gnssAntennaInfos) {
-      antennaInfos.add(gnssAntennaInfos);
     }
   }
 }

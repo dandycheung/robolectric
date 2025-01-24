@@ -1,18 +1,17 @@
 package org.robolectric.shadows;
 
-import android.annotation.Nullable;
 import android.hardware.camera2.CaptureResult;
 import android.hardware.camera2.CaptureResult.Key;
-import android.os.Build.VERSION_CODES;
 import com.google.common.base.Preconditions;
 import java.util.HashMap;
 import java.util.Map;
+import javax.annotation.Nullable;
 import org.robolectric.annotation.Implementation;
 import org.robolectric.annotation.Implements;
 import org.robolectric.util.ReflectionHelpers;
 
 /** Shadow of {@link CaptureResult}. */
-@Implements(value = CaptureResult.class, minSdk = VERSION_CODES.LOLLIPOP)
+@Implements(value = CaptureResult.class)
 public class ShadowCaptureResult {
 
   private final Map<Key<?>, Object> resultsKeyToValue = new HashMap<>();
@@ -22,9 +21,7 @@ public class ShadowCaptureResult {
     return ReflectionHelpers.callConstructor(CaptureResult.class);
   }
 
-  /**
-   * Obtain a property of the CaptureResult.
-   */
+  /** Obtain a property of the CaptureResult. */
   @Implementation
   @Nullable
   @SuppressWarnings("unchecked")

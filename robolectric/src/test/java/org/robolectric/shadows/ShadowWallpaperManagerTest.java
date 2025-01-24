@@ -2,25 +2,28 @@ package org.robolectric.shadows;
 
 import static android.os.Build.VERSION_CODES.M;
 import static android.os.Build.VERSION_CODES.N;
-import static android.os.Build.VERSION_CODES.P;
+import static android.os.Build.VERSION_CODES.O;
+import static android.os.Build.VERSION_CODES.TIRAMISU;
 import static com.google.common.truth.Truth.assertThat;
-import static junit.framework.Assert.fail;
+import static org.junit.Assert.fail;
 import static org.robolectric.Shadows.shadowOf;
 
+import android.app.Activity;
 import android.app.Application;
+import android.app.WallpaperInfo;
 import android.app.WallpaperManager;
 import android.content.ComponentName;
+import android.content.Context;
 import android.graphics.Bitmap;
 import android.os.Binder;
 import android.os.Bundle;
 import android.os.IBinder;
 import android.os.ParcelFileDescriptor;
-import androidx.annotation.Nullable;
 import androidx.test.core.app.ApplicationProvider;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
+import com.google.common.io.ByteStreams;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
-import java.io.Closeable;
 import java.io.FileDescriptor;
 import java.io.FileInputStream;
 import java.io.IOException;
@@ -29,10 +32,15 @@ import java.util.List;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.robolectric.Robolectric;
+import org.robolectric.android.controller.ActivityController;
 import org.robolectric.annotation.Config;
+import org.robolectric.annotation.GraphicsMode;
+import org.robolectric.annotation.GraphicsMode.Mode;
 import org.robolectric.shadows.ShadowWallpaperManager.WallpaperCommandRecord;
 
 @RunWith(AndroidJUnit4.class)
+@GraphicsMode(Mode.LEGACY)
 public class ShadowWallpaperManagerTest {
 
   private static final Bitmap TEST_IMAGE_1 = Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888);
@@ -41,7 +49,7 @@ public class ShadowWallpaperManagerTest {
 
   private static final Bitmap TEST_IMAGE_3 = Bitmap.createBitmap(1, 5, Bitmap.Config.ARGB_8888);
 
-  private static final int UNSUPPORTED_FLAG = WallpaperManager.FLAG_LOCK + 123;
+  private static final int UNSUPPORTED_FLAG = 0x100; // neither FLAG_SYSTEM nor FLAG_LOCK
 
   private static final String SET_WALLPAPER_COMPONENT =
       "android.permission.SET_WALLPAPER_COMPONENT";
@@ -96,7 +104,56 @@ public class ShadowWallpaperManagerTest {
   }
 
   @Test
-  @Config(minSdk = P)
+  public void hasResourceWallpaper_wallpaperResourceNotSet_returnsFalse() {
+    assertThat(manager.hasResourceWallpaper(1)).isFalse();
+    assertThat(manager.hasResourceWallpaper(5)).isFalse();
+  }
+
+  @Test
+  public void hasResourceWallpaper_wallpaperResourceSet_returnsTrue() throws IOException {
+    int resId = 5;
+    manager.setResource(resId);
+
+    assertThat(manager.hasResourceWallpaper(1)).isFalse();
+    assertThat(manager.hasResourceWallpaper(resId)).isTrue();
+  }
+
+  @Test
+  public void setResource_multipleTimes_hasResourceWallpaperReturnsTrueForLastValue()
+      throws IOException {
+    manager.setResource(1);
+    manager.setResource(2);
+    manager.setResource(3);
+
+    assertThat(manager.hasResourceWallpaper(1)).isFalse();
+    assertThat(manager.hasResourceWallpaper(2)).isFalse();
+    assertThat(manager.hasResourceWallpaper(3)).isTrue();
+  }
+
+  @Test
+  @Config(minSdk = N)
+  public void setResource_invalidFlag_returnsZero() throws IOException {
+    assertThat(manager.setResource(1, 0)).isEqualTo(0);
+    assertThat(manager.hasResourceWallpaper(1)).isFalse();
+    assertThat(manager.hasResourceWallpaper(2)).isFalse();
+  }
+
+  @Test
+  @Config(minSdk = N)
+  public void setResource_lockScreenOnly_returnsNewId() throws IOException {
+    assertThat(manager.setResource(1, WallpaperManager.FLAG_LOCK)).isEqualTo(1);
+    assertThat(manager.hasResourceWallpaper(1)).isTrue();
+  }
+
+  @Test
+  @Config(minSdk = N)
+  public void setResource_homeScreenOnly_returnsNewId() throws IOException {
+    assertThat(manager.setResource(1, WallpaperManager.FLAG_SYSTEM)).isEqualTo(1);
+    assertThat(manager.hasResourceWallpaper(1)).isTrue();
+  }
+
+  @Test
+  @Config(minSdk = N)
   public void setBitmap_flagSystem_shouldCacheInMemory() throws Exception {
     int returnCode =
         manager.setBitmap(
@@ -111,7 +168,7 @@ public class ShadowWallpaperManagerTest {
   }
 
   @Test
-  @Config(minSdk = P)
+  @Config(minSdk = N)
   public void setBitmap_liveWallpaperWasDefault_flagSystem_shouldRemoveLiveWallpaper()
       throws Exception {
     manager.setWallpaperComponent(TEST_WALLPAPER_SERVICE);
@@ -126,7 +183,7 @@ public class ShadowWallpaperManagerTest {
   }
 
   @Test
-  @Config(minSdk = P)
+  @Config(minSdk = N)
   public void setBitmap_multipleCallsWithFlagSystem_shouldCacheLastBitmapInMemory()
       throws Exception {
     manager.setBitmap(
@@ -150,7 +207,7 @@ public class ShadowWallpaperManagerTest {
   }
 
   @Test
-  @Config(minSdk = P)
+  @Config(minSdk = N)
   public void setBitmap_flagLock_shouldCacheInMemory() throws Exception {
     int returnCode =
         manager.setBitmap(
@@ -165,7 +222,7 @@ public class ShadowWallpaperManagerTest {
   }
 
   @Test
-  @Config(minSdk = P)
+  @Config(minSdk = N)
   public void setBitmap_liveWallpaperWasDefault_flagLock_shouldRemoveLiveWallpaper()
       throws Exception {
     manager.setWallpaperComponent(TEST_WALLPAPER_SERVICE);
@@ -180,7 +237,7 @@ public class ShadowWallpaperManagerTest {
   }
 
   @Test
-  @Config(minSdk = P)
+  @Config(minSdk = N)
   public void setBitmap_multipleCallsWithFlagLock_shouldCacheLastBitmapInMemory() throws Exception {
     manager.setBitmap(
         TEST_IMAGE_1,
@@ -203,7 +260,7 @@ public class ShadowWallpaperManagerTest {
   }
 
   @Test
-  @Config(minSdk = P)
+  @Config(minSdk = N)
   public void setBitmap_unsupportedFlag_shouldNotCacheInMemory() throws Exception {
     int code =
         manager.setBitmap(
@@ -214,7 +271,7 @@ public class ShadowWallpaperManagerTest {
   }
 
   @Test
-  @Config(minSdk = P)
+  @Config(minSdk = N)
   public void setBitmap_liveWallpaperWasDefault_unsupportedFlag_shouldNotRemoveLiveWallpaper()
       throws Exception {
     manager.setWallpaperComponent(TEST_WALLPAPER_SERVICE);
@@ -226,13 +283,13 @@ public class ShadowWallpaperManagerTest {
   }
 
   @Test
-  @Config(minSdk = P)
-  public void getWallpaperFile_flagSystem_nothingCached_shouldReturnNull() throws Exception {
+  @Config(minSdk = N)
+  public void getWallpaperFile_flagSystem_nothingCached_shouldReturnNull() {
     assertThat(manager.getWallpaperFile(WallpaperManager.FLAG_SYSTEM)).isNull();
   }
 
   @Test
-  @Config(minSdk = P)
+  @Config(minSdk = N)
   public void getWallpaperFile_flagSystem_previouslyCached_shouldReturnParcelFileDescriptor()
       throws Exception {
     manager.setBitmap(
@@ -241,20 +298,21 @@ public class ShadowWallpaperManagerTest {
         /* allowBackup= */ false,
         WallpaperManager.FLAG_SYSTEM);
 
-    ParcelFileDescriptor parcelFileDescriptor =
-        manager.getWallpaperFile(WallpaperManager.FLAG_SYSTEM);
-    assertThat(getBytesFromFileDescriptor(parcelFileDescriptor.getFileDescriptor()))
-        .isEqualTo(getBytesFromBitmap(TEST_IMAGE_1));
+    try (ParcelFileDescriptor parcelFileDescriptor =
+        manager.getWallpaperFile(WallpaperManager.FLAG_SYSTEM)) {
+      assertThat(getBytesFromFileDescriptor(parcelFileDescriptor.getFileDescriptor()))
+          .isEqualTo(getBytesFromBitmap(TEST_IMAGE_1));
+    }
   }
 
   @Test
-  @Config(minSdk = P)
-  public void getWallpaperFile_flagLock_nothingCached_shouldReturnNull() throws Exception {
+  @Config(minSdk = N)
+  public void getWallpaperFile_flagLock_nothingCached_shouldReturnNull() {
     assertThat(manager.getWallpaperFile(WallpaperManager.FLAG_LOCK)).isNull();
   }
 
   @Test
-  @Config(minSdk = P)
+  @Config(minSdk = N)
   public void getWallpaperFile_flagLock_previouslyCached_shouldReturnParcelFileDescriptor()
       throws Exception {
     manager.setBitmap(
@@ -263,15 +321,16 @@ public class ShadowWallpaperManagerTest {
         /* allowBackup= */ false,
         WallpaperManager.FLAG_LOCK);
 
-    ParcelFileDescriptor parcelFileDescriptor =
-        manager.getWallpaperFile(WallpaperManager.FLAG_LOCK);
-    assertThat(getBytesFromFileDescriptor(parcelFileDescriptor.getFileDescriptor()))
-        .isEqualTo(getBytesFromBitmap(TEST_IMAGE_3));
+    try (ParcelFileDescriptor parcelFileDescriptor =
+        manager.getWallpaperFile(WallpaperManager.FLAG_LOCK)) {
+      assertThat(getBytesFromFileDescriptor(parcelFileDescriptor.getFileDescriptor()))
+          .isEqualTo(getBytesFromBitmap(TEST_IMAGE_3));
+    }
   }
 
   @Test
-  @Config(minSdk = P)
-  public void getWallpaperFile_unsupportedFlag_shouldReturnNull() throws Exception {
+  @Config(minSdk = N)
+  public void getWallpaperFile_unsupportedFlag_shouldReturnNull() {
     assertThat(manager.getWallpaperFile(UNSUPPORTED_FLAG)).isNull();
   }
 
@@ -310,61 +369,47 @@ public class ShadowWallpaperManagerTest {
   @Test
   @Config(minSdk = N)
   public void setStream_flagSystem_shouldCacheInMemory() throws Exception {
-    InputStream inputStream = null;
     byte[] testImageBytes = getBytesFromBitmap(TEST_IMAGE_1);
-    try {
-      inputStream = new ByteArrayInputStream(testImageBytes);
-      manager.setStream(
-          inputStream,
-          /* visibleCropHint= */ null,
-          /* allowBackup= */ true,
-          WallpaperManager.FLAG_SYSTEM);
 
-      assertThat(getBytesFromBitmap(shadowOf(manager).getBitmap(WallpaperManager.FLAG_SYSTEM)))
-          .isEqualTo(testImageBytes);
-      assertThat(shadowOf(manager).getBitmap(WallpaperManager.FLAG_LOCK)).isNull();
-    } finally {
-      close(inputStream);
-    }
+    manager.setStream(
+        new ByteArrayInputStream(testImageBytes),
+        /* visibleCropHint= */ null,
+        /* allowBackup= */ true,
+        WallpaperManager.FLAG_SYSTEM);
+
+    assertThat(getBytesFromBitmap(shadowOf(manager).getBitmap(WallpaperManager.FLAG_SYSTEM)))
+        .isEqualTo(testImageBytes);
+    assertThat(shadowOf(manager).getBitmap(WallpaperManager.FLAG_LOCK)).isNull();
   }
 
   @Test
   @Config(minSdk = N)
   public void setStream_flagLock_shouldCacheInMemory() throws Exception {
-    InputStream inputStream = null;
     byte[] testImageBytes = getBytesFromBitmap(TEST_IMAGE_2);
-    try {
-      inputStream = new ByteArrayInputStream(testImageBytes);
-      manager.setStream(
-          inputStream,
-          /* visibleCropHint= */ null,
-          /* allowBackup= */ true,
-          WallpaperManager.FLAG_LOCK);
+    manager.setStream(
+        new ByteArrayInputStream(testImageBytes),
+        /* visibleCropHint= */ null,
+        /* allowBackup= */ true,
+        WallpaperManager.FLAG_LOCK);
 
-      assertThat(getBytesFromBitmap(shadowOf(manager).getBitmap(WallpaperManager.FLAG_LOCK)))
-          .isEqualTo(testImageBytes);
-      assertThat(shadowOf(manager).getBitmap(WallpaperManager.FLAG_SYSTEM)).isNull();
-    } finally {
-      close(inputStream);
-    }
+    assertThat(getBytesFromBitmap(shadowOf(manager).getBitmap(WallpaperManager.FLAG_LOCK)))
+        .isEqualTo(testImageBytes);
+    assertThat(shadowOf(manager).getBitmap(WallpaperManager.FLAG_SYSTEM)).isNull();
   }
 
   @Test
   @Config(minSdk = N)
   public void setStream_unsupportedFlag_shouldNotCacheInMemory() throws Exception {
-    InputStream inputStream = null;
     byte[] testImageBytes = getBytesFromBitmap(TEST_IMAGE_2);
-    try {
-      inputStream = new ByteArrayInputStream(testImageBytes);
-      manager.setStream(
-          inputStream, /* visibleCropHint= */ null, /* allowBackup= */ true, UNSUPPORTED_FLAG);
+    manager.setStream(
+        new ByteArrayInputStream(testImageBytes),
+        /* visibleCropHint= */ null,
+        /* allowBackup= */ true,
+        UNSUPPORTED_FLAG);
 
-      assertThat(shadowOf(manager).getBitmap(WallpaperManager.FLAG_LOCK)).isNull();
-      assertThat(shadowOf(manager).getBitmap(WallpaperManager.FLAG_SYSTEM)).isNull();
-      assertThat(shadowOf(manager).getBitmap(UNSUPPORTED_FLAG)).isNull();
-    } finally {
-      close(inputStream);
-    }
+    assertThat(shadowOf(manager).getBitmap(WallpaperManager.FLAG_LOCK)).isNull();
+    assertThat(shadowOf(manager).getBitmap(WallpaperManager.FLAG_SYSTEM)).isNull();
+    assertThat(shadowOf(manager).getBitmap(UNSUPPORTED_FLAG)).isNull();
   }
 
   @Test
@@ -394,8 +439,7 @@ public class ShadowWallpaperManagerTest {
   @Test
   @Config(minSdk = M)
   public void
-      setWallpaperComponent_liveWallpaperSet_shouldReturnLiveWallpaperComponentAndUnsetStaticWallpapers()
-          throws Exception {
+      setWallpaperComponent_liveWallpaperSet_shouldReturnLiveWallpaperComponentAndUnsetStaticWallpapers() {
     manager.setWallpaperComponent(TEST_WALLPAPER_SERVICE);
 
     assertThat(manager.getWallpaperInfo().getComponent()).isEqualTo(TEST_WALLPAPER_SERVICE);
@@ -405,11 +449,12 @@ public class ShadowWallpaperManagerTest {
 
   @Test
   @Config(minSdk = M)
-  public void getWallpaperInfo_noLiveWallpaperSet_shouldReturnNull() throws Exception {
+  public void getWallpaperInfo_noLiveWallpaperSet_shouldReturnNull() {
     assertThat(manager.getWallpaperInfo()).isNull();
   }
 
-  @Config(minSdk = P)
+  @Test
+  @Config(minSdk = N)
   public void
       getWallpaperInfo_staticWallpaperWasDefault_liveWallpaperSet_shouldRemoveCachedStaticWallpaper()
           throws Exception {
@@ -430,39 +475,138 @@ public class ShadowWallpaperManagerTest {
     assertThat(manager.getWallpaperFile(WallpaperManager.FLAG_LOCK)).isNull();
   }
 
+  @Config(minSdk = TIRAMISU)
+  @Test
+  public void getDefaultWallpaperDimAmount_shouldBeZero() {
+    assertThat(
+            ApplicationProvider.getApplicationContext()
+                .getSystemService(WallpaperManager.class)
+                .getWallpaperDimAmount())
+        .isEqualTo(0.0f);
+  }
+
+  @Config(minSdk = TIRAMISU)
+  @Test
+  public void setWallpaperDimAmount_shouldGetSameDimAmount() {
+    float testDimAmount = 0.1f;
+    ApplicationProvider.getApplicationContext()
+        .getSystemService(WallpaperManager.class)
+        .setWallpaperDimAmount(testDimAmount);
+
+    assertThat(
+            ApplicationProvider.getApplicationContext()
+                .getSystemService(WallpaperManager.class)
+                .getWallpaperDimAmount())
+        .isEqualTo(testDimAmount);
+  }
+
+  @Config(minSdk = TIRAMISU)
+  @Test
+  public void setWallpaperDimAmount_belowRange_shouldBeBounded() {
+    float testDimAmount = -0.5f;
+    ApplicationProvider.getApplicationContext()
+        .getSystemService(WallpaperManager.class)
+        .setWallpaperDimAmount(testDimAmount);
+
+    assertThat(
+            ApplicationProvider.getApplicationContext()
+                .getSystemService(WallpaperManager.class)
+                .getWallpaperDimAmount())
+        .isEqualTo(0f);
+  }
+
+  @Config(minSdk = TIRAMISU)
+  @Test
+  public void setWallpaperDimAmount_aboveRange_shouldBeBounded() {
+    float testDimAmount = 2.5f;
+    ApplicationProvider.getApplicationContext()
+        .getSystemService(WallpaperManager.class)
+        .setWallpaperDimAmount(testDimAmount);
+
+    assertThat(
+            ApplicationProvider.getApplicationContext()
+                .getSystemService(WallpaperManager.class)
+                .getWallpaperDimAmount())
+        .isEqualTo(1f);
+  }
+
+  @Test
+  @Config(minSdk = N)
+  public void setBitmap_bothLockAndHome() throws Exception {
+    int returnCode =
+        manager.setBitmap(
+            TEST_IMAGE_1,
+            /* visibleCropHint= */ null,
+            /* allowBackup= */ false,
+            WallpaperManager.FLAG_SYSTEM | WallpaperManager.FLAG_LOCK);
+
+    assertThat(returnCode).isEqualTo(1);
+    assertThat(shadowOf(manager).getBitmap(WallpaperManager.FLAG_SYSTEM)).isEqualTo(TEST_IMAGE_1);
+    assertThat(shadowOf(manager).getBitmap(WallpaperManager.FLAG_LOCK)).isEqualTo(TEST_IMAGE_1);
+  }
+
+  @Test
+  @Config(minSdk = N)
+  public void setStream_bothLockAndHome() throws Exception {
+    byte[] testImageBytes = getBytesFromBitmap(TEST_IMAGE_1);
+    manager.setStream(
+        new ByteArrayInputStream(testImageBytes),
+        /* visibleCropHint= */ null,
+        /* allowBackup= */ true,
+        WallpaperManager.FLAG_SYSTEM | WallpaperManager.FLAG_LOCK);
+
+    assertThat(getBytesFromBitmap(shadowOf(manager).getBitmap(WallpaperManager.FLAG_SYSTEM)))
+        .isEqualTo(testImageBytes);
+    assertThat(getBytesFromBitmap(shadowOf(manager).getBitmap(WallpaperManager.FLAG_LOCK)))
+        .isEqualTo(testImageBytes);
+  }
+
+  @Test
+  @Config(minSdk = TIRAMISU)
+  public void getAllWallpaperDimAmounts_returnsFullListOfAllDimAmountsSet() {
+    assertThat(shadowOf(manager).getAllWallpaperDimAmounts()).isEmpty();
+    manager.setWallpaperDimAmount(0.5f);
+    assertThat(shadowOf(manager).getAllWallpaperDimAmounts()).containsExactly(0.5f);
+    manager.setWallpaperDimAmount(0f);
+    assertThat(shadowOf(manager).getAllWallpaperDimAmounts()).containsExactly(0.5f, 0f);
+  }
+
   private static byte[] getBytesFromFileDescriptor(FileDescriptor fileDescriptor)
       throws IOException {
-    FileInputStream inputStream = null;
-    ByteArrayOutputStream outputStream = null;
-    try {
-      inputStream = new FileInputStream(fileDescriptor);
-      outputStream = new ByteArrayOutputStream();
-      byte[] buffer = new byte[1024];
-      int numOfBytes = 0;
-      while ((numOfBytes = inputStream.read(buffer, 0, buffer.length)) != -1) {
-        outputStream.write(buffer, 0, numOfBytes);
-      }
-      return outputStream.toByteArray();
-    } finally {
-      close(inputStream);
-      close(outputStream);
-    }
+    InputStream inputStream = new FileInputStream(fileDescriptor);
+    ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+    ByteStreams.copy(inputStream, outputStream);
+    return outputStream.toByteArray();
   }
 
-  private static byte[] getBytesFromBitmap(Bitmap bitmap) throws IOException {
-    ByteArrayOutputStream stream = null;
-    try {
-      stream = new ByteArrayOutputStream();
-      bitmap.compress(Bitmap.CompressFormat.PNG, /* quality= */ 0, stream);
-      return stream.toByteArray();
-    } finally {
-      close(stream);
-    }
+  private static byte[] getBytesFromBitmap(Bitmap bitmap) {
+    ByteArrayOutputStream stream = new ByteArrayOutputStream();
+    bitmap.compress(Bitmap.CompressFormat.PNG, /* quality= */ 0, stream);
+    return stream.toByteArray();
   }
 
-  private static void close(@Nullable Closeable closeable) throws IOException {
-    if (closeable != null) {
-      closeable.close();
+  @Test
+  @Config(minSdk = O)
+  public void wallpaperManager_activityContextEnabled_retrievesSameWallpaper() {
+    String originalProperty = System.getProperty("robolectric.createActivityContexts", "");
+    System.setProperty("robolectric.createActivityContexts", "true");
+    try (ActivityController<Activity> controller =
+        Robolectric.buildActivity(Activity.class).setup()) {
+      Activity activity = controller.get();
+      WallpaperManager applicationWallpaperManager =
+          (WallpaperManager) application.getSystemService(Context.WALLPAPER_SERVICE);
+      WallpaperManager activityWallpaperManager =
+          (WallpaperManager) activity.getSystemService(Context.WALLPAPER_SERVICE);
+
+      assertThat(applicationWallpaperManager).isNotSameInstanceAs(activityWallpaperManager);
+
+      // Adjusted for WallpaperManager, as direct comparison methods are not available
+      WallpaperInfo applicationWallpaper = manager.getWallpaperInfo();
+      WallpaperInfo activityWallpaper = activityWallpaperManager.getWallpaperInfo();
+
+      assertThat(activityWallpaper).isEqualTo(applicationWallpaper);
+    } finally {
+      System.setProperty("robolectric.createActivityContexts", originalProperty);
     }
   }
 }

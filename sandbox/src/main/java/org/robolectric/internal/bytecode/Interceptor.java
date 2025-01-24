@@ -7,7 +7,7 @@ import org.robolectric.util.Function;
 import org.robolectric.util.ReflectionHelpers;
 
 public abstract class Interceptor {
-  private MethodRef[] methodRefs;
+  private final MethodRef[] methodRefs;
 
   public Interceptor(MethodRef... methodRefs) {
     this.methodRefs = methodRefs;
@@ -17,17 +17,15 @@ public abstract class Interceptor {
     return methodRefs;
   }
 
-  abstract public Function<Object, Object> handle(MethodSignature methodSignature);
+  public abstract Function<Object, Object> handle(MethodSignature methodSignature);
 
-  abstract public MethodHandle getMethodHandle(String methodName, MethodType type) throws NoSuchMethodException, IllegalAccessException;
+  public abstract MethodHandle getMethodHandle(String methodName, MethodType type)
+      throws NoSuchMethodException, IllegalAccessException;
 
   @Nonnull
-  protected static Function<Object, Object> returnDefaultValue(final MethodSignature methodSignature) {
-    return new Function<Object, Object>() {
-      @Override
-      public Object call(Class<?> theClass, Object value, Object[] params) {
-        return ReflectionHelpers.defaultValueForType(methodSignature.returnType);
-      }
-    };
+  protected static Function<Object, Object> returnDefaultValue(
+      final MethodSignature methodSignature) {
+    return (theClass, value, params) ->
+        ReflectionHelpers.defaultValueForType(methodSignature.returnType);
   }
 }

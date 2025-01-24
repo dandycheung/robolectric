@@ -1,18 +1,21 @@
 package org.robolectric.shadows;
 
-import static android.os.Build.VERSION_CODES.JELLY_BEAN_MR1;
+import static android.os.Build.VERSION_CODES.Q;
 import static com.google.common.truth.Truth.assertThat;
+import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 import static org.robolectric.Shadows.shadowOf;
 
 import android.content.Context;
 import android.os.Binder;
+import android.os.IBinder.DeathRecipient;
 import android.os.Parcel;
 import android.os.UserHandle;
 import android.os.UserManager;
 import androidx.test.core.app.ApplicationProvider;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
+import javax.annotation.Nonnull;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -44,6 +47,53 @@ public class ShadowBinderTest {
     assertThat(reply.readString()).isEqualTo("Hello Robolectric");
   }
 
+  @Test
+  public void testLinkToDeath() {
+    Binder binder = new Binder();
+    DeathRecipient recipient = () -> {};
+    binder.linkToDeath(recipient, 0);
+    assertThat(shadowOf(binder).getDeathRecipients()).containsExactly(recipient);
+  }
+
+  @Test
+  public void testLinkToDeath_unlink() {
+    Binder binder = new Binder();
+    DeathRecipient recipient = () -> {};
+    // recipient doesn't exist, returns false.
+    assertThat(binder.unlinkToDeath(recipient, 0)).isFalse();
+
+    binder.linkToDeath(recipient, 0);
+    // recipient exists, return true.
+    assertThat(binder.unlinkToDeath(recipient, 0)).isTrue();
+    assertThat(shadowOf(binder).getDeathRecipients()).isEmpty();
+  }
+
+  @Test
+  public void testLinkToDeath_twice() {
+    Binder binder = new Binder();
+    DeathRecipient recipient = () -> {};
+    binder.linkToDeath(recipient, 0);
+    binder.linkToDeath(recipient, 0);
+    assertThat(shadowOf(binder).getDeathRecipients()).containsExactly(recipient, recipient);
+
+    binder.unlinkToDeath(recipient, 0);
+    assertThat(shadowOf(binder).getDeathRecipients()).containsExactly(recipient);
+  }
+
+  @Test
+  public void testLinkToDeath_weakReference() {
+    Binder binder = new Binder();
+    //noinspection Convert2Lambda
+    binder.linkToDeath(
+        new DeathRecipient() {
+          @Override
+          public void binderDied() {}
+        },
+        0);
+    System.gc();
+    assertThat(shadowOf(binder).getDeathRecipients()).isEmpty();
+  }
+
   static class TestBinder extends Binder {
     int code;
     Parcel data;
@@ -71,7 +121,7 @@ public class ShadowBinderTest {
     testThrowingBinder.transact(2, data, reply, 3);
     try {
       reply.readException();
-      fail();  // Expect thrown
+      fail(); // Expect thrown
     } catch (SecurityException e) {
       assertThat(e.getMessage()).isEqualTo("Halt! Who goes there?");
     }
@@ -80,7 +130,7 @@ public class ShadowBinderTest {
   static class TestThrowingBinder extends Binder {
 
     @Override
-    protected boolean onTransact(int code, Parcel data, Parcel reply, int flags) {
+    protected boolean onTransact(int code, @Nonnull Parcel data, Parcel reply, int flags) {
       throw new SecurityException("Halt! Who goes there?");
     }
   }
@@ -98,7 +148,6 @@ public class ShadowBinderTest {
   }
 
   @Test
-  @Config(minSdk = JELLY_BEAN_MR1)
   public void testSetCallingUserHandle() {
     UserHandle newUser = shadowOf(userManager).addUser(10, "secondary_user", 0);
     ShadowBinder.setCallingUserHandle(newUser);
@@ -116,7 +165,24 @@ public class ShadowBinderTest {
   }
 
   @Test
-  @Config(minSdk = JELLY_BEAN_MR1)
+  @Config(minSdk = Q)
+  public void testGetCallingUidOrThrowWithValueSet() {
+    ShadowBinder.setCallingUid(123);
+    assertThat(Binder.getCallingUidOrThrow()).isEqualTo(123);
+  }
+
+  @Test
+  @Config(minSdk = Q)
+  public void testGetCallingUidOrThrowWithValueNotSet() {
+    ShadowBinder.reset();
+    IllegalStateException ex =
+        assertThrows(IllegalStateException.class, Binder::getCallingUidOrThrow);
+
+    // Typo in "transaction" is intentional to match platform
+    assertThat(ex).hasMessageThat().isEqualTo("Thread is not in a binder transcation");
+  }
+
+  @Test
   public void testGetCallingUserHandleShouldUseThatOfProcessByDefault() {
     assertThat(Binder.getCallingUserHandle()).isEqualTo(android.os.Process.myUserHandle());
   }
@@ -131,7 +197,15 @@ public class ShadowBinderTest {
   }
 
   @Test
-  @Config(minSdk = JELLY_BEAN_MR1)
+  @Config(minSdk = Q)
+  public void testResetUpdatesGetCallingUidOrThrow() {
+    ShadowBinder.setCallingUid(123);
+    ShadowBinder.reset();
+
+    assertThrows(IllegalStateException.class, Binder::getCallingUidOrThrow);
+  }
+
+  @Test
   public void testResetUpdatesCallingUserHandle() {
     UserHandle newUser = shadowOf(userManager).addUser(10, "secondary_user", 0);
     ShadowBinder.setCallingUserHandle(newUser);

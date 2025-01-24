@@ -2,6 +2,8 @@ package org.robolectric.shadows;
 
 import static android.os.Build.VERSION_CODES.M;
 import static android.os.Build.VERSION_CODES.N;
+import static android.os.Build.VERSION_CODES.TIRAMISU;
+import static android.os.Build.VERSION_CODES.UPSIDE_DOWN_CAKE;
 
 import android.os.UserManager;
 import android.os.storage.StorageManager;
@@ -14,20 +16,19 @@ import org.robolectric.RuntimeEnvironment;
 import org.robolectric.annotation.HiddenApi;
 import org.robolectric.annotation.Implementation;
 import org.robolectric.annotation.Implements;
+import org.robolectric.annotation.Resetter;
 import org.robolectric.shadow.api.Shadow;
 
-/**
- * Fake implementation of {@link android.os.storage.StorageManager}
- */
+/** Fake implementation of {@link android.os.storage.StorageManager} */
 @Implements(StorageManager.class)
 public class ShadowStorageManager {
 
   private static boolean isFileEncryptionSupported = true;
-  private final List<StorageVolume> storageVolumeList = new ArrayList<>();
+  private static final List<StorageVolume> storageVolumeList = new ArrayList<>();
 
   @Implementation(minSdk = M)
   protected static StorageVolume[] getVolumeList(int userId, int flags) {
-    return new StorageVolume[0];
+    return storageVolumeList.toArray(new StorageVolume[0]);
   }
 
   /**
@@ -35,6 +36,7 @@ public class ShadowStorageManager {
    *
    * @return volume list
    */
+  @Implementation
   public StorageVolume[] getVolumeList() {
     return getVolumeList(0, 0);
   }
@@ -82,8 +84,10 @@ public class ShadowStorageManager {
     return null;
   }
 
+  // Use maxSdk=T for this method, since starting in U, this method in StorageManager is deprecated
+  // and is no longer called by the Android framework. It's planned to be removed entirely in V.
   @HiddenApi
-  @Implementation(minSdk = N)
+  @Implementation(minSdk = N, maxSdk = TIRAMISU)
   protected static boolean isFileEncryptedNativeOrEmulated() {
     return isFileEncryptionSupported;
   }
@@ -97,11 +101,18 @@ public class ShadowStorageManager {
     isFileEncryptionSupported = isSupported;
   }
 
+  // Use maxSdk=U, as this method is planned to be removed from StorageManager in V.
   @HiddenApi
-  @Implementation(minSdk = N)
+  @Implementation(minSdk = N, maxSdk = UPSIDE_DOWN_CAKE)
   protected static boolean isUserKeyUnlocked(int userId) {
     ShadowUserManager extract =
         Shadow.extract(RuntimeEnvironment.getApplication().getSystemService(UserManager.class));
     return extract.isUserUnlocked();
+  }
+
+  @Resetter
+  public static void reset() {
+    storageVolumeList.clear();
+    isFileEncryptionSupported = true;
   }
 }

@@ -1,9 +1,5 @@
 package org.robolectric.shadows;
 
-import static android.os.Build.VERSION_CODES.KITKAT_WATCH;
-import static android.os.Build.VERSION_CODES.LOLLIPOP;
-import static org.robolectric.RuntimeEnvironment.getApiLevel;
-import static org.robolectric.shadow.api.Shadow.directlyOn;
 import static org.robolectric.util.reflector.Reflector.reflector;
 
 import android.os.Handler;
@@ -24,12 +20,12 @@ import org.robolectric.util.reflector.ForType;
  * <p>In {@link LooperMode.Mode.LEGACY}, each Message is associated with a Runnable posted to the
  * {@link Scheduler}.
  *
- * @see ShadowLooper, ShadowLegacyMessageQueue
+ * @see ShadowLooper
+ * @see ShadowLegacyMessageQueue
  */
 @Implements(value = Message.class, isInAndroidSdk = false)
 public class ShadowLegacyMessage extends ShadowMessage {
-  @RealObject
-  private Message realMessage;
+  @RealObject private Message realMessage;
   private Runnable scheduledRunnable;
 
   private void unschedule() {
@@ -42,31 +38,16 @@ public class ShadowLegacyMessage extends ShadowMessage {
   }
 
   /**
-   * Hook to unscheduled the callback when the message is recycled.
-   * Invokes {@link #unschedule()} and then calls through to the
-   * package private method {@link Message#recycleUnchecked()}
-   * on the real object.
+   * Hook to unscheduled the callback when the message is recycled. Invokes {@link #unschedule()}
+   * and then calls through to the package private method {@link Message#recycleUnchecked()} on the
+   * real object.
    */
   @HiddenApi
-  @Implementation(minSdk = LOLLIPOP)
+  @Implementation
   public void recycleUnchecked() {
-    if (getApiLevel() >= LOLLIPOP) {
-      unschedule();
-      reflector(MessageReflector.class, realMessage).recycleUnchecked();
-    } else {
-      // provide forward compatibility with SDK 21.
-      recycle();
-    }
-  }
 
-  /**
-   * Hook to unscheduled the callback when the message is recycled. Invokes {@link #unschedule()}
-   * and then calls through to {@link Message#recycle()} on the real object.
-   */
-  @Implementation(maxSdk = KITKAT_WATCH)
-  protected void recycle() {
     unschedule();
-    directlyOn(realMessage, Message.class, "recycle");
+    reflector(MessageReflector.class, realMessage).recycleUnchecked();
   }
 
   @Override

@@ -48,7 +48,7 @@ public class CustomConfigurerTest {
 
     @Test
     @SomeConfig(value = "the value")
-    public void shouldHaveValue() throws Exception {
+    public void shouldHaveValue() {
       SomeConfig someConfig = ConfigurationRegistry.get(SomeConfig.class);
       fail("someConfig value is " + someConfig.value());
     }
@@ -112,17 +112,17 @@ public class CustomConfigurerTest {
     HierarchicalConfigurationStrategy configurationStrategy =
         new HierarchicalConfigurationStrategy(
             new ConfigConfigurer(new PackagePropertiesLoader()),
-            new LooperModeConfigurer(new Properties()),
+            new LooperModeConfigurer(new Properties(), new PackagePropertiesLoader()),
             new SomeConfigConfigurer());
 
-    SingleSdkRobolectricTestRunner testRunner = new SingleSdkRobolectricTestRunner(
-        testClass,
-        SingleSdkRobolectricTestRunner.defaultInjector()
-            .bind(ConfigurationStrategy.class, configurationStrategy)
-            .build());
+    SingleSdkRobolectricTestRunner testRunner =
+        new SingleSdkRobolectricTestRunner(
+            testClass,
+            SingleSdkRobolectricTestRunner.defaultInjector()
+                .bind(ConfigurationStrategy.class, configurationStrategy)
+                .build());
 
     testRunner.run(notifier);
     return failureListener.failures.stream().map(Failure::getMessage).collect(toList());
   }
-
 }

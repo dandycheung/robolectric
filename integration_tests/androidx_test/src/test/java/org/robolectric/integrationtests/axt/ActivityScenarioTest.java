@@ -1,11 +1,17 @@
 package org.robolectric.integrationtests.axt;
 
+import static android.os.Build.VERSION_CODES.P;
 import static com.google.common.truth.Truth.assertThat;
+import static org.junit.Assert.assertThrows;
 
 import android.app.Activity;
+import android.app.AppComponentFactory;
+import android.app.UiAutomation;
 import android.content.Context;
 import android.content.Intent;
+import android.content.res.Configuration;
 import android.os.Bundle;
+import android.os.Looper;
 import androidx.appcompat.R;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.fragment.app.Fragment;
@@ -13,11 +19,16 @@ import androidx.lifecycle.Lifecycle.State;
 import androidx.test.core.app.ActivityScenario;
 import androidx.test.core.app.ApplicationProvider;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
+import androidx.test.platform.app.InstrumentationRegistry;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
+import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.robolectric.annotation.Config;
 
 /**
  * Integration tests for {@link ActivityScenario} that verify it behaves consistently on device and
@@ -28,6 +39,9 @@ public class ActivityScenarioTest {
 
   private static final List<String> callbacks = new ArrayList<>();
 
+  /**
+   * @noinspection NewClassNamingConvention
+   */
   public static class TranscriptActivity extends Activity {
 
     @Override
@@ -63,7 +77,7 @@ public class ActivityScenarioTest {
     @Override
     public void onStop() {
       super.onStop();
-      callbacks.add("onStop");
+      callbacks.add("onStop " + isChangingConfigurations());
     }
 
     @Override
@@ -85,11 +99,14 @@ public class ActivityScenarioTest {
     }
   }
 
+  /**
+   * @noinspection NewClassNamingConvention
+   */
   public static class LifecycleOwnerActivity extends AppCompatActivity {
     @Override
     protected void onCreate(Bundle bundle) {
-      super.onCreate(bundle);
       setTheme(R.style.Theme_AppCompat);
+      super.onCreate(bundle);
     }
   }
 
@@ -98,127 +115,258 @@ public class ActivityScenarioTest {
     callbacks.clear();
   }
 
+  /**
+   * @noinspection NewClassNamingConvention
+   */
+  public static class ActivityWithCustomConstructor extends Activity {
+    private final int intValue;
+
+    public ActivityWithCustomConstructor(int intValue) {
+      this.intValue = intValue;
+    }
+
+    public int getIntValue() {
+      return intValue;
+    }
+  }
+
+  /**
+   * @noinspection NewClassNamingConvention
+   */
+  public static class CustomAppComponentFactory extends AppComponentFactory {
+
+    @Nonnull
+    @Override
+    public Activity instantiateActivity(
+        @Nonnull ClassLoader cl, @Nonnull String className, @Nullable Intent intent)
+        throws ClassNotFoundException, IllegalAccessException, InstantiationException {
+      if (className.contains(ActivityWithCustomConstructor.class.getName())) {
+        return new ActivityWithCustomConstructor(100);
+      }
+      return super.instantiateActivity(cl, className, intent);
+    }
+  }
+
   @Test
   public void launch_callbackSequence() {
-    ActivityScenario<TranscriptActivity> activityScenario =
-        ActivityScenario.launch(TranscriptActivity.class);
-    assertThat(activityScenario).isNotNull();
-    assertThat(callbacks)
-        .containsExactly(
-            "onCreate", "onStart", "onPostCreate", "onResume", "onWindowFocusChanged true");
+    try (ActivityScenario<TranscriptActivity> activityScenario =
+        ActivityScenario.launch(TranscriptActivity.class)) {
+      assertThat(activityScenario).isNotNull();
+      assertThat(callbacks)
+          .containsExactly(
+              "onCreate", "onStart", "onPostCreate", "onResume", "onWindowFocusChanged true");
+    }
   }
 
   @Test
   public void launch_pauseAndResume_callbackSequence() {
-    ActivityScenario<TranscriptActivity> activityScenario =
-        ActivityScenario.launch(TranscriptActivity.class);
-    assertThat(activityScenario).isNotNull();
-    activityScenario.moveToState(State.STARTED);
-    activityScenario.moveToState(State.RESUMED);
-    assertThat(callbacks)
-        .containsExactly(
-            "onCreate", "onStart", "onPostCreate", "onResume", "onWindowFocusChanged true",
-            "onPause", "onResume");
+    try (ActivityScenario<TranscriptActivity> activityScenario =
+        ActivityScenario.launch(TranscriptActivity.class)) {
+      assertThat(activityScenario).isNotNull();
+      activityScenario.moveToState(State.STARTED);
+      activityScenario.moveToState(State.RESUMED);
+      assertThat(callbacks)
+          .containsExactly(
+              "onCreate",
+              "onStart",
+              "onPostCreate",
+              "onResume",
+              "onWindowFocusChanged true",
+              "onPause",
+              "onResume");
+    }
   }
 
   @Test
   public void launch_stopAndResume_callbackSequence() {
-      ActivityScenario<TranscriptActivity> activityScenario =
-          ActivityScenario.launch(TranscriptActivity.class);
+    try (ActivityScenario<TranscriptActivity> activityScenario =
+        ActivityScenario.launch(TranscriptActivity.class)) {
       assertThat(activityScenario).isNotNull();
       activityScenario.moveToState(State.CREATED);
       activityScenario.moveToState(State.RESUMED);
       assertThat(callbacks)
           .containsExactly(
-              "onCreate", "onStart", "onPostCreate", "onResume", "onWindowFocusChanged true",
-              "onPause", "onStop", "onRestart", "onStart", "onResume");
+              "onCreate",
+              "onStart",
+              "onPostCreate",
+              "onResume",
+              "onWindowFocusChanged true",
+              "onPause",
+              "onStop false",
+              "onRestart",
+              "onStart",
+              "onResume");
+    }
   }
 
   @Test
   public void launchAlias_createTargetAndCallbackSequence() {
     Context context = ApplicationProvider.getApplicationContext();
-    ActivityScenario<Activity> activityScenario =
+    try (ActivityScenario<Activity> activityScenario =
         ActivityScenario.launch(
             new Intent()
                 .setClassName(
-                    context, "org.robolectric.integrationtests.axt.ActivityScenarioTestAlias"));
+                    context, "org.robolectric.integrationtests.axt.ActivityScenarioTestAlias"))) {
 
-    assertThat(activityScenario).isNotNull();
-    activityScenario.onActivity(
-        activity -> {
-          assertThat(activity).isInstanceOf(TranscriptActivity.class);
-        });
-    assertThat(callbacks)
-        .containsExactly(
-            "onCreate", "onStart", "onPostCreate", "onResume", "onWindowFocusChanged true");
+      assertThat(activityScenario).isNotNull();
+      activityScenario.onActivity(
+          activity -> assertThat(activity).isInstanceOf(TranscriptActivity.class));
+      assertThat(callbacks)
+          .containsExactly(
+              "onCreate", "onStart", "onPostCreate", "onResume", "onWindowFocusChanged true");
+    }
   }
 
   @Test
   public void launch_lifecycleOwnerActivity() {
-    ActivityScenario<LifecycleOwnerActivity> activityScenario =
-        ActivityScenario.launch(LifecycleOwnerActivity.class);
-    assertThat(activityScenario).isNotNull();
-    activityScenario.onActivity(
-        activity -> {
-          assertThat(activity.getLifecycle().getCurrentState()).isEqualTo(State.RESUMED);
-        });
-    activityScenario.moveToState(State.STARTED);
-    activityScenario.onActivity(
-        activity -> {
-          assertThat(activity.getLifecycle().getCurrentState()).isEqualTo(State.STARTED);
-        });
-    activityScenario.moveToState(State.CREATED);
-    activityScenario.onActivity(
-        activity -> {
-          assertThat(activity.getLifecycle().getCurrentState()).isEqualTo(State.CREATED);
-        });
+    try (ActivityScenario<LifecycleOwnerActivity> activityScenario =
+        ActivityScenario.launch(LifecycleOwnerActivity.class)) {
+      assertThat(activityScenario).isNotNull();
+      activityScenario.onActivity(
+          activity ->
+              assertThat(activity.getLifecycle().getCurrentState()).isEqualTo(State.RESUMED));
+      activityScenario.moveToState(State.STARTED);
+      activityScenario.onActivity(
+          activity ->
+              assertThat(activity.getLifecycle().getCurrentState()).isEqualTo(State.STARTED));
+      activityScenario.moveToState(State.CREATED);
+      activityScenario.onActivity(
+          activity ->
+              assertThat(activity.getLifecycle().getCurrentState()).isEqualTo(State.CREATED));
+    }
   }
 
   @Test
   public void recreate_retainFragmentHostingActivity() {
     Fragment fragment = new Fragment();
     fragment.setRetainInstance(true);
-    ActivityScenario<LifecycleOwnerActivity> activityScenario =
-        ActivityScenario.launch(LifecycleOwnerActivity.class);
-    assertThat(activityScenario).isNotNull();
-    activityScenario.onActivity(
-        activity -> {
-          activity
-              .getSupportFragmentManager()
-              .beginTransaction()
-              .add(android.R.id.content, fragment)
-              .commitNow();
-          assertThat(activity.getSupportFragmentManager().findFragmentById(android.R.id.content))
-              .isSameInstanceAs(fragment);
-        });
-    activityScenario.recreate();
-    activityScenario.onActivity(
-        activity ->
+    try (ActivityScenario<LifecycleOwnerActivity> activityScenario =
+        ActivityScenario.launch(LifecycleOwnerActivity.class)) {
+      assertThat(activityScenario).isNotNull();
+      activityScenario.onActivity(
+          activity -> {
+            activity
+                .getSupportFragmentManager()
+                .beginTransaction()
+                .add(android.R.id.content, fragment)
+                .commitNow();
             assertThat(activity.getSupportFragmentManager().findFragmentById(android.R.id.content))
-                .isSameInstanceAs(fragment));
+                .isSameInstanceAs(fragment);
+          });
+      activityScenario.recreate();
+      activityScenario.onActivity(
+          activity ->
+              assertThat(
+                      activity.getSupportFragmentManager().findFragmentById(android.R.id.content))
+                  .isSameInstanceAs(fragment));
+    }
   }
 
   @Test
   public void recreate_nonRetainFragmentHostingActivity() {
     Fragment fragment = new Fragment();
     fragment.setRetainInstance(false);
-    ActivityScenario<LifecycleOwnerActivity> activityScenario =
-        ActivityScenario.launch(LifecycleOwnerActivity.class);
-    assertThat(activityScenario).isNotNull();
-    activityScenario.onActivity(
-        activity -> {
-          activity
-              .getSupportFragmentManager()
-              .beginTransaction()
-              .add(android.R.id.content, fragment)
-              .commitNow();
-          assertThat(activity.getSupportFragmentManager().findFragmentById(android.R.id.content))
-              .isSameInstanceAs(fragment);
-        });
-    activityScenario.recreate();
-    activityScenario.onActivity(
-        activity ->
+    try (ActivityScenario<LifecycleOwnerActivity> activityScenario =
+        ActivityScenario.launch(LifecycleOwnerActivity.class)) {
+      assertThat(activityScenario).isNotNull();
+      activityScenario.onActivity(
+          activity -> {
+            activity
+                .getSupportFragmentManager()
+                .beginTransaction()
+                .add(android.R.id.content, fragment)
+                .commitNow();
             assertThat(activity.getSupportFragmentManager().findFragmentById(android.R.id.content))
-                .isNotSameInstanceAs(fragment));
+                .isSameInstanceAs(fragment);
+          });
+      activityScenario.recreate();
+      activityScenario.onActivity(
+          activity ->
+              assertThat(
+                      activity.getSupportFragmentManager().findFragmentById(android.R.id.content))
+                  .isNotSameInstanceAs(fragment));
+    }
+  }
+
+  @Test
+  public void recreate_isChangingConfigurations() {
+    try (ActivityScenario<TranscriptActivity> activityScenario =
+        ActivityScenario.launch(TranscriptActivity.class)) {
+      activityScenario.recreate();
+
+      assertThat(callbacks).contains("onStop true");
+    }
+  }
+
+  @Test
+  public void setRotation_recreatesActivity() {
+    UiAutomation uiAutomation = InstrumentationRegistry.getInstrumentation().getUiAutomation();
+    try (ActivityScenario<TranscriptActivity> activityScenario =
+        ActivityScenario.launch(TranscriptActivity.class)) {
+      AtomicReference<Activity> originalActivity = new AtomicReference<>();
+      activityScenario.onActivity(originalActivity::set);
+
+      uiAutomation.setRotation(UiAutomation.ROTATION_FREEZE_90);
+
+      activityScenario.onActivity(
+          activity -> {
+            assertThat(activity.getResources().getConfiguration().orientation)
+                .isEqualTo(Configuration.ORIENTATION_LANDSCAPE);
+            assertThat(activity).isNotSameInstanceAs(originalActivity);
+          });
+    }
+  }
+
+  @Test
+  public void onActivityExceptionPropagated() {
+    try (ActivityScenario<TranscriptActivity> activityScenario =
+        ActivityScenario.launch(TranscriptActivity.class)) {
+      assertThrows(
+          IllegalStateException.class,
+          () ->
+              activityScenario.onActivity(
+                  activity -> {
+                    throw new IllegalStateException("test");
+                  }));
+    }
+  }
+
+  @Test
+  public void onActivity_runsOnMainLooperThread() {
+    try (ActivityScenario<TranscriptActivity> activityScenario =
+        ActivityScenario.launch(TranscriptActivity.class)) {
+      activityScenario.onActivity(
+          activity ->
+              assertThat(Looper.getMainLooper().getThread()).isEqualTo(Thread.currentThread()));
+    }
+  }
+
+  @Test
+  public void getCallingActivity_empty() {
+    try (ActivityScenario<TranscriptActivity> activityScenario =
+        ActivityScenario.launch(TranscriptActivity.class)) {
+      activityScenario.onActivity(activity -> assertThat(activity.getCallingActivity()).isNull());
+    }
+  }
+
+  @Test
+  public void getCallingActivity_isSet() {
+    try (ActivityScenario<TranscriptActivity> activityScenario =
+        ActivityScenario.launchActivityForResult(TranscriptActivity.class)) {
+      activityScenario.onActivity(
+          activity ->
+              assertThat(activity.getCallingActivity().getPackageName())
+                  .isEqualTo("org.robolectric.integrationtests.axt"));
+    }
+  }
+
+  @Test
+  @Config(minSdk = P)
+  public void launchActivityWithCustomConstructor() {
+    try (ActivityScenario<ActivityWithCustomConstructor> activityScenario =
+        ActivityScenario.launch(ActivityWithCustomConstructor.class)) {
+      assertThat(activityScenario.getState()).isEqualTo(State.RESUMED);
+      activityScenario.onActivity(activity -> assertThat(activity.getIntValue()).isEqualTo(100));
+    }
   }
 }

@@ -8,10 +8,10 @@ import androidx.test.core.app.ApplicationProvider;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import java.util.ArrayList;
 import java.util.List;
+import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
-import org.robolectric.Shadows;
 
 @RunWith(AndroidJUnit4.class)
 public class ShadowAbstractCursorTest {
@@ -21,6 +21,11 @@ public class ShadowAbstractCursorTest {
   @Before
   public void setUp() throws Exception {
     cursor = new TestCursor();
+  }
+
+  @After
+  public void tearDown() {
+    cursor.close();
   }
 
   @Test
@@ -206,11 +211,10 @@ public class ShadowAbstractCursorTest {
   @Test
   public void testGetNotificationUri() {
     Uri uri = Uri.parse("content://foo.com");
-    ShadowAbstractCursor shadow = Shadows.shadowOf(cursor);
-    assertThat(shadow.getNotificationUri_Compatibility()).isNull();
+    assertThat(cursor.getNotificationUri()).isNull();
     cursor.setNotificationUri(
         ApplicationProvider.getApplicationContext().getContentResolver(), uri);
-    assertThat(shadow.getNotificationUri_Compatibility()).isEqualTo(uri);
+    assertThat(cursor.getNotificationUri()).isEqualTo(uri);
   }
 
   @Test

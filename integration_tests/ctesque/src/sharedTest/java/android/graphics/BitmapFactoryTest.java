@@ -1,27 +1,25 @@
 package android.graphics;
 
-import static androidx.test.InstrumentationRegistry.getTargetContext;
 import static com.google.common.truth.Truth.assertThat;
+import static java.lang.Math.round;
 
 import android.content.res.Resources;
 import android.graphics.Bitmap.CompressFormat;
 import android.graphics.BitmapFactory.Options;
 import android.os.Build;
-import androidx.test.runner.AndroidJUnit4;
+import androidx.test.ext.junit.runners.AndroidJUnit4;
+import androidx.test.platform.app.InstrumentationRegistry;
 import com.google.common.truth.TruthJUnit;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
-import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.Charset;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
-import org.robolectric.annotation.internal.DoNotInstrument;
 import org.robolectric.testapp.R;
 
 /** Compatibility test for {@link BitmapFactory} */
-@DoNotInstrument
 @RunWith(AndroidJUnit4.class)
 public class BitmapFactoryTest {
 
@@ -33,7 +31,7 @@ public class BitmapFactoryTest {
 
   @Before
   public void setUp() {
-    resources = getTargetContext().getResources();
+    resources = InstrumentationRegistry.getInstrumentation().getTargetContext().getResources();
   }
 
   @Test
@@ -88,7 +86,7 @@ public class BitmapFactoryTest {
    * can be enabled for Robolectric.
    */
   @Test
-  public void decodeStream_options_setsOutWidthToMinusOne() throws IOException {
+  public void decodeStream_options_setsOutWidthToMinusOne() {
     TruthJUnit.assume().that(Build.FINGERPRINT).isNotEqualTo("robolectric");
     byte[] invalidBitmapPixels = "invalid bitmap pixels".getBytes(Charset.defaultCharset());
     ByteArrayInputStream inputStream = new ByteArrayInputStream(invalidBitmapPixels);
@@ -97,5 +95,17 @@ public class BitmapFactoryTest {
     assertThat(result).isEqualTo(null);
     assertThat(opts.outWidth).isEqualTo(-1);
     assertThat(opts.outHeight).isEqualTo(-1);
+  }
+
+  @Test
+  public void decodeFile_scaledDensity_shouldHaveCorrectWidthAndHeight() throws Exception {
+    BitmapFactory.Options opts = new BitmapFactory.Options();
+    opts.inScaled = true;
+    opts.inDensity = 2;
+    opts.inTargetDensity = 1;
+    Bitmap bitmap = BitmapFactory.decodeStream(new ByteArrayInputStream(obtainArray()), null, opts);
+
+    assertThat(bitmap.getWidth()).isEqualTo(round(START_WIDTH / 2f));
+    assertThat(bitmap.getHeight()).isEqualTo(round(START_HEIGHT / 2f));
   }
 }

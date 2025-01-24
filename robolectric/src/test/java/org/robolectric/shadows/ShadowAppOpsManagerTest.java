@@ -15,7 +15,7 @@ import static android.app.AppOpsManager.OP_FINE_LOCATION;
 import static android.app.AppOpsManager.OP_GPS;
 import static android.app.AppOpsManager.OP_SEND_SMS;
 import static android.app.AppOpsManager.OP_VIBRATE;
-import static android.os.Build.VERSION_CODES.KITKAT;
+import static android.os.Build.VERSION_CODES.O;
 import static android.os.Build.VERSION_CODES.Q;
 import static android.os.Build.VERSION_CODES.R;
 import static com.google.common.truth.Truth.assertThat;
@@ -28,6 +28,7 @@ import static org.robolectric.Shadows.shadowOf;
 import static org.robolectric.shadows.ShadowAppOpsManager.DURATION;
 import static org.robolectric.shadows.ShadowAppOpsManager.OP_TIME;
 
+import android.app.Activity;
 import android.app.AppOpsManager;
 import android.app.AppOpsManager.OnOpChangedListener;
 import android.app.AppOpsManager.OpEntry;
@@ -46,6 +47,9 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.ArgumentCaptor;
+import org.robolectric.Robolectric;
+import org.robolectric.Shadows;
+import org.robolectric.android.controller.ActivityController;
 import org.robolectric.annotation.Config;
 import org.robolectric.shadows.ShadowAppOpsManager.ModeAndException;
 import org.robolectric.util.ReflectionHelpers;
@@ -53,7 +57,6 @@ import org.robolectric.util.ReflectionHelpers.ClassParameter;
 
 /** Unit tests for {@link ShadowAppOpsManager}. */
 @RunWith(AndroidJUnit4.class)
-@Config(minSdk = KITKAT)
 public class ShadowAppOpsManagerTest {
 
   private static final String PACKAGE_NAME1 = "com.company1.pkg1";
@@ -94,14 +97,12 @@ public class ShadowAppOpsManagerTest {
   }
 
   @Test
-  @Config(minSdk = VERSION_CODES.KITKAT)
-  public void checkOpNoThrow_noModeSet_atLeastKitKat_shouldReturnModeAllowed() {
+  public void checkOpNoThrow_noModeSet_shouldReturnModeAllowed() {
     assertThat(appOps.checkOpNoThrow(/* op= */ 2, UID_1, PACKAGE_NAME1)).isEqualTo(MODE_ALLOWED);
   }
 
   @Test
-  @Config(minSdk = VERSION_CODES.KITKAT)
-  public void setMode_withModeDefault_atLeastKitKat_checkOpNoThrow_shouldReturnModeDefault() {
+  public void setMode_withModeDefault_checkOpNoThrow_shouldReturnModeDefault() {
     appOps.setMode(/* op= */ 2, UID_1, PACKAGE_NAME1, MODE_DEFAULT);
     assertThat(appOps.checkOpNoThrow(/* op= */ 2, UID_1, PACKAGE_NAME1)).isEqualTo(MODE_DEFAULT);
   }
@@ -136,7 +137,7 @@ public class ShadowAppOpsManagerTest {
 
   @Test
   @Config(sdk = VERSION_CODES.Q)
-  public void noModeSet_q_noteProxyOpNoThrow_withproxiedUid_shouldReturnModeAllowed() {
+  public void noModeSet_q_noteProxyOpNoThrow_withProxiedUid_shouldReturnModeAllowed() {
     int result = appOps.noteProxyOpNoThrow(OPSTR_GPS, PACKAGE_NAME1, Binder.getCallingUid());
     assertThat(result).isEqualTo(MODE_ALLOWED);
   }
@@ -217,7 +218,6 @@ public class ShadowAppOpsManagerTest {
   }
 
   @Test
-  @Config(minSdk = VERSION_CODES.KITKAT)
   public void startStopWatchingMode() {
     OnOpChangedListener callback = mock(OnOpChangedListener.class);
     appOps.startWatchingMode(OPSTR_FINE_LOCATION, PACKAGE_NAME1, callback);
@@ -239,6 +239,19 @@ public class ShadowAppOpsManagerTest {
 
     appOps.stopWatchingMode(callback);
     appOps.setMode(OP_FINE_LOCATION, UID_1, PACKAGE_NAME1, MODE_ALLOWED);
+    verifyNoMoreInteractions(callback);
+  }
+
+  @Test
+  @Config(minSdk = VERSION_CODES.M)
+  public void startStopWatchingModeUid() {
+    OnOpChangedListener callback = mock(OnOpChangedListener.class);
+    appOps.startWatchingMode(OPSTR_FINE_LOCATION, PACKAGE_NAME1, callback);
+    appOps.setUidMode(OP_FINE_LOCATION, UID_1, MODE_ERRORED);
+    verify(callback).onOpChanged(OPSTR_FINE_LOCATION, null);
+
+    appOps.stopWatchingMode(callback);
+    appOps.setUidMode(OP_FINE_LOCATION, UID_1, MODE_ALLOWED);
     verifyNoMoreInteractions(callback);
   }
 
@@ -429,7 +442,7 @@ public class ShadowAppOpsManagerTest {
   }
 
   @Test
-  @Config(minSdk = VERSION_CODES.KITKAT, maxSdk = VERSION_CODES.Q)
+  @Config(maxSdk = VERSION_CODES.Q)
   public void startOpNoThrow_setModeAllowed() {
     appOps.setMode(OP_FINE_LOCATION, UID_1, PACKAGE_NAME1, MODE_ALLOWED);
 
@@ -438,7 +451,7 @@ public class ShadowAppOpsManagerTest {
   }
 
   @Test
-  @Config(minSdk = VERSION_CODES.KITKAT, maxSdk = VERSION_CODES.Q)
+  @Config(maxSdk = VERSION_CODES.Q)
   public void startOpNoThrow_setModeErrored() {
     appOps.setMode(OP_FINE_LOCATION, UID_1, PACKAGE_NAME1, MODE_ERRORED);
 
@@ -472,7 +485,6 @@ public class ShadowAppOpsManagerTest {
   }
 
   @Test
-  @Config(minSdk = VERSION_CODES.LOLLIPOP)
   public void setRestrictions() {
     appOps.setRestriction(
         OP_VIBRATE, AudioAttributes.USAGE_NOTIFICATION, MODE_ERRORED, new String[] {PACKAGE_NAME1});
@@ -513,7 +525,6 @@ public class ShadowAppOpsManagerTest {
     // check passes without exception
   }
 
-  @Config(minSdk = KITKAT)
   @Test
   public void getPackageForOps_setNone_getNull() {
     int[] intNull = null;
@@ -521,7 +532,6 @@ public class ShadowAppOpsManagerTest {
     assertThat(packageOps).isNull();
   }
 
-  @Config(minSdk = KITKAT)
   @Test
   public void getPackageForOps_setOne_getOne() {
     String packageName = "com.android.package";
@@ -533,7 +543,6 @@ public class ShadowAppOpsManagerTest {
     assertThat(containsPackageOpPair(packageOps, packageName, 0, MODE_ALLOWED)).isTrue();
   }
 
-  @Config(minSdk = KITKAT)
   @Test
   public void getPackageForOps_setMultiple_getMultiple() {
     String packageName1 = "com.android.package";
@@ -557,7 +566,6 @@ public class ShadowAppOpsManagerTest {
     assertThat(containsPackageOpPair(packageOps, packageName2, 0, MODE_ALLOWED)).isTrue();
   }
 
-  @Config(minSdk = KITKAT)
   @Test
   public void getPackageForOps_setMultiple_onlyGetThoseAskedFor() {
     String packageName1 = "com.android.package";
@@ -680,6 +688,37 @@ public class ShadowAppOpsManagerTest {
         .isTrue();
   }
 
+  @Test
+  @Config(minSdk = VERSION_CODES.P)
+  public void checkOpNoThrowString_noModeSetForUid_shouldReturnModeAllowed() {
+    assertThat(appOps.checkOpNoThrow(OPSTR_GPS, UID_1, null)).isEqualTo(MODE_ALLOWED);
+  }
+
+  @Test
+  @Config(minSdk = VERSION_CODES.P)
+  public void setUidMode_withModeDefault_checkOpNoThrowString_shouldReturnModeDefault() {
+    ReflectionHelpers.callInstanceMethod(
+        appOps,
+        "setUidMode",
+        ClassParameter.from(int.class, OP_GPS),
+        ClassParameter.from(int.class, UID_1),
+        ClassParameter.from(int.class, MODE_DEFAULT));
+    assertThat(appOps.checkOpNoThrow(OPSTR_GPS, UID_1, null)).isEqualTo(MODE_DEFAULT);
+  }
+
+  @Test
+  @Config(minSdk = VERSION_CODES.M)
+  public void checkOpNoThrow_noModeSetForUid_shouldReturnModeAllowed() {
+    assertThat(appOps.checkOpNoThrow(/* op= */ 2, UID_1, null)).isEqualTo(MODE_ALLOWED);
+  }
+
+  @Test
+  @Config(minSdk = VERSION_CODES.M)
+  public void setUidMode_withModeDefault_checkOpNoThrow_shouldReturnModeDefault() {
+    appOps.setUidMode(/* op= */ 2, UID_1, MODE_DEFAULT);
+    assertThat(appOps.checkOpNoThrow(/* op= */ 2, UID_1, null)).isEqualTo(MODE_DEFAULT);
+  }
+
   /** Assert that the results contain the expected op codes. */
   private void assertOps(List<PackageOps> pkgOps, Integer... expectedOps) {
     Set<Integer> actualOps = new HashSet<>();
@@ -720,5 +759,45 @@ public class ShadowAppOpsManagerTest {
       }
     }
     return false;
+  }
+
+  @Test
+  @Config(minSdk = R)
+  public void reset_clearsOnOpNotedCallback() {
+    AppOpsManager.OnOpNotedCallback callback = mock(AppOpsManager.OnOpNotedCallback.class);
+    appOps.setOnOpNotedCallback(directExecutor(), callback);
+    ShadowAppOpsManager.reset();
+    appOps.setOnOpNotedCallback(directExecutor(), callback); // should not throw an exception
+  }
+
+  @Test
+  @Config(minSdk = O)
+  public void appOpsManager_activityContextEnabled_differentInstancesRetrieveOps() {
+    String originalProperty = System.getProperty("robolectric.createActivityContexts", "");
+    System.setProperty("robolectric.createActivityContexts", "true");
+    try (ActivityController<Activity> controller =
+        Robolectric.buildActivity(Activity.class).setup()) {
+      // Get the AppOpsManager instances
+      AppOpsManager applicationAppOpsManager =
+          ApplicationProvider.getApplicationContext().getSystemService(AppOpsManager.class);
+      ShadowAppOpsManager shadowApplicationAppOpsManager =
+          Shadows.shadowOf(applicationAppOpsManager);
+
+      Activity activity = controller.get();
+      AppOpsManager activityAppOpsManager = activity.getSystemService(AppOpsManager.class);
+      ShadowAppOpsManager shadowActivityAppOpsManager = Shadows.shadowOf(activityAppOpsManager);
+
+      int[] ops = {
+        AppOpsManager.OP_COARSE_LOCATION, AppOpsManager.OP_FINE_LOCATION, AppOpsManager.OP_CAMERA
+      };
+
+      List<PackageOps> applicationPackageOpsList =
+          shadowApplicationAppOpsManager.getPackagesForOps(ops);
+      List<PackageOps> activityPackageOpsList = shadowActivityAppOpsManager.getPackagesForOps(ops);
+
+      assertThat(activityPackageOpsList).isEqualTo(applicationPackageOpsList);
+    } finally {
+      System.setProperty("robolectric.createActivityContexts", originalProperty);
+    }
   }
 }

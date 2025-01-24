@@ -12,6 +12,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
@@ -21,6 +22,7 @@ import org.robolectric.pluginapi.UsesSdk;
 import org.robolectric.res.Fs;
 import org.robolectric.res.ResourcePath;
 import org.robolectric.res.ResourceTable;
+import org.robolectric.util.Logger;
 import org.w3c.dom.Document;
 import org.w3c.dom.NamedNodeMap;
 import org.w3c.dom.Node;
@@ -51,6 +53,7 @@ public class AndroidManifest implements UsesSdk {
   private String processName;
   private String themeRef;
   private String labelRef;
+  private String appComponentFactory; // Added from SDK 28
   private Integer minSdkVersion;
   private Integer targetSdkVersion;
   private Integer maxSdkVersion;
@@ -65,8 +68,6 @@ public class AndroidManifest implements UsesSdk {
   private final List<String> usedPermissions = new ArrayList<>();
   private final Map<String, String> applicationAttributes = new HashMap<>();
   private MetaData applicationMetaData;
-
-  private Boolean supportsBinaryResourcesMode;
 
   /**
    * Creates a Robolectric configuration using specified locations.
@@ -92,7 +93,12 @@ public class AndroidManifest implements UsesSdk {
       Path resDirectory,
       Path assetsDirectory,
       String overridePackageName) {
-    this(androidManifestFile, resDirectory, assetsDirectory, Collections.emptyList(), overridePackageName);
+    this(
+        androidManifestFile,
+        resDirectory,
+        assetsDirectory,
+        Collections.emptyList(),
+        overridePackageName);
   }
 
   /**
@@ -145,12 +151,12 @@ public class AndroidManifest implements UsesSdk {
     return themeRef;
   }
 
-  public String getRClassName() throws Exception {
+  public String getRClassName() {
     parseAndroidManifest();
     return rClassName;
   }
 
-  public Class getRClass() {
+  public Class<?> getRClass() {
     try {
       String rClassName = getRClassName();
       return Class.forName(rClassName);
@@ -165,6 +171,8 @@ public class AndroidManifest implements UsesSdk {
       return;
     }
 
+    Logger.debug("Manifest file location: " + androidManifestFile);
+
     if (androidManifestFile != null && Files.exists(androidManifestFile)) {
       try {
         DocumentBuilderFactory dbf = DocumentBuilderFactory.newInstance();
@@ -173,6 +181,8 @@ public class AndroidManifest implements UsesSdk {
         InputStream inputStream = Fs.getInputStream(androidManifestFile);
         Document manifestDocument = db.parse(inputStream);
         inputStream.close();
+
+        Logger.debug("Manifest doc location:\n%s", androidManifestFile.toString());
 
         if (!packageNameIsOverridden()) {
           packageName = getTagAttributeText(manifestDocument, "manifest", "package");
@@ -184,6 +194,7 @@ public class AndroidManifest implements UsesSdk {
         rClassName = packageName + ".R";
 
         Node applicationNode = findApplicationNode(manifestDocument);
+        // Parse application node of the AndroidManifest.xml
         if (applicationNode != null) {
           NamedNodeMap attributes = applicationNode.getAttributes();
           int attrCount = attributes.getLength();
@@ -197,6 +208,7 @@ public class AndroidManifest implements UsesSdk {
           processName = applicationAttributes.get("android:process");
           themeRef = applicationAttributes.get("android:theme");
           labelRef = applicationAttributes.get("android:label");
+          appComponentFactory = applicationAttributes.get("android:appComponentFactory");
 
           parseReceivers(applicationNode);
           parseServices(applicationNode);
@@ -211,8 +223,7 @@ public class AndroidManifest implements UsesSdk {
         String targetSdkText =
             getTagAttributeText(manifestDocument, "uses-sdk", "android:targetSdkVersion");
         if (targetSdkText != null) {
-          // Support Android O Preview. This can be removed once Android O is officially launched.
-          targetSdkVersion = targetSdkText.equals("O") ? 26 : Integer.parseInt(targetSdkText);
+          targetSdkVersion = Integer.parseInt(targetSdkText);
         }
 
         maxSdkVersion =
@@ -233,17 +244,16 @@ public class AndroidManifest implements UsesSdk {
         System.out.println("Falling back to the Android OS resources only.");
         System.out.println(
             "To remove this warning, annotate your test class with @Config(manifest=Config.NONE).");
+        System.out.println(
+            "If you're using Android Gradle Plugin, add "
+                + "testOptions.unitTests.includeAndroidResources = true to your build.gradle");
       }
 
-      if (packageName == null || packageName.equals("")) {
+      if (packageName == null || packageName.isEmpty()) {
         packageName = "org.robolectric.default";
       }
 
       rClassName = packageName + ".R";
-
-      if (androidManifestFile != null) {
-        System.err.println("No such manifest file: " + androidManifestFile);
-      }
     }
 
     manifestIsParsed = true;
@@ -306,13 +316,13 @@ public class AndroidManifest implements UsesSdk {
 
       List<PathPermissionData> pathPermissionDatas = new ArrayList<>();
       for (Node node : getChildrenTags(contentProviderNode, "path-permission")) {
-        pathPermissionDatas.add(new PathPermissionData(
+        pathPermissionDatas.add(
+            new PathPermissionData(
                 getAttributeValue(node, "android:path"),
                 getAttributeValue(node, "android:pathPrefix"),
                 getAttributeValue(node, "android:pathPattern"),
                 getAttributeValue(node, "android:readPermission"),
-                getAttributeValue(node, "android:writePermission")
-        ));
+                getAttributeValue(node, "android:writePermission")));
       }
 
       providers.add(
@@ -425,9 +435,6 @@ public class AndroidManifest implements UsesSdk {
     ActivityData targetActivity = null;
     if (isAlias) {
       String targetName = resolveClassRef(activityAttrs.get(ActivityData.getTargetAttr("android")));
-      if (activityName == null) {
-        return;
-      }
       // The target activity should have been parsed already so if it exists we should find it in
       // activityDatas.
       targetActivity = activityDatas.get(targetName);
@@ -444,7 +451,7 @@ public class AndroidManifest implements UsesSdk {
     for (Node n : getChildrenTags(activityNode, "intent-filter")) {
       ArrayList<String> actionNames = new ArrayList<>();
       ArrayList<String> categories = new ArrayList<>();
-      //should only be one action.
+      // should only be one action.
       for (Node action : getChildrenTags(n, "action")) {
         NamedNodeMap attributes = action.getAttributes();
         Node actionNameNode = attributes.getNamedItem("android:name");
@@ -467,7 +474,8 @@ public class AndroidManifest implements UsesSdk {
     return intentFilterDatas;
   }
 
-  private IntentFilterData parseIntentFilterData(final Node intentFilterNode, IntentFilterData intentFilterData) {
+  private IntentFilterData parseIntentFilterData(
+      final Node intentFilterNode, IntentFilterData intentFilterData) {
     for (Node n : getChildrenTags(intentFilterNode, "data")) {
       NamedNodeMap attributes = n.getAttributes();
       String host = null;
@@ -542,7 +550,7 @@ public class AndroidManifest implements UsesSdk {
   }
 
   private String resolveClassRef(String maybePartialClassName) {
-    return (maybePartialClassName.startsWith("."))
+    return maybePartialClassName.startsWith(".")
         ? packageName + maybePartialClassName
         : maybePartialClassName;
   }
@@ -558,11 +566,13 @@ public class AndroidManifest implements UsesSdk {
     return children;
   }
 
-  private Integer getTagAttributeIntValue(final Document doc, final String tag, final String attribute) {
+  private Integer getTagAttributeIntValue(
+      final Document doc, final String tag, final String attribute) {
     return getTagAttributeIntValue(doc, tag, attribute, null);
   }
 
-  private Integer getTagAttributeIntValue(final Document doc, final String tag, final String attribute, final Integer defaultValue) {
+  private Integer getTagAttributeIntValue(
+      final Document doc, final String tag, final String attribute, final Integer defaultValue) {
     String valueString = getTagAttributeText(doc, tag, attribute);
     if (valueString != null) {
       return Integer.parseInt(valueString);
@@ -598,6 +608,11 @@ public class AndroidManifest implements UsesSdk {
     return labelRef;
   }
 
+  public String getAppComponentFactory() {
+    parseAndroidManifest();
+    return appComponentFactory;
+  }
+
   /**
    * Returns the minimum Android SDK version that this package expects to be runnable on, as
    * specified in the manifest.
@@ -605,12 +620,12 @@ public class AndroidManifest implements UsesSdk {
    * <p>Note that if {@link #targetSdkVersion} isn't set, this value changes the behavior of some
    * Android code (notably {@link android.content.SharedPreferences}) to emulate old bugs.
    *
-   * @return the minimum SDK version, or Jelly Bean (16) by default
+   * @return the minimum SDK version, or Lollipop (21) by default
    */
   @Override
   public int getMinSdkVersion() {
     parseAndroidManifest();
-    return minSdkVersion == null ? 16 : minSdkVersion;
+    return minSdkVersion == null ? 21 : minSdkVersion;
   }
 
   /**
@@ -620,7 +635,7 @@ public class AndroidManifest implements UsesSdk {
    * <p>Note that this value changes the behavior of some Android code (notably {@link
    * android.content.SharedPreferences}) to emulate old bugs.
    *
-   * @return the minimum SDK version, or Jelly Bean (16) by default
+   * @return the target SDK version, or Lollipop (21) by default
    */
   @Override
   public int getTargetSdkVersion() {
@@ -647,7 +662,7 @@ public class AndroidManifest implements UsesSdk {
   public Map<String, Object> getApplicationMetaData() {
     parseAndroidManifest();
     if (applicationMetaData == null) {
-      applicationMetaData = new MetaData(Collections.<Node>emptyList());
+      applicationMetaData = new MetaData(Collections.emptyList());
     }
     return applicationMetaData.getValueMap();
   }
@@ -657,7 +672,8 @@ public class AndroidManifest implements UsesSdk {
   }
 
   public List<ResourcePath> getIncludedResourcePaths() {
-    Collection<ResourcePath> resourcePaths = new LinkedHashSet<>(); // Needs stable ordering and no duplicates
+    Collection<ResourcePath> resourcePaths =
+        new LinkedHashSet<>(); // Needs stable ordering and no duplicates
     resourcePaths.add(getResourcePath());
     for (AndroidManifest libraryManifest : getLibraryManifests()) {
       resourcePaths.addAll(libraryManifest.getIncludedResourcePaths());
@@ -671,7 +687,7 @@ public class AndroidManifest implements UsesSdk {
   }
 
   public List<AndroidManifest> getLibraryManifests() {
-    assert(libraryManifests != null);
+    assert (libraryManifests != null);
     return Collections.unmodifiableList(libraryManifests);
   }
 
@@ -722,7 +738,8 @@ public class AndroidManifest implements UsesSdk {
     return serviceDatas.get(serviceClassName);
   }
 
-  private static String getTagAttributeText(final Document doc, final String tag, final String attribute) {
+  private static String getTagAttributeText(
+      final Document doc, final String tag, final String attribute) {
     NodeList elementsByTagName = doc.getElementsByTagName(tag);
     for (int i = 0; i < elementsByTagName.getLength(); ++i) {
       Node item = elementsByTagName.item(i);
@@ -739,33 +756,28 @@ public class AndroidManifest implements UsesSdk {
     if (this == o) {
       return true;
     }
-    if (o == null || getClass() != o.getClass()) {
+    if (!(o instanceof AndroidManifest)) {
       return false;
     }
 
     AndroidManifest that = (AndroidManifest) o;
 
-    if (androidManifestFile != null ? !androidManifestFile.equals(that.androidManifestFile)
-        : that.androidManifestFile != null) {
+    if (!Objects.equals(androidManifestFile, that.androidManifestFile)) {
       return false;
     }
-    if (resDirectory != null ? !resDirectory.equals(that.resDirectory)
-        : that.resDirectory != null) {
+    if (!Objects.equals(resDirectory, that.resDirectory)) {
       return false;
     }
-    if (assetsDirectory != null ? !assetsDirectory.equals(that.assetsDirectory)
-        : that.assetsDirectory != null) {
+    if (!Objects.equals(assetsDirectory, that.assetsDirectory)) {
       return false;
     }
-    if (overridePackageName != null ? !overridePackageName.equals(that.overridePackageName)
-        : that.overridePackageName != null) {
+    if (!Objects.equals(overridePackageName, that.overridePackageName)) {
       return false;
     }
-    if (libraryManifests != null ? !libraryManifests.equals(that.libraryManifests)
-        : that.libraryManifests != null) {
+    if (!Objects.equals(libraryManifests, that.libraryManifests)) {
       return false;
     }
-    return apkFile != null ? apkFile.equals(that.apkFile) : that.apkFile == null;
+    return Objects.equals(apkFile, that.apkFile);
   }
 
   @Override
@@ -829,18 +841,20 @@ public class AndroidManifest implements UsesSdk {
     return apkFile;
   }
 
-  /** @deprecated Do not use. */
+  /**
+   * @deprecated Do not use.
+   */
   @Deprecated
-  public boolean supportsLegacyResourcesMode() {
+  @SuppressWarnings("InlineMeSuggester")
+  public final boolean supportsLegacyResourcesMode() {
     return true;
   }
 
-  /** @deprecated Do not use. */
+  /**
+   * @deprecated Do not use.
+   */
   @Deprecated
-  synchronized public boolean supportsBinaryResourcesMode() {
-    if (supportsBinaryResourcesMode == null) {
-      supportsBinaryResourcesMode = apkFile != null && Files.exists(apkFile);
-    }
-    return supportsBinaryResourcesMode;
+  public synchronized boolean supportsBinaryResourcesMode() {
+    return true;
   }
 }

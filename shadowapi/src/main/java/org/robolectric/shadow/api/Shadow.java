@@ -4,13 +4,16 @@ import org.robolectric.internal.IShadow;
 import org.robolectric.util.ReflectionHelpers.ClassParameter;
 
 public class Shadow {
-  @SuppressWarnings("unused")
+  @SuppressWarnings({"unused", "FieldMayBeFinal"})
   private static IShadow SHADOW_IMPL;
 
   static {
     try {
-      SHADOW_IMPL = Class.forName("org.robolectric.internal.bytecode.ShadowImpl")
-          .asSubclass(IShadow.class).getDeclaredConstructor().newInstance();
+      SHADOW_IMPL =
+          Class.forName("org.robolectric.internal.bytecode.ShadowImpl")
+              .asSubclass(IShadow.class)
+              .getDeclaredConstructor()
+              .newInstance();
     } catch (Exception e) {
       throw new RuntimeException(e);
     }
@@ -18,6 +21,7 @@ public class Shadow {
 
   /**
    * Retrieve corresponding Shadow of the object.
+   *
    * @since 3.3
    */
   @SuppressWarnings("TypeParameterUnusedInFormals")
@@ -38,7 +42,7 @@ public class Shadow {
     }
   }
 
-  public static <T> T newInstance(Class<T> clazz, Class[] parameterTypes, Object[] params) {
+  public static <T> T newInstance(Class<T> clazz, Class<?>[] parameterTypes, Object[] params) {
     return SHADOW_IMPL.newInstance(clazz, parameterTypes, params);
   }
 
@@ -56,27 +60,38 @@ public class Shadow {
     return SHADOW_IMPL.directlyOn(shadowedObject, clazz);
   }
 
-  @SuppressWarnings(value = {"unchecked", "TypeParameterUnusedInFormals"})
-  public static <R> R directlyOn(Object shadowedObject, String clazzName, String methodName, ClassParameter... paramValues) {
+  @SuppressWarnings("TypeParameterUnusedInFormals")
+  public static <R> R directlyOn(
+      Object shadowedObject,
+      String clazzName,
+      String methodName,
+      ClassParameter<?>... paramValues) {
     return SHADOW_IMPL.directlyOn(shadowedObject, clazzName, methodName, paramValues);
   }
 
   @SuppressWarnings("TypeParameterUnusedInFormals")
-  public static <R, T> R directlyOn(T shadowedObject, Class<T> clazz, String methodName, ClassParameter... paramValues) {
+  public static <R, T> R directlyOn(
+      T shadowedObject, Class<T> clazz, String methodName, ClassParameter<?>... paramValues) {
     return SHADOW_IMPL.directlyOn(shadowedObject, clazz, methodName, paramValues);
   }
 
   @SuppressWarnings("TypeParameterUnusedInFormals")
-  public static <R, T> R directlyOn(Class<T> clazz, String methodName, ClassParameter... paramValues) {
+  public static <R, T> R directlyOn(
+      Class<T> clazz, String methodName, ClassParameter<?>... paramValues) {
     return SHADOW_IMPL.directlyOn(clazz, methodName, paramValues);
   }
 
-  public static <R> R invokeConstructor(Class<? extends R> clazz, R instance, ClassParameter... paramValues) {
+  public static <R> R invokeConstructor(
+      Class<? extends R> clazz, R instance, ClassParameter<?>... paramValues) {
     return SHADOW_IMPL.invokeConstructor(clazz, instance, paramValues);
   }
 
   public static String directMethodName(String className, String methodName) {
     return SHADOW_IMPL.directMethodName(className, methodName);
+  }
+
+  public static String directNativeMethodName(String className, String methodName) {
+    return SHADOW_IMPL.directNativeMethodName(className, methodName);
   }
 
   public static void directInitialize(Class<?> clazz) {

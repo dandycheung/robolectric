@@ -4,12 +4,14 @@ import static android.content.pm.ShortcutManager.FLAG_MATCH_CACHED;
 import static android.content.pm.ShortcutManager.FLAG_MATCH_DYNAMIC;
 import static android.content.pm.ShortcutManager.FLAG_MATCH_MANIFEST;
 import static android.content.pm.ShortcutManager.FLAG_MATCH_PINNED;
+import static android.os.Build.VERSION_CODES.O;
 import static android.os.Build.VERSION_CODES.R;
 import static com.google.common.truth.Truth.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 import static org.robolectric.Shadows.shadowOf;
 
+import android.app.Activity;
 import android.content.Context;
 import android.content.pm.ShortcutInfo;
 import android.content.pm.ShortcutManager;
@@ -22,6 +24,8 @@ import java.util.List;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.robolectric.Robolectric;
+import org.robolectric.android.controller.ActivityController;
 import org.robolectric.annotation.Config;
 import org.robolectric.shadow.api.Shadow;
 
@@ -116,8 +120,7 @@ public final class ShadowShortcutManagerTest {
   public void testRemoveDynamicShortcuts() {
     ShortcutInfo shortcut1 = createShortcut("id1");
     ShortcutInfo shortcut2 = createShortcut("id2");
-    shortcutManager.addDynamicShortcuts(
-        ImmutableList.of(shortcut1, shortcut2));
+    shortcutManager.addDynamicShortcuts(ImmutableList.of(shortcut1, shortcut2));
     assertThat(shortcutManager.getDynamicShortcuts()).hasSize(2);
 
     shortcutManager.removeDynamicShortcuts(ImmutableList.of("id1"));
@@ -141,8 +144,7 @@ public final class ShadowShortcutManagerTest {
   public void testUpdateShortcut_dynamic() {
     ShortcutInfo shortcut1 = createShortcutWithLabel("id1", "original");
     ShortcutInfo shortcutUpdated = createShortcutWithLabel("id1", "updated");
-    shortcutManager.addDynamicShortcuts(
-        ImmutableList.of(shortcut1));
+    shortcutManager.addDynamicShortcuts(ImmutableList.of(shortcut1));
     assertThat(shortcutManager.getDynamicShortcuts()).containsExactly(shortcut1);
 
     shortcutManager.updateShortcuts(ImmutableList.of(shortcutUpdated));
@@ -154,8 +156,7 @@ public final class ShadowShortcutManagerTest {
   public void testUpdateShortcut_pinned() {
     ShortcutInfo shortcut1 = createShortcutWithLabel("id1", "original");
     ShortcutInfo shortcutUpdated = createShortcutWithLabel("id1", "updated");
-    shortcutManager.requestPinShortcut(
-        shortcut1, null /* resultIntent */);
+    shortcutManager.requestPinShortcut(shortcut1, null /* resultIntent */);
     assertThat(shortcutManager.getPinnedShortcuts()).containsExactly(shortcut1);
 
     shortcutManager.updateShortcuts(ImmutableList.of(shortcutUpdated));
@@ -388,5 +389,32 @@ public final class ShadowShortcutManagerTest {
     return new ShortcutInfo.Builder(ApplicationProvider.getApplicationContext(), id)
         .setLongLabel(longLabel)
         .build();
+  }
+
+  @Test
+  @Config(minSdk = O)
+  public void shortcutManager_activityContextEnabled_differentInstancesCheckRateLimiting() {
+    String originalProperty = System.getProperty("robolectric.createActivityContexts", "");
+    System.setProperty("robolectric.createActivityContexts", "true");
+    try (ActivityController<Activity> controller =
+        Robolectric.buildActivity(Activity.class).setup()) {
+      ShortcutManager applicationShortcutManager =
+          (ShortcutManager)
+              ApplicationProvider.getApplicationContext()
+                  .getSystemService(Context.SHORTCUT_SERVICE);
+
+      Activity activity = controller.get();
+      ShortcutManager activityShortcutManager =
+          (ShortcutManager) activity.getSystemService(Context.SHORTCUT_SERVICE);
+
+      assertThat(applicationShortcutManager).isNotSameInstanceAs(activityShortcutManager);
+
+      boolean applicationRateLimiting = applicationShortcutManager.isRateLimitingActive();
+      boolean activityRateLimiting = activityShortcutManager.isRateLimitingActive();
+
+      assertThat(activityRateLimiting).isEqualTo(applicationRateLimiting);
+    } finally {
+      System.setProperty("robolectric.createActivityContexts", originalProperty);
+    }
   }
 }

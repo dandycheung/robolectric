@@ -1,5 +1,8 @@
 package org.robolectric.android.controller;
 
+import static android.os.Build.VERSION_CODES.O_MR1;
+import static android.os.Build.VERSION_CODES.P;
+import static android.os.Build.VERSION_CODES.Q;
 import static com.google.common.truth.Truth.assertThat;
 import static com.google.common.truth.Truth.assertWithMessage;
 import static org.robolectric.Shadows.shadowOf;
@@ -8,10 +11,10 @@ import static org.robolectric.shadows.ShadowLooper.shadowMainLooper;
 
 import android.app.Activity;
 import android.app.Fragment;
+import android.app.WindowConfiguration;
 import android.content.ComponentName;
 import android.content.Intent;
 import android.content.res.Configuration;
-import android.os.Build;
 import android.os.Build.VERSION_CODES;
 import android.os.Bundle;
 import android.os.Handler;
@@ -25,6 +28,7 @@ import androidx.test.core.app.ApplicationProvider;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import java.util.ArrayList;
 import java.util.List;
+import javax.annotation.Nonnull;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -98,14 +102,14 @@ public class ActivityControllerTest {
   }
 
   @Test
-  public void shouldSetIntent() throws Exception {
+  public void shouldSetIntent() {
     MyActivity myActivity = controller.create().get();
     assertThat(myActivity.getIntent()).isNotNull();
     assertThat(myActivity.getIntent().getComponent()).isEqualTo(componentName);
   }
 
   @Test
-  public void shouldSetIntentComponentWithCustomIntentWithoutComponentSet() throws Exception {
+  public void shouldSetIntentComponentWithCustomIntentWithoutComponentSet() {
     MyActivity myActivity =
         Robolectric.buildActivity(MyActivity.class, new Intent(Intent.ACTION_VIEW)).create().get();
     assertThat(myActivity.getIntent().getAction()).isEqualTo(Intent.ACTION_VIEW);
@@ -113,7 +117,7 @@ public class ActivityControllerTest {
   }
 
   @Test
-  public void shouldSetIntentForGivenActivityInstance() throws Exception {
+  public void shouldSetIntentForGivenActivityInstance() {
     ActivityController<MyActivity> activityController =
         ActivityController.of(new MyActivity()).create();
     assertThat(activityController.get().getIntent()).isNotNull();
@@ -121,7 +125,7 @@ public class ActivityControllerTest {
 
   @Test
   @LooperMode(LEGACY)
-  public void whenLooperIsNotPaused_shouldCreateWithMainLooperPaused() throws Exception {
+  public void whenLooperIsNotPaused_shouldCreateWithMainLooperPaused() {
     ShadowLooper.unPauseMainLooper();
     controller.create();
     assertThat(shadowOf(Looper.getMainLooper()).isPaused()).isFalse();
@@ -129,7 +133,7 @@ public class ActivityControllerTest {
   }
 
   @Test
-  public void whenLooperIsAlreadyPaused_shouldCreateWithMainLooperPaused() throws Exception {
+  public void whenLooperIsAlreadyPaused_shouldCreateWithMainLooperPaused() {
     shadowMainLooper().pause();
     controller.create();
     assertThat(transcript).contains("finishedOnCreate");
@@ -181,7 +185,6 @@ public class ActivityControllerTest {
   }
 
   @Test
-  @Config(minSdk = VERSION_CODES.JELLY_BEAN_MR1)
   public void destroy_cleansUpWindowManagerState() {
     WindowManager windowManager = controller.get().getWindowManager();
     ShadowWindowManagerImpl shadowWindowManager =
@@ -250,8 +253,7 @@ public class ActivityControllerTest {
   }
 
   @Test
-  @Config(sdk = Build.VERSION_CODES.KITKAT)
-  public void attach_shouldWorkWithAPI19() {
+  public void attach_shouldWork() {
     MyActivity activity = Robolectric.buildActivity(MyActivity.class).create().get();
     assertThat(activity).isNotNull();
   }
@@ -292,40 +294,58 @@ public class ActivityControllerTest {
         Robolectric.buildActivity(ConfigAwareActivity.class).setup();
     transcript.clear();
     configController.configurationChange(config);
-    assertThat(transcript).contains("onConfigurationChanged");
+    assertThat(transcript).containsAtLeast("onConfigurationChanged", "View.onConfigurationChanged");
     assertThat(configController.get().getResources().getConfiguration().fontScale)
         .isEqualTo(newFontScale);
   }
 
+  @Config(minSdk = P)
   @Test
-  public void configurationChange_callsLifecycleMethodsAndAppliesConfigWhenAnyNonManaged() {
+  public void configurationChange_windowConfigurationChanges_doesNotRecreateActivity() {
     Configuration config =
         new Configuration(
             ApplicationProvider.getApplicationContext().getResources().getConfiguration());
-    final float newFontScale = config.fontScale *= 2;
-    final int newOrientation = config.orientation = (config.orientation + 1) % 3;
+    WindowConfiguration windowConfiguration = config.windowConfiguration;
+    windowConfiguration.setWindowingMode(WindowConfiguration.WINDOWING_MODE_FULLSCREEN);
 
-    ActivityController<ConfigAwareActivity> configController =
+    ActivityController<ConfigAwareActivity> controller =
         Robolectric.buildActivity(ConfigAwareActivity.class).setup();
     transcript.clear();
-    configController.configurationChange(config);
-    assertThat(transcript)
-        .containsAtLeast("onPause", "onStop", "onDestroy", "onCreate", "onStart", "onResume");
-    assertThat(configController.get().getResources().getConfiguration().fontScale)
-        .isEqualTo(newFontScale);
-    assertThat(configController.get().getResources().getConfiguration().orientation)
-        .isEqualTo(newOrientation);
+    controller.configurationChange(config);
+
+    assertThat(transcript).containsAtLeast("onConfigurationChanged", "View.onConfigurationChanged");
+    assertThat(
+            controller
+                .get()
+                .getResources()
+                .getConfiguration()
+                .windowConfiguration
+                .getWindowingMode())
+        .isEqualTo(WindowConfiguration.WINDOWING_MODE_FULLSCREEN);
   }
 
   @Test
-  @Config(qualifiers = "land")
-  public void noArgsConfigurationChange_appliesChangedSystemConfiguration() throws Exception {
+  @Config(maxSdk = O_MR1)
+  public void configurationChange_callsLifecycleMethodsAndAppliesConfigWhenAnyNonManaged_beforeP() {
+    configurationChange_callsLifecycleMethodsAndAppliesConfigWhenAnyNonManaged(
+        "onSaveInstanceState", "onStop");
+  }
+
+  @Test
+  @Config(minSdk = P)
+  public void configurationChange_callsLifecycleMethodsAndAppliesConfigWhenAnyNonManaged_fromP() {
+    configurationChange_callsLifecycleMethodsAndAppliesConfigWhenAnyNonManaged(
+        "onStop", "onSaveInstanceState");
+  }
+
+  @Test
+  @Config(qualifiers = "sw600dp")
+  public void noArgsConfigurationChange_appliesChangedSystemConfiguration() {
     ActivityController<ConfigAwareActivity> configController =
         Robolectric.buildActivity(ConfigAwareActivity.class).setup();
-    RuntimeEnvironment.setQualifiers("port");
+    RuntimeEnvironment.setQualifiers("sw800dp");
     configController.configurationChange();
-    assertThat(configController.get().newConfig.orientation)
-        .isEqualTo(Configuration.ORIENTATION_PORTRAIT);
+    assertThat(configController.get().newConfig.smallestScreenWidthDp).isEqualTo(800);
   }
 
   @Test
@@ -367,6 +387,38 @@ public class ActivityControllerTest {
   }
 
   @Test
+  public void isChangingConfiguration() {
+    try (ActivityController<ConfigChangeActivity> controller =
+        Robolectric.buildActivity(ConfigChangeActivity.class)) {
+
+      controller.recreate();
+
+      assertThat(transcript).containsExactly("onPause true", "onStop true", "onDestroy true");
+    }
+  }
+
+  private static class ConfigChangeActivity extends Activity {
+
+    @Override
+    public void onPause() {
+      super.onPause();
+      transcript.add("onPause " + isChangingConfigurations());
+    }
+
+    @Override
+    public void onStop() {
+      super.onStop();
+      transcript.add("onStop " + isChangingConfigurations());
+    }
+
+    @Override
+    public void onDestroy() {
+      super.onDestroy();
+      transcript.add("onDestroy " + isChangingConfigurations());
+    }
+  }
+
+  @Test
   public void windowFocusChanged() {
     controller.setup();
     assertThat(transcript).doesNotContain("finishedOnWindowFocusChanged");
@@ -380,10 +432,23 @@ public class ActivityControllerTest {
   }
 
   @Test
+  @Config(minSdk = VERSION_CODES.Q)
+  public void onTopActivityResumedCalledWithSetup() {
+    controller.setup();
+    assertThat(transcript).contains("finishedOnTopResumedActivityChanged");
+  }
+
+  @Test
+  @Config(maxSdk = VERSION_CODES.P)
+  public void onTopActivityResumedNotCalledWithSetupPreQ() {
+    controller.setup();
+    assertThat(transcript).doesNotContain("finishedOnTopResumedActivityChanged");
+  }
+
+  @Test
   public void close_transitionsActivityStateToDestroyed() {
     Robolectric.buildActivity(MyActivity.class).close();
     assertThat(transcript).isEmpty();
-    transcript.clear();
 
     Robolectric.buildActivity(MyActivity.class).create().close();
     assertThat(transcript)
@@ -404,24 +469,27 @@ public class ActivityControllerTest {
     transcript.clear();
 
     Robolectric.buildActivity(MyActivity.class).setup().close();
-    assertThat(transcript)
-        .containsExactly(
-            "onCreate",
-            "finishedOnCreate",
-            "onStart",
-            "finishedOnStart",
-            "onPostCreate",
-            "finishedOnPostCreate",
-            "onResume",
-            "finishedOnResume",
-            "onPostResume",
-            "finishedOnPostResume",
-            "onPause",
-            "finishedOnPause",
-            "onStop",
-            "finishedOnStop",
-            "onDestroy",
-            "finishedOnDestroy");
+    List<String> expectedStringList = new ArrayList<>();
+    expectedStringList.add("onCreate");
+    expectedStringList.add("finishedOnCreate");
+    expectedStringList.add("onStart");
+    expectedStringList.add("finishedOnStart");
+    expectedStringList.add("onPostCreate");
+    expectedStringList.add("finishedOnPostCreate");
+    expectedStringList.add("onResume");
+    expectedStringList.add("finishedOnResume");
+    expectedStringList.add("onPostResume");
+    expectedStringList.add("finishedOnPostResume");
+    if (RuntimeEnvironment.getApiLevel() >= Q) {
+      expectedStringList.add("finishedOnTopResumedActivityChanged");
+    }
+    expectedStringList.add("onPause");
+    expectedStringList.add("finishedOnPause");
+    expectedStringList.add("onStop");
+    expectedStringList.add("finishedOnStop");
+    expectedStringList.add("onDestroy");
+    expectedStringList.add("finishedOnDestroy");
+    assertThat(transcript).containsExactly(expectedStringList.toArray());
   }
 
   @Test
@@ -430,39 +498,84 @@ public class ActivityControllerTest {
         Robolectric.buildActivity(MyActivity.class).setup()) {
       // no-op
     }
+    List<String> expectedStringList = new ArrayList<>();
+    expectedStringList.add("onCreate");
+    expectedStringList.add("finishedOnCreate");
+    expectedStringList.add("onStart");
+    expectedStringList.add("finishedOnStart");
+    expectedStringList.add("onPostCreate");
+    expectedStringList.add("finishedOnPostCreate");
+    expectedStringList.add("onResume");
+    expectedStringList.add("finishedOnResume");
+    expectedStringList.add("onPostResume");
+    expectedStringList.add("finishedOnPostResume");
+    if (RuntimeEnvironment.getApiLevel() >= Q) {
+      expectedStringList.add("finishedOnTopResumedActivityChanged");
+    }
+    expectedStringList.add("onPause");
+    expectedStringList.add("finishedOnPause");
+    expectedStringList.add("onStop");
+    expectedStringList.add("finishedOnStop");
+    expectedStringList.add("onDestroy");
+    expectedStringList.add("finishedOnDestroy");
+    assertThat(transcript).containsExactly(expectedStringList.toArray());
+  }
+
+  private void configurationChange_callsLifecycleMethodsAndAppliesConfigWhenAnyNonManaged(
+      String secondExpected, String thirdExpected) {
+    Configuration config =
+        new Configuration(
+            ApplicationProvider.getApplicationContext().getResources().getConfiguration());
+    final float newFontScale = config.fontScale *= 2;
+    final int newOrientation = config.orientation = (config.orientation + 1) % 3;
+
+    ActivityController<ConfigAwareActivity> configController =
+        Robolectric.buildActivity(ConfigAwareActivity.class).setup();
+    transcript.clear();
+    configController.configurationChange(config);
     assertThat(transcript)
-        .containsExactly(
-            "onCreate",
-            "finishedOnCreate",
-            "onStart",
-            "finishedOnStart",
-            "onPostCreate",
-            "finishedOnPostCreate",
-            "onResume",
-            "finishedOnResume",
-            "onPostResume",
-            "finishedOnPostResume",
+        .containsAtLeast(
             "onPause",
-            "finishedOnPause",
-            "onStop",
-            "finishedOnStop",
+            secondExpected,
+            thirdExpected,
             "onDestroy",
-            "finishedOnDestroy");
+            "onCreate",
+            "onStart",
+            "onResume")
+        .inOrder();
+    assertThat(configController.get().getResources().getConfiguration().fontScale)
+        .isEqualTo(newFontScale);
+    assertThat(configController.get().getResources().getConfiguration().orientation)
+        .isEqualTo(newOrientation);
   }
 
   public static class MyActivity extends Activity {
     @Override
-    protected void onRestoreInstanceState(Bundle savedInstanceState) {
+    protected void onRestoreInstanceState(@Nonnull Bundle savedInstanceState) {
       super.onRestoreInstanceState(savedInstanceState);
       transcribeWhilePaused("onRestoreInstanceState");
       transcript.add("finishedOnRestoreInstanceState");
     }
 
     @Override
+    protected void onSaveInstanceState(@Nonnull Bundle outState) {
+      super.onSaveInstanceState(outState);
+      transcribeWhilePaused("onSaveInstanceState");
+      transcript.add("finishedOnSaveInstanceState");
+    }
+
+    @Override
     protected void onCreate(Bundle savedInstanceState) {
       super.onCreate(savedInstanceState);
       getWindow().requestFeature(Window.FEATURE_ACTION_BAR);
-      setContentView(new LinearLayout(ApplicationProvider.getApplicationContext()));
+      setContentView(
+          new LinearLayout(this) {
+            @Override
+            protected void onConfigurationChanged(Configuration configuration) {
+              super.onConfigurationChanged(configuration);
+              transcribeWhilePaused("View.onConfigurationChanged");
+            }
+          });
       transcribeWhilePaused("onCreate");
       transcript.add("finishedOnCreate");
     }
@@ -538,7 +651,7 @@ public class ActivityControllerTest {
     }
 
     @Override
-    public void onConfigurationChanged(Configuration newConfig) {
+    public void onConfigurationChanged(@Nonnull Configuration newConfig) {
       super.onConfigurationChanged(newConfig);
       transcribeWhilePaused("onConfigurationChanged");
       transcript.add("finishedOnConfigurationChanged");
@@ -548,6 +661,12 @@ public class ActivityControllerTest {
     public void onWindowFocusChanged(boolean newFocus) {
       super.onWindowFocusChanged(newFocus);
       transcript.add("finishedOnWindowFocusChanged");
+    }
+
+    @Override
+    public void onTopResumedActivityChanged(boolean isTopResumedActivity) {
+      super.onTopResumedActivityChanged(isTopResumedActivity);
+      transcript.add("finishedOnTopResumedActivityChanged");
     }
 
     private void transcribeWhilePaused(final String event) {
@@ -568,13 +687,13 @@ public class ActivityControllerTest {
     }
 
     @Override
-    public void onSaveInstanceState(Bundle outState) {
+    public void onSaveInstanceState(@Nonnull Bundle outState) {
       super.onSaveInstanceState(outState);
       outState.putSerializable("test", new Exception());
     }
 
     @Override
-    public void onConfigurationChanged(Configuration newConfig) {
+    public void onConfigurationChanged(@Nonnull Configuration newConfig) {
       this.newConfig = new Configuration(newConfig);
       super.onConfigurationChanged(newConfig);
     }

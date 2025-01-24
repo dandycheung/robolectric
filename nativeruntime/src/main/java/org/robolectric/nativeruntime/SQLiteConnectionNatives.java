@@ -27,10 +27,6 @@ import java.util.function.UnaryOperator;
  */
 public class SQLiteConnectionNatives {
 
-  static {
-    NativeRuntimeLoader.ensureLoaded();
-  }
-
   private SQLiteConnectionNatives() {}
 
   public static native long nativeOpen(
@@ -81,7 +77,8 @@ public class SQLiteConnectionNatives {
   public static native void nativeResetStatementAndClearBindings(
       long connectionPtr, long statementPtr);
 
-  public static native void nativeExecute(long connectionPtr, long statementPtr);
+  public static native void nativeExecute(
+      long connectionPtr, long statementPtr, boolean isPragmaStmt);
 
   public static native long nativeExecuteForLong(long connectionPtr, long statementPtr);
 

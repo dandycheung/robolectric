@@ -9,20 +9,22 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 
 class NumberReturner {
-  fun returnNumber() = 0
+  fun returnNumber() = RETURN_NUMBER
+
+  companion object {
+    private const val RETURN_NUMBER = 0
+  }
 }
 
 @RunWith(RobolectricTestRunner::class)
 class MockkInitTestCase {
 
-  @MockK
-  lateinit var returner: NumberReturner
+  @MockK lateinit var returner: NumberReturner
 
-  @Before
-  fun setUp() = MockKAnnotations.init(this)
+  @Before fun setUp() = MockKAnnotations.init(this)
 
   @Test
-  fun `Mockk1`() {
+  fun mockk1() {
     every { returner.returnNumber() } returns 1
     assert(returner.returnNumber() == 1)
   }

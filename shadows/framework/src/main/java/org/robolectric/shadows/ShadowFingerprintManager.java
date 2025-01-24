@@ -10,6 +10,8 @@ import android.hardware.fingerprint.FingerprintManager;
 import android.hardware.fingerprint.FingerprintManager.AuthenticationCallback;
 import android.hardware.fingerprint.FingerprintManager.AuthenticationResult;
 import android.hardware.fingerprint.FingerprintManager.CryptoObject;
+import android.hardware.fingerprint.FingerprintSensorPropertiesInternal;
+import android.os.Build.VERSION_CODES;
 import android.os.CancellationSignal;
 import android.os.Handler;
 import android.util.Log;
@@ -22,24 +24,34 @@ import org.robolectric.RuntimeEnvironment;
 import org.robolectric.annotation.HiddenApi;
 import org.robolectric.annotation.Implementation;
 import org.robolectric.annotation.Implements;
+import org.robolectric.annotation.Resetter;
 import org.robolectric.util.ReflectionHelpers;
 import org.robolectric.util.ReflectionHelpers.ClassParameter;
 
 /** Provides testing APIs for {@link FingerprintManager} */
 @SuppressWarnings("NewApi")
-@Implements(FingerprintManager.class)
+@Implements(value = FingerprintManager.class, minSdk = M)
 public class ShadowFingerprintManager {
 
   private static final String TAG = "ShadowFingerprintManager";
 
-  private boolean isHardwareDetected;
-  protected CryptoObject pendingCryptoObject;
-  private AuthenticationCallback pendingCallback;
-  private List<Fingerprint> fingerprints = Collections.emptyList();
+  private static boolean isHardwareDetected;
+  protected static CryptoObject pendingCryptoObject;
+  private static AuthenticationCallback pendingCallback;
+  private static List<Fingerprint> fingerprints = Collections.emptyList();
+
+  @Resetter
+  public static void reset() {
+    isHardwareDetected = false;
+    pendingCryptoObject = null;
+    pendingCallback = null;
+    fingerprints = Collections.emptyList();
+  }
 
   /**
    * Simulates a successful fingerprint authentication. An authentication request must have been
-   * issued with {@link FingerprintManager#authenticate(CryptoObject, CancellationSignal, int, AuthenticationCallback, Handler)} and not cancelled.
+   * issued with {@link FingerprintManager#authenticate(CryptoObject, CancellationSignal, int,
+   * AuthenticationCallback, Handler)} and not cancelled.
    */
   public void authenticationSucceeds() {
     if (pendingCallback == null) {
@@ -67,8 +79,9 @@ public class ShadowFingerprintManager {
   }
 
   /**
-   * Simulates a failed fingerprint authentication. An authentication request must have been
-   * issued with {@link FingerprintManager#authenticate(CryptoObject, CancellationSignal, int, AuthenticationCallback, Handler)} and not cancelled.
+   * Simulates a failed fingerprint authentication. An authentication request must have been issued
+   * with {@link FingerprintManager#authenticate(CryptoObject, CancellationSignal, int,
+   * AuthenticationCallback, Handler)} and not cancelled.
    */
   public void authenticationFails() {
     if (pendingCallback == null) {
@@ -82,7 +95,7 @@ public class ShadowFingerprintManager {
    * Success or failure can be simulated with a subsequent call to {@link #authenticationSucceeds()}
    * or {@link #authenticationFails()}.
    */
-  @Implementation(minSdk = M)
+  @Implementation
   protected void authenticate(
       CryptoObject crypto,
       CancellationSignal cancel,
@@ -98,10 +111,11 @@ public class ShadowFingerprintManager {
         Log.w(TAG, "authentication already canceled");
         return;
       } else {
-        cancel.setOnCancelListener(() -> {
-          this.pendingCallback = null;
-          this.pendingCryptoObject = null;
-        });
+        cancel.setOnCancelListener(
+            () -> {
+              this.pendingCallback = null;
+              this.pendingCryptoObject = null;
+            });
       }
     }
 
@@ -120,10 +134,10 @@ public class ShadowFingerprintManager {
   }
 
   /**
-   * Returns {@code false} by default, or the value specified via
-   * {@link #setHasEnrolledFingerprints(boolean)}.
+   * Returns {@code false} by default, or the value specified via {@link
+   * #setHasEnrolledFingerprints(boolean)}.
    */
-  @Implementation(minSdk = M)
+  @Implementation
   protected boolean hasEnrolledFingerprints() {
     return !fingerprints.isEmpty();
   }
@@ -132,7 +146,7 @@ public class ShadowFingerprintManager {
    * @return lists of current fingerprint items, the list be set via {@link #setDefaultFingerprints}
    */
   @HiddenApi
-  @Implementation(minSdk = M)
+  @Implementation
   protected List<Fingerprint> getEnrolledFingerprints() {
     return new ArrayList<>(fingerprints);
   }
@@ -169,9 +183,7 @@ public class ShadowFingerprintManager {
     this.fingerprints = Arrays.asList(fingerprints);
   }
 
-  /**
-   * Sets the return value of {@link FingerprintManager#isHardwareDetected()}.
-   */
+  /** Sets the return value of {@link FingerprintManager#isHardwareDetected()}. */
   public void setIsHardwareDetected(boolean isHardwareDetected) {
     this.isHardwareDetected = isHardwareDetected;
   }
@@ -182,5 +194,10 @@ public class ShadowFingerprintManager {
   @Implementation(minSdk = M)
   protected boolean isHardwareDetected() {
     return this.isHardwareDetected;
+  }
+
+  @Implementation(minSdk = VERSION_CODES.S)
+  protected List<FingerprintSensorPropertiesInternal> getSensorPropertiesInternal() {
+    return new ArrayList<>();
   }
 }

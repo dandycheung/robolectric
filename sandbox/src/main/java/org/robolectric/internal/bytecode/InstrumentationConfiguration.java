@@ -3,37 +3,46 @@ package org.robolectric.internal.bytecode;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
-import com.google.common.collect.Sets;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 import org.objectweb.asm.tree.MethodInsnNode;
 import org.robolectric.annotation.internal.DoNotInstrument;
 import org.robolectric.annotation.internal.Instrument;
 import org.robolectric.shadow.api.Shadow;
 
-/**
- * Configuration rules for {@link SandboxClassLoader}.
- */
+/** Configuration rules for {@link SandboxClassLoader}. */
 public class InstrumentationConfiguration {
 
   public static Builder newBuilder() {
     return new Builder();
   }
 
-  static final Set<String> CLASSES_TO_ALWAYS_ACQUIRE = Sets.newHashSet(
-      RobolectricInternals.class.getName(),
-      InvokeDynamicSupport.class.getName(),
-      Shadow.class.getName(),
+  static final ImmutableSet<String> CLASSES_TO_ALWAYS_ACQUIRE =
+      ImmutableSet.of(
+          RobolectricInternals.class.getName(),
+          InvokeDynamicSupport.class.getName(),
+          Shadow.class.getName());
 
-      // these classes are deprecated and will be removed soon:
-      "org.robolectric.util.FragmentTestUtil",
-      "org.robolectric.util.FragmentTestUtil$FragmentUtilActivity"
-  );
+  static final ImmutableSet<String> PACKAGES_TO_NEVER_ACQUIRE =
+      ImmutableSet.of(
+          "com.sun",
+          "java",
+          "javax",
+          "jdk.internal",
+          "org.junit",
+          "org.robolectric.annotation.",
+          "org.robolectric.internal.",
+          "org.robolectric.pluginapi.",
+          "org.robolectric.util.",
+          "sun");
 
   // Must always acquire these as they change from API level to API level
   static final ImmutableSet<String> RESOURCES_TO_ALWAYS_ACQUIRE =
@@ -59,7 +68,7 @@ public class InstrumentationConfiguration {
       Collection<String> instrumentedPackages,
       Collection<String> instrumentedClasses,
       Collection<String> classesToNotAcquire,
-      Collection<String> packagesToNotAquire,
+      Collection<String> packagesToNotAcquire,
       Collection<String> classesToNotInstrument,
       Collection<String> packagesToNotInstrument,
       String classesToNotInstrumentRegex) {
@@ -68,7 +77,7 @@ public class InstrumentationConfiguration {
     this.instrumentedPackages = ImmutableList.copyOf(instrumentedPackages);
     this.instrumentedClasses = ImmutableSet.copyOf(instrumentedClasses);
     this.classesToNotAcquire = ImmutableSet.copyOf(classesToNotAcquire);
-    this.packagesToNotAcquire = ImmutableSet.copyOf(packagesToNotAquire);
+    this.packagesToNotAcquire = ImmutableSet.copyOf(packagesToNotAcquire);
     this.classesToNotInstrument = ImmutableSet.copyOf(classesToNotInstrument);
     this.packagesToNotInstrument = ImmutableSet.copyOf(packagesToNotInstrument);
     this.classesToNotInstrumentRegex = classesToNotInstrumentRegex;
@@ -93,7 +102,9 @@ public class InstrumentationConfiguration {
         && !classDetails.hasAnnotation(DoNotInstrument.class)
         && (isInInstrumentedPackage(classDetails.getName())
             || instrumentedClasses.contains(classDetails.getName())
-            || classDetails.hasAnnotation(Instrument.class));
+            || classDetails.hasAnnotation(Instrument.class))
+        && !classDetails.hasAnnotation(
+            "org.junit.runner.RunWith"); // Don't instrument test classes.
   }
 
   private boolean classMatchesExclusionRegex(String className) {
@@ -103,8 +114,8 @@ public class InstrumentationConfiguration {
   /**
    * Determine if {@link SandboxClassLoader} should load a given class.
    *
-   * @param   name The fully-qualified class name.
-   * @return  True if the class should be loaded.
+   * @param name The fully-qualified class name.
+   * @return True if the class should be loaded.
    */
   public boolean shouldAcquire(String name) {
     if (CLASSES_TO_ALWAYS_ACQUIRE.contains(name)) {
@@ -126,13 +137,18 @@ public class InstrumentationConfiguration {
       return true;
     }
 
-    for (String packageName : packagesToNotAcquire) {
-      if (name.startsWith(packageName)) return false;
+    for (String packageName : PACKAGES_TO_NEVER_ACQUIRE) {
+      if (name.startsWith(packageName)) {
+        return false;
+      }
     }
 
-    // R classes must be loaded from system CP
-    boolean isRClass = name.matches(".*\\.R(|\\$[a-z]+)$");
-    return !isRClass && !classesToNotAcquire.contains(name);
+    for (String packageName : packagesToNotAcquire) {
+      if (name.startsWith(packageName)) {
+        return false;
+      }
+    }
+    return !classesToNotAcquire.contains(name);
   }
 
   /**
@@ -142,6 +158,12 @@ public class InstrumentationConfiguration {
    * @return True if the resource should be loaded.
    */
   public boolean shouldAcquireResource(String name) {
+    if (name.contains("android_runtime")) {
+      return true;
+    }
+    if (name.contains("icudt75l.dat")) {
+      return true;
+    }
     return RESOURCES_TO_ALWAYS_ACQUIRE.contains(name);
   }
 
@@ -188,7 +210,6 @@ public class InstrumentationConfiguration {
     if (!instrumentedPackages.equals(that.instrumentedPackages)) return false;
     if (!instrumentedClasses.equals(that.instrumentedClasses)) return false;
     if (!interceptedMethods.equals(that.interceptedMethods)) return false;
-
 
     return true;
   }
@@ -251,9 +272,7 @@ public class InstrumentationConfiguration {
     public final Collection<String> packagesToNotInstrument = new HashSet<>();
     public String classesToNotInstrumentRegex;
 
-
-    public Builder() {
-    }
+    public Builder() {}
 
     public Builder(InstrumentationConfiguration classLoaderConfig) {
       instrumentedPackages.addAll(classLoaderConfig.instrumentedPackages);
@@ -317,13 +336,35 @@ public class InstrumentationConfiguration {
       return this;
     }
 
+    public InstrumentationConfiguration build() {
+      // Remove redundant packages, e.g. remove 'android.os' if 'android.' is present.
+      List<String> minimalPackages = new ArrayList<>(instrumentedPackages);
+      if (!instrumentedPackages.isEmpty()) {
+        Collections.sort(minimalPackages);
+        Iterator<String> iterator = minimalPackages.iterator();
+        String cur = iterator.next();
+        while (iterator.hasNext()) {
+          String element = iterator.next();
+          if (element.startsWith(cur)) {
+            iterator.remove();
+          } else {
+            cur = element;
+          }
+        }
+      }
+      // Remove redundant classes that are already specified by a package. We do this to avoid
+      // unnecessarily creating sandboxes if a class is specified to be instrumented via
+      // '@Config(shadows=...)'.
+      List<String> minimalClasses =
+          instrumentedClasses.stream()
+              .filter(className -> minimalPackages.stream().noneMatch(className::startsWith))
+              .collect(Collectors.toList());
 
-      public InstrumentationConfiguration build() {
       return new InstrumentationConfiguration(
           classNameTranslations,
           interceptedMethods,
-          instrumentedPackages,
-          instrumentedClasses,
+          minimalPackages,
+          minimalClasses,
           classesToNotAcquire,
           packagesToNotAcquire,
           classesToNotInstrument,

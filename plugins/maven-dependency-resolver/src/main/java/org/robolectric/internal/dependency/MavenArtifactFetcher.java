@@ -2,6 +2,7 @@ package org.robolectric.internal.dependency;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
 
+import com.google.auto.value.AutoValue;
 import com.google.common.base.Strings;
 import com.google.common.hash.HashCode;
 import com.google.common.hash.Hashing;
@@ -14,7 +15,9 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.InetSocketAddress;
 import java.net.MalformedURLException;
+import java.net.Proxy;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URL;
@@ -22,6 +25,7 @@ import java.net.URLConnection;
 import java.util.Base64;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
+import javax.annotation.Nonnull;
 import org.robolectric.util.Logger;
 
 /**
@@ -34,6 +38,8 @@ public class MavenArtifactFetcher {
   private final String repositoryUrl;
   private final String repositoryUserName;
   private final String repositoryPassword;
+  private final String proxyHost;
+  private final int proxyPort;
   private final File localRepositoryDir;
   private final ExecutorService executorService;
   private File stagingRepositoryDir;
@@ -42,11 +48,15 @@ public class MavenArtifactFetcher {
       String repositoryUrl,
       String repositoryUserName,
       String repositoryPassword,
+      String proxyHost,
+      int proxyPort,
       File localRepositoryDir,
       ExecutorService executorService) {
     this.repositoryUrl = repositoryUrl;
     this.repositoryUserName = repositoryUserName;
     this.repositoryPassword = repositoryPassword;
+    this.proxyHost = proxyHost;
+    this.proxyPort = proxyPort;
     this.localRepositoryDir = localRepositoryDir;
     this.executorService = executorService;
   }
@@ -62,9 +72,9 @@ public class MavenArtifactFetcher {
     try {
       createArtifactSubdirectory(artifact, stagingRepositoryDir);
       Futures.whenAllSucceed(
-              fetchToStagingRepository(artifact.pomSha1Path()),
+              fetchToStagingRepository(artifact.pomSha512Path()),
               fetchToStagingRepository(artifact.pomPath()),
-              fetchToStagingRepository(artifact.jarSha1Path()),
+              fetchToStagingRepository(artifact.jarSha512Path()),
               fetchToStagingRepository(artifact.jarPath()))
           .callAsync(
               () -> {
@@ -74,21 +84,35 @@ public class MavenArtifactFetcher {
                   return Futures.immediateFuture(null);
                 }
                 createArtifactSubdirectory(artifact, localRepositoryDir);
-                boolean pomValid = validateStagedFiles(artifact.pomPath(), artifact.pomSha1Path());
-                if (!pomValid) {
-                  throw new AssertionError("SHA1 mismatch for POM file fetched in " + artifact);
+                ValidationResult pomResult =
+                    validateStagedFiles(artifact.pomPath(), artifact.pomSha512Path());
+                if (!pomResult.isSuccess()) {
+                  throw new AssertionError(
+                      "SHA-512 mismatch for POM file for "
+                          + artifact
+                          + ", expected SHA-512="
+                          + pomResult.expectedHashCode()
+                          + ", actual SHA-512="
+                          + pomResult.calculatedHashCode());
                 }
-                boolean jarValid = validateStagedFiles(artifact.jarPath(), artifact.jarSha1Path());
-                if (!jarValid) {
-                  throw new AssertionError("SHA1 mismatch for JAR file fetched in " + artifact);
+                ValidationResult jarResult =
+                    validateStagedFiles(artifact.jarPath(), artifact.jarSha512Path());
+                if (!jarResult.isSuccess()) {
+                  throw new AssertionError(
+                      "SHA-512 mismatch for POM file for "
+                          + artifact
+                          + ", expected SHA-512="
+                          + jarResult.expectedHashCode()
+                          + ", actual SHA-512="
+                          + jarResult.calculatedHashCode());
                 }
                 Logger.info(
                     String.format(
                         "Checksums validated, moving artifact %s to local maven directory",
                         artifact));
-                commitFromStaging(artifact.pomSha1Path());
+                commitFromStaging(artifact.pomSha512Path());
                 commitFromStaging(artifact.pomPath());
-                commitFromStaging(artifact.jarSha1Path());
+                commitFromStaging(artifact.jarSha512Path());
                 commitFromStaging(artifact.jarPath());
                 removeArtifactFiles(stagingRepositoryDir, artifact);
                 return Futures.immediateFuture(null);
@@ -108,19 +132,38 @@ public class MavenArtifactFetcher {
 
   private void removeArtifactFiles(File repositoryDir, MavenJarArtifact artifact) {
     new File(repositoryDir, artifact.jarPath()).delete();
-    new File(repositoryDir, artifact.jarSha1Path()).delete();
+    new File(repositoryDir, artifact.jarSha512Path()).delete();
     new File(repositoryDir, artifact.pomPath()).delete();
-    new File(repositoryDir, artifact.pomSha1Path()).delete();
+    new File(repositoryDir, artifact.pomSha512Path()).delete();
   }
 
-  private boolean validateStagedFiles(String filePath, String sha1Path) throws IOException {
+  private ValidationResult validateStagedFiles(String filePath, String sha512Path)
+      throws IOException {
     File tempFile = new File(this.stagingRepositoryDir, filePath);
-    File sha1File = new File(this.stagingRepositoryDir, sha1Path);
+    File sha512File = new File(this.stagingRepositoryDir, sha512Path);
 
-    HashCode expected = HashCode.fromString(new String(Files.asByteSource(sha1File).read(), UTF_8));
+    HashCode expected =
+        HashCode.fromString(new String(Files.asByteSource(sha512File).read(), UTF_8));
 
-    HashCode actual = Files.asByteSource(tempFile).hash(Hashing.sha1());
-    return expected.equals(actual);
+    HashCode actual = Files.asByteSource(tempFile).hash(Hashing.sha512());
+    return ValidationResult.create(expected.equals(actual), expected.toString(), actual.toString());
+  }
+
+  @AutoValue
+  abstract static class ValidationResult {
+    abstract boolean isSuccess();
+
+    @Nonnull
+    abstract String expectedHashCode();
+
+    @Nonnull
+    abstract String calculatedHashCode();
+
+    static ValidationResult create(
+        boolean isSuccess, String expectedHashCode, String calculatedHashCode) {
+      return new AutoValue_MavenArtifactFetcher_ValidationResult(
+          isSuccess, expectedHashCode, calculatedHashCode);
+    }
   }
 
   private void createArtifactSubdirectory(MavenJarArtifact artifact, File repositoryDir)
@@ -149,7 +192,8 @@ public class MavenArtifactFetcher {
 
   protected ListenableFuture<Void> createFetchToFileTask(URL remoteUrl, File tempFile) {
     return Futures.submitAsync(
-        new FetchToFileTask(remoteUrl, tempFile, repositoryUserName, repositoryPassword),
+        new FetchToFileTask(
+            remoteUrl, tempFile, repositoryUserName, repositoryPassword, proxyHost, proxyPort),
         this.executorService);
   }
 
@@ -163,20 +207,37 @@ public class MavenArtifactFetcher {
 
     private final URL remoteURL;
     private final File localFile;
-    private String repositoryUserName;
-    private String repositoryPassword;
+    private final String repositoryUserName;
+    private final String repositoryPassword;
+    private final String proxyHost;
+    private final int proxyPort;
 
     public FetchToFileTask(
-        URL remoteURL, File localFile, String repositoryUserName, String repositoryPassword) {
+        URL remoteURL,
+        File localFile,
+        String repositoryUserName,
+        String repositoryPassword,
+        String proxyHost,
+        int proxyPort) {
       this.remoteURL = remoteURL;
       this.localFile = localFile;
       this.repositoryUserName = repositoryUserName;
       this.repositoryPassword = repositoryPassword;
+      this.proxyHost = proxyHost;
+      this.proxyPort = proxyPort;
     }
 
+    @Nonnull
     @Override
     public ListenableFuture<Void> call() throws Exception {
-      URLConnection connection = remoteURL.openConnection();
+      URLConnection connection;
+      if (this.proxyHost != null && !this.proxyHost.isEmpty() && this.proxyPort > 0) {
+        Proxy proxy =
+            new Proxy(Proxy.Type.HTTP, new InetSocketAddress(this.proxyHost, this.proxyPort));
+        connection = remoteURL.openConnection(proxy);
+      } else {
+        connection = remoteURL.openConnection();
+      }
       // Add authorization header if applicable.
       if (!Strings.isNullOrEmpty(this.repositoryUserName)) {
         String encoded =
@@ -190,6 +251,9 @@ public class MavenArtifactFetcher {
       try (InputStream inputStream = connection.getInputStream();
           FileOutputStream outputStream = new FileOutputStream(localFile)) {
         ByteStreams.copy(inputStream, outputStream);
+        // Ensure all contents are written to disk.
+        outputStream.flush();
+        outputStream.getFD().sync();
       }
       return Futures.immediateFuture(null);
     }

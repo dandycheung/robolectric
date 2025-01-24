@@ -16,9 +16,7 @@ import java.util.Properties;
 import java.util.Set;
 import javax.annotation.Nonnull;
 
-/**
- * Configuration settings that can be used on a per-class or per-test basis.
- */
+/** Configuration settings that can be used on a per-class or per-test basis. */
 @Documented
 @Inherited
 @Retention(RetentionPolicy.RUNTIME)
@@ -26,14 +24,16 @@ import javax.annotation.Nonnull;
 @SuppressWarnings(value = {"BadAnnotationImplementation", "ImmutableAnnotationChecker"})
 public @interface Config {
   /**
-   * TODO(vnayar): Create named constants for default values instead of magic numbers.
-   * Array named constants must be avoided in order to dodge a JDK 1.7 bug.
-   *   error: annotation Config is missing value for the attribute &lt;clinit&gt;
-   * See <a href="https://bugs.openjdk.java.net/browse/JDK-8013485">JDK-8013485</a>.
+   * TODO(vnayar): Create named constants for default values instead of magic numbers. Array named
+   * constants must be avoided in order to dodge a JDK 1.7 bug. error: annotation Config is missing
+   * value for the attribute &lt;clinit&gt; See <a
+   * href="https://bugs.openjdk.java.net/browse/JDK-8013485">JDK-8013485</a>.
    */
   String NONE = "--none";
+
   String DEFAULT_VALUE_STRING = "--default";
   int DEFAULT_VALUE_INT = -1;
+  float DEFAULT_FONT_SCALE = 1.0f;
 
   String DEFAULT_MANIFEST_NAME = "AndroidManifest.xml";
   Class<? extends Application> DEFAULT_APPLICATION = DefaultApplication.class;
@@ -47,44 +47,46 @@ public @interface Config {
   int OLDEST_SDK = -4;
   int NEWEST_SDK = -5;
 
-  /**
-   * The Android SDK level to emulate. This value will also be set as Build.VERSION.SDK_INT.
-   */
-  int[] sdk() default {};  // DEFAULT_SDK
+  /** The Android SDK level to emulate. This value will also be set as Build.VERSION.SDK_INT. */
+  int[] sdk() default {}; // DEFAULT_SDK
 
-  /**
-   * The minimum Android SDK level to emulate when running tests on multiple API versions.
-   */
+  /** The minimum Android SDK level to emulate when running tests on multiple API versions. */
   int minSdk() default -1;
 
-  /**
-   * The maximum Android SDK level to emulate when running tests on multiple API versions.
-   */
+  /** The maximum Android SDK level to emulate when running tests on multiple API versions. */
   int maxSdk() default -1;
+
+  /**
+   * The default font scale. In U+, users will have a slider to determine font scale. In all
+   * previous APIs, font scales are either small (0.85f), normal (1.0f), large (1.15f) or huge
+   * (1.3f)
+   */
+  float fontScale() default 1.0f;
 
   /**
    * The Android manifest file to load; Robolectric will look relative to the current directory.
    * Resources and assets will be loaded relative to the manifest.
    *
-   * If not specified, Robolectric defaults to {@code AndroidManifest.xml}.
+   * <p>If not specified, Robolectric defaults to {@code AndroidManifest.xml}.
    *
-   * If your project has no manifest or resources, use {@link Config#NONE}.
+   * <p>If your project has no manifest or resources, use {@link Config#NONE}.
+   *
    * @deprecated If you are using at least Android Studio 3.0 alpha 5 or Bazel's android_local_test
-   * please migrate to the preferred way to configure
-   * builds http://robolectric.org/getting-started/
-   *
+   *     please migrate to the preferred way to configure builds
+   *     http://robolectric.org/getting-started/
    * @return The Android manifest file to load.
    */
   @Deprecated
   String manifest() default DEFAULT_VALUE_STRING;
 
   /**
-   * The {@link android.app.Application} class to use in the test, this takes precedence over any application
-   * specified in the AndroidManifest.xml.
+   * The {@link android.app.Application} class to use in the test, this takes precedence over any
+   * application specified in the AndroidManifest.xml.
    *
    * @return The {@link android.app.Application} class to use in the test.
    */
-  Class<? extends Application> application() default DefaultApplication.class;  // DEFAULT_APPLICATION
+  Class<? extends Application> application() default
+      DefaultApplication.class; // DEFAULT_APPLICATION
 
   /**
    * Java package name where the "R.class" file is located. This only needs to be specified if you
@@ -99,7 +101,8 @@ public @interface Config {
    *     name encoded in the arsc resources file. If you are looking to simulate another application
    *     you can create another applications Context using {@link
    *     android.content.Context#createPackageContext(String, int)}. Note that you must add this
-   *     package to {@link org.robolectric.shadows.ShadowPackageManager#addPackage(android.content.pm.PackageInfo)}
+   *     package to {@link
+   *     org.robolectric.shadows.ShadowPackageManager#addPackage(android.content.pm.PackageInfo)}
    *     first.
    */
   @Deprecated
@@ -108,7 +111,7 @@ public @interface Config {
   /**
    * Qualifiers specifying device configuration for this test, such as "fr-normal-port-hdpi".
    *
-   * <p>If the string is prefixed with '+', the qualifiers that follow are overlayed on any more
+   * <p>If the string is prefixed with '+', the qualifiers that follow are overlaid on any more
    * broadly-scoped qualifiers.
    *
    * @see <a href="http://robolectric.org/device-configuration">Device Configuration</a> for
@@ -118,24 +121,26 @@ public @interface Config {
   String qualifiers() default DEFAULT_QUALIFIERS;
 
   /**
-   * The directory from which to load resources.  This should be relative to the directory containing AndroidManifest.xml.
+   * The directory from which to load resources. This should be relative to the directory containing
+   * AndroidManifest.xml.
    *
-   * If not specified, Robolectric defaults to {@code res}.
+   * <p>If not specified, Robolectric defaults to {@code res}.
+   *
    * @deprecated If you are using at least Android Studio 3.0 alpha 5 or Bazel's android_local_test
-   * please migrate to the preferred way to configure
-   *
+   *     please migrate to the preferred way to configure
    * @return Android resource directory.
    */
   @Deprecated
   String resourceDir() default DEFAULT_RES_FOLDER;
 
   /**
-   * The directory from which to load assets. This should be relative to the directory containing AndroidManifest.xml.
+   * The directory from which to load assets. This should be relative to the directory containing
+   * AndroidManifest.xml.
    *
-   * If not specified, Robolectric defaults to {@code assets}.
+   * <p>If not specified, Robolectric defaults to {@code assets}.
+   *
    * @deprecated If you are using at least Android Studio 3.0 alpha 5 or Bazel's android_local_test
-   * please migrate to the preferred way to configure
-   *
+   *     please migrate to the preferred way to configure
    * @return Android asset directory.
    */
   @Deprecated
@@ -146,30 +151,30 @@ public @interface Config {
    *
    * @return A list of additional shadow classes to enable.
    */
-  Class<?>[] shadows() default {};  // DEFAULT_SHADOWS
+  Class<?>[] shadows() default {}; // DEFAULT_SHADOWS
 
   /**
    * A list of instrumented packages, in addition to those that are already instrumented.
    *
    * @return A list of additional instrumented packages.
    */
-  String[] instrumentedPackages() default {};  // DEFAULT_INSTRUMENTED_PACKAGES
+  String[] instrumentedPackages() default {}; // DEFAULT_INSTRUMENTED_PACKAGES
 
   /**
    * A list of folders containing Android Libraries on which this project depends.
    *
    * @deprecated If you are using at least Android Studio 3.0 alpha 5 or Bazel's android_local_test
-   * please migrate to the preferred way to configure
-   *
+   *     please migrate to the preferred way to configure
    * @return A list of Android Libraries.
    */
   @Deprecated
-  String[] libraries() default {};  // DEFAULT_LIBRARIES;
+  String[] libraries() default {}; // DEFAULT_LIBRARIES;
 
   class Implementation implements Config {
     private final int[] sdk;
     private final int minSdk;
     private final int maxSdk;
+    private final float fontScale;
     private final String manifest;
     private final String qualifiers;
     private final String resourceDir;
@@ -181,13 +186,14 @@ public @interface Config {
     private final String[] libraries;
 
     public static Config fromProperties(Properties properties) {
-      if (properties == null || properties.size() == 0) return null;
+      if (properties == null || properties.isEmpty()) return null;
       return new Implementation(
           parseSdkArrayProperty(properties.getProperty("sdk", "")),
           parseSdkInt(properties.getProperty("minSdk", "-1")),
           parseSdkInt(properties.getProperty("maxSdk", "-1")),
           properties.getProperty("manifest", DEFAULT_VALUE_STRING),
           properties.getProperty("qualifiers", DEFAULT_QUALIFIERS),
+          Float.parseFloat(properties.getProperty("fontScale", "1.0f")),
           properties.getProperty("packageName", DEFAULT_PACKAGE_NAME),
           properties.getProperty("resourceDir", DEFAULT_RES_FOLDER),
           properties.getProperty("assetDir", DEFAULT_ASSET_FOLDER),
@@ -210,7 +216,7 @@ public @interface Config {
     private static Class<?>[] parseClasses(String input) {
       if (input.isEmpty()) return new Class[0];
       final String[] classNames = input.split("[, ]+", 0);
-      final Class[] classes = new Class[classNames.length];
+      final Class<?>[] classes = new Class[classNames.length];
       for (int i = 0; i < classNames.length; i++) {
         classes[i] = parseClass(classNames[i]);
       }
@@ -255,8 +261,9 @@ public @interface Config {
 
     private static void validate(Config config) {
       //noinspection ConstantConditions
-      if (config.sdk() != null && config.sdk().length > 0 &&
-          (config.minSdk() != DEFAULT_VALUE_INT || config.maxSdk() != DEFAULT_VALUE_INT)) {
+      if (config.sdk() != null
+          && config.sdk().length > 0
+          && (config.minSdk() != DEFAULT_VALUE_INT || config.maxSdk() != DEFAULT_VALUE_INT)) {
         throw new IllegalArgumentException(
             "sdk and minSdk/maxSdk may not be specified together"
                 + " (sdk="
@@ -268,9 +275,16 @@ public @interface Config {
                 + ")");
       }
 
-      if (config.minSdk() > DEFAULT_VALUE_INT && config.maxSdk() > DEFAULT_VALUE_INT && config.minSdk() > config.maxSdk()) {
-        throw new IllegalArgumentException("minSdk may not be larger than maxSdk" +
-            " (minSdk=" + config.minSdk() + ", maxSdk=" + config.maxSdk() + ")");
+      if (config.minSdk() > DEFAULT_VALUE_INT
+          && config.maxSdk() > DEFAULT_VALUE_INT
+          && config.minSdk() > config.maxSdk()) {
+        throw new IllegalArgumentException(
+            "minSdk may not be larger than maxSdk"
+                + " (minSdk="
+                + config.minSdk()
+                + ", maxSdk="
+                + config.maxSdk()
+                + ")");
       }
     }
 
@@ -280,6 +294,7 @@ public @interface Config {
         int maxSdk,
         String manifest,
         String qualifiers,
+        float fontScale,
         String packageName,
         String resourceDir,
         String assetDir,
@@ -292,6 +307,7 @@ public @interface Config {
       this.maxSdk = maxSdk;
       this.manifest = manifest;
       this.qualifiers = qualifiers;
+      this.fontScale = fontScale;
       this.packageName = packageName;
       this.resourceDir = resourceDir;
       this.assetDir = assetDir;
@@ -321,6 +337,11 @@ public @interface Config {
     @Override
     public String manifest() {
       return manifest;
+    }
+
+    @Override
+    public float fontScale() {
+      return fontScale;
     }
 
     @Override
@@ -363,7 +384,8 @@ public @interface Config {
       return libraries;
     }
 
-    @Nonnull @Override
+    @Nonnull
+    @Override
     public Class<? extends Annotation> annotationType() {
       return Config.class;
     }
@@ -371,18 +393,35 @@ public @interface Config {
     @Override
     public String toString() {
       return "Implementation{"
-          + "sdk=" + Arrays.toString(sdk)
-          + ", minSdk=" + minSdk
-          + ", maxSdk=" + maxSdk
-          + ", manifest='" + manifest + '\''
-          + ", qualifiers='" + qualifiers + '\''
-          + ", resourceDir='" + resourceDir + '\''
-          + ", assetDir='" + assetDir + '\''
-          + ", packageName='" + packageName + '\''
-          + ", shadows=" + Arrays.toString(shadows)
-          + ", instrumentedPackages=" + Arrays.toString(instrumentedPackages)
-          + ", application=" + application
-          + ", libraries=" + Arrays.toString(libraries)
+          + "sdk="
+          + Arrays.toString(sdk)
+          + ", minSdk="
+          + minSdk
+          + ", maxSdk="
+          + maxSdk
+          + ", manifest='"
+          + manifest
+          + '\''
+          + ", qualifiers='"
+          + qualifiers
+          + '\''
+          + ", resourceDir='"
+          + resourceDir
+          + '\''
+          + ", assetDir='"
+          + assetDir
+          + '\''
+          + ", packageName='"
+          + packageName
+          + '\''
+          + ", shadows="
+          + Arrays.toString(shadows)
+          + ", instrumentedPackages="
+          + Arrays.toString(instrumentedPackages)
+          + ", application="
+          + application
+          + ", libraries="
+          + Arrays.toString(libraries)
           + '}';
     }
   }
@@ -391,6 +430,7 @@ public @interface Config {
     protected int[] sdk = new int[0];
     protected int minSdk = -1;
     protected int maxSdk = -1;
+    protected float fontScale = 1.0f;
     protected String manifest = Config.DEFAULT_VALUE_STRING;
     protected String qualifiers = Config.DEFAULT_QUALIFIERS;
     protected String packageName = Config.DEFAULT_PACKAGE_NAME;
@@ -401,8 +441,7 @@ public @interface Config {
     protected Class<? extends Application> application = DEFAULT_APPLICATION;
     protected String[] libraries = new String[0];
 
-    public Builder() {
-    }
+    public Builder() {}
 
     public Builder(Config config) {
       sdk = config.sdk();
@@ -410,6 +449,7 @@ public @interface Config {
       maxSdk = config.maxSdk();
       manifest = config.manifest();
       qualifiers = config.qualifiers();
+      fontScale = config.fontScale();
       packageName = config.packageName();
       resourceDir = config.resourceDir();
       assetDir = config.assetDir();
@@ -454,6 +494,11 @@ public @interface Config {
       return this;
     }
 
+    public Builder setFontScale(float fontScale) {
+      this.fontScale = fontScale;
+      return this;
+    }
+
     public Builder setAssetDir(String assetDir) {
       this.assetDir = assetDir;
       return this;
@@ -480,8 +525,8 @@ public @interface Config {
     }
 
     /**
-     * This returns actual default values where they exist, in the sense that we could use
-     * the values, rather than markers like {@code -1} or {@code --default}.
+     * This returns actual default values where they exist, in the sense that we could use the
+     * values, rather than markers like {@code -1} or {@code --default}.
      */
     public static Builder defaults() {
       return new Builder()
@@ -494,6 +539,7 @@ public @interface Config {
       int[] overlaySdk = overlayConfig.sdk();
       int overlayMinSdk = overlayConfig.minSdk();
       int overlayMaxSdk = overlayConfig.maxSdk();
+      float overlayFontScale = overlayConfig.fontScale();
 
       //noinspection ConstantConditions
       if (overlaySdk != null && overlaySdk.length > 0) {
@@ -511,8 +557,10 @@ public @interface Config {
       }
       this.manifest = pick(this.manifest, overlayConfig.manifest(), DEFAULT_VALUE_STRING);
 
+      this.fontScale = pick(this.fontScale, overlayFontScale, DEFAULT_FONT_SCALE);
+
       String qualifiersOverlayValue = overlayConfig.qualifiers();
-      if (qualifiersOverlayValue != null && !qualifiersOverlayValue.equals("")) {
+      if (qualifiersOverlayValue != null && !qualifiersOverlayValue.isEmpty()) {
         if (qualifiersOverlayValue.startsWith("+")) {
           this.qualifiers = this.qualifiers + " " + qualifiersOverlayValue;
         } else {
@@ -521,30 +569,32 @@ public @interface Config {
       }
 
       this.packageName = pick(this.packageName, overlayConfig.packageName(), "");
-      this.resourceDir = pick(this.resourceDir, overlayConfig.resourceDir(), Config.DEFAULT_RES_FOLDER);
+      this.resourceDir =
+          pick(this.resourceDir, overlayConfig.resourceDir(), Config.DEFAULT_RES_FOLDER);
       this.assetDir = pick(this.assetDir, overlayConfig.assetDir(), Config.DEFAULT_ASSET_FOLDER);
 
       List<Class<?>> shadows = new ArrayList<>(Arrays.asList(this.shadows));
       shadows.addAll(Arrays.asList(overlayConfig.shadows()));
-      this.shadows = shadows.toArray(new Class[shadows.size()]);
+      this.shadows = shadows.toArray(new Class[0]);
 
       Set<String> instrumentedPackages = new HashSet<>();
       instrumentedPackages.addAll(Arrays.asList(this.instrumentedPackages));
       instrumentedPackages.addAll(Arrays.asList(overlayConfig.instrumentedPackages()));
-      this.instrumentedPackages = instrumentedPackages.toArray(new String[instrumentedPackages.size()]);
-
+      this.instrumentedPackages = instrumentedPackages.toArray(new String[0]);
       this.application = pick(this.application, overlayConfig.application(), DEFAULT_APPLICATION);
 
       Set<String> libraries = new HashSet<>();
       libraries.addAll(Arrays.asList(this.libraries));
       libraries.addAll(Arrays.asList(overlayConfig.libraries()));
-      this.libraries = libraries.toArray(new String[libraries.size()]);
+      this.libraries = libraries.toArray(new String[0]);
 
       return this;
     }
 
     private <T> T pick(T baseValue, T overlayValue, T nullValue) {
-      return overlayValue != null ? (overlayValue.equals(nullValue) ? baseValue : overlayValue) : null;
+      return overlayValue != null
+          ? (overlayValue.equals(nullValue) ? baseValue : overlayValue)
+          : null;
     }
 
     private int[] pickSdk(int[] baseValue, int[] overlayValue, int[] nullValue) {
@@ -558,6 +608,7 @@ public @interface Config {
           maxSdk,
           manifest,
           qualifiers,
+          fontScale,
           packageName,
           resourceDir,
           assetDir,
@@ -568,7 +619,8 @@ public @interface Config {
     }
 
     public static boolean isDefaultApplication(Class<? extends Application> clazz) {
-      return clazz == null || clazz.getCanonicalName().equals(DEFAULT_APPLICATION.getCanonicalName());
+      return clazz == null
+          || clazz.getCanonicalName().equals(DEFAULT_APPLICATION.getCanonicalName());
     }
   }
 }

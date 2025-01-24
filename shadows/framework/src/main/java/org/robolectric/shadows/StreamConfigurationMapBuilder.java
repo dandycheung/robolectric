@@ -8,6 +8,7 @@ import android.util.SparseIntArray;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import org.robolectric.RuntimeEnvironment;
 import org.robolectric.util.ReflectionHelpers;
@@ -17,6 +18,7 @@ public final class StreamConfigurationMapBuilder {
   // from system/core/include/system/graphics.h
   private static final int HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED = 0x22;
 
+  private final HashMap<Integer, Collection<Size>> inputFormatWithSupportedSize = new HashMap<>();
   private final HashMap<Integer, Collection<Size>> outputFormatWithSupportedSize = new HashMap<>();
 
   /** Create a new {@link StreamConfigurationMapBuilder}. */
@@ -41,6 +43,22 @@ public final class StreamConfigurationMapBuilder {
   }
 
   /**
+   * Adds an input size to be returned by {@link StreamConfigurationMap#getInputSizes} for the
+   * provided format.
+   *
+   * <p>The provided format must be one of the formats defined in {@link ImageFormat} or {@link
+   * PixelFormat}.
+   */
+  public StreamConfigurationMapBuilder addInputSize(int format, Size inputSize) {
+    if (!inputFormatWithSupportedSize.containsKey(format)) {
+      List<Size> inputSizes = new ArrayList<>();
+      inputFormatWithSupportedSize.put(format, inputSizes);
+    }
+    inputFormatWithSupportedSize.get(format).add(inputSize);
+    return this;
+  }
+
+  /**
    * Adds an output size to be returned by {@link StreamConfigurationMap#getOutputSizes}.
    *
    * <p>Calling this method is equivalent to calling {@link addOutputSize(int, Size)} with format
@@ -59,9 +77,18 @@ public final class StreamConfigurationMapBuilder {
       for (Size size : entry.getValue()) {
         configsList.add(
             new StreamConfiguration(
-                entry.getKey(), size.getWidth(), size.getHeight(), /*input=*/ false));
+                entry.getKey(), size.getWidth(), size.getHeight(), /* input= */ false));
       }
     }
+
+    for (Map.Entry<Integer, Collection<Size>> entry : inputFormatWithSupportedSize.entrySet()) {
+      for (Size size : entry.getValue()) {
+        configsList.add(
+            new StreamConfiguration(
+                entry.getKey(), size.getWidth(), size.getHeight(), /* input= */ true));
+      }
+    }
+
     StreamConfiguration[] configs = new StreamConfiguration[configsList.size()];
     configsList.toArray(configs);
 
@@ -84,6 +111,13 @@ public final class StreamConfigurationMapBuilder {
           StreamConfigurationMap.class, map, "mOutputFormats", outputFormats);
       ReflectionHelpers.setField(
           StreamConfigurationMap.class, map, "mAllOutputFormats", outputFormats);
+
+      // Add input formats for reprocessing
+      SparseIntArray inputFormats = new SparseIntArray();
+      for (int format : inputFormatWithSupportedSize.keySet()) {
+        inputFormats.put(format, inputFormatWithSupportedSize.get(format).size());
+      }
+      ReflectionHelpers.setField(StreamConfigurationMap.class, map, "mInputFormats", inputFormats);
     }
     return map;
   }

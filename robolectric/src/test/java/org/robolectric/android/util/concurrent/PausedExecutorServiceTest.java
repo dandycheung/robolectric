@@ -6,7 +6,6 @@ import static org.junit.Assert.fail;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Callable;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import org.junit.Before;
@@ -14,9 +13,7 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
 
-/**
- * Unit tests for {@link PausedExecutorService}
- */
+/** Unit tests for {@link PausedExecutorService} */
 @RunWith(JUnit4.class)
 public class PausedExecutorServiceTest {
   private List<String> executedTasksRecord;
@@ -29,7 +26,7 @@ public class PausedExecutorServiceTest {
   }
 
   @Test
-  public void executionRunsInBackgroundThread() throws ExecutionException, InterruptedException {
+  public void executionRunsInBackgroundThread() {
     final Thread testThread = Thread.currentThread();
     executorService.execute(
         () -> {
@@ -41,7 +38,7 @@ public class PausedExecutorServiceTest {
   }
 
   @Test
-  public void runAll() throws Exception {
+  public void runAll() {
     executorService.execute(() -> executedTasksRecord.add("background event ran"));
 
     assertThat(executedTasksRecord).isEmpty();
@@ -51,7 +48,7 @@ public class PausedExecutorServiceTest {
   }
 
   @Test
-  public void runAll_inOrder() throws Exception {
+  public void runAll_inOrder() {
     executorService.execute(() -> executedTasksRecord.add("first"));
     executorService.execute(() -> executedTasksRecord.add("second"));
     assertThat(executedTasksRecord).isEmpty();
@@ -61,7 +58,7 @@ public class PausedExecutorServiceTest {
   }
 
   @Test
-  public void runNext() throws Exception {
+  public void runNext() {
     executorService.execute(() -> executedTasksRecord.add("first"));
     executorService.execute(() -> executedTasksRecord.add("second"));
     assertThat(executedTasksRecord).isEmpty();
@@ -74,7 +71,7 @@ public class PausedExecutorServiceTest {
   }
 
   @Test
-  public void runAll_clearsQueuedTasks() throws Exception {
+  public void runAll_clearsQueuedTasks() {
     executorService.execute(() -> executedTasksRecord.add("background event ran"));
 
     assertThat(executedTasksRecord).isEmpty();
@@ -102,10 +99,12 @@ public class PausedExecutorServiceTest {
   @Test
   public void submitCallable() throws Exception {
     Runnable runnable = () -> executedTasksRecord.add("background event ran");
-    Future<String> future = executorService.submit(() -> {
-      runnable.run();
-      return "foo";
-    });
+    Future<String> future =
+        executorService.submit(
+            () -> {
+              runnable.run();
+              return "foo";
+            });
     executorService.runAll();
 
     assertThat(executedTasksRecord).containsExactly("background event ran");
@@ -124,8 +123,7 @@ public class PausedExecutorServiceTest {
   }
 
   @Test
-  public void whenShutdownBeforeSubmittedTasksAreExecuted_TaskIsNotInTranscript()
-      throws ExecutionException, InterruptedException {
+  public void whenShutdownBeforeSubmittedTasksAreExecuted_TaskIsNotInTranscript() {
     executorService.execute(() -> executedTasksRecord.add("background event ran"));
 
     executorService.shutdown();
@@ -135,8 +133,7 @@ public class PausedExecutorServiceTest {
   }
 
   @Test
-  public void whenShutdownNow_ReturnedListContainsOneRunnable()
-      throws ExecutionException, InterruptedException {
+  public void whenShutdownNow_ReturnedListContainsOneRunnable() {
     executorService.execute(() -> executedTasksRecord.add("background event ran"));
 
     List<Runnable> notExecutedRunnables = executorService.shutdownNow();
@@ -163,10 +160,11 @@ public class PausedExecutorServiceTest {
 
   @Test
   @SuppressWarnings("FutureReturnValueIgnored")
-  public void exceptionsPropagated() throws ExecutionException, InterruptedException {
-    Callable<Void> throwingCallable = () -> {
-      throw new IllegalStateException("I failed");
-    };
+  public void exceptionsPropagated() {
+    Callable<Void> throwingCallable =
+        () -> {
+          throw new IllegalStateException("I failed");
+        };
     try {
       executorService.submit(throwingCallable);
       executorService.runAll();
@@ -177,15 +175,13 @@ public class PausedExecutorServiceTest {
   }
 
   @Test
-  public void postingTasks() throws Exception {
-    Runnable postingRunnable = new Runnable() {
-      @Override
-      public void run() {
-        executedTasksRecord.add("first");
-        executorService.execute(() -> executedTasksRecord.add("third"));
-        executedTasksRecord.add("second");
-      }
-    };
+  public void postingTasks() {
+    Runnable postingRunnable =
+        () -> {
+          executedTasksRecord.add("first");
+          executorService.execute(() -> executedTasksRecord.add("third"));
+          executedTasksRecord.add("second");
+        };
     executorService.execute(postingRunnable);
     executorService.runAll();
 

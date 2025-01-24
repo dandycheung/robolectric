@@ -4,6 +4,7 @@ import static com.google.common.truth.Truth.assertThat;
 
 import android.content.ContentValues;
 import android.content.Context;
+import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
 import android.database.sqlite.SQLiteDatabase.CursorFactory;
 import android.database.sqlite.SQLiteOpenHelper;
@@ -20,7 +21,7 @@ public class SQLiteOpenHelperTest {
   private TestOpenHelper helper;
 
   @Before
-  public void setUp() throws Exception {
+  public void setUp() {
     helper = new TestOpenHelper(ApplicationProvider.getApplicationContext(), "path", null, 1);
   }
 
@@ -35,6 +36,7 @@ public class SQLiteOpenHelperTest {
     SQLiteDatabase database = helper.getReadableDatabase();
     assertDatabaseOpened(database, helper);
     assertInitialDB(database, helper);
+    helper.close();
   }
 
   @Test
@@ -106,6 +108,8 @@ public class SQLiteOpenHelperTest {
     String expectedPath2 =
         ApplicationProvider.getApplicationContext().getDatabasePath(path2).getAbsolutePath();
     assertThat(helper2.getReadableDatabase().getPath()).isEqualTo(expectedPath2);
+    helper1.close();
+    helper2.close();
   }
 
   @Test
@@ -140,11 +144,15 @@ public class SQLiteOpenHelperTest {
   }
 
   private void setupTable(SQLiteDatabase db, String table) {
-    db.execSQL("CREATE TABLE " + table + " (" +
-        "id INTEGER PRIMARY KEY AUTOINCREMENT, " +
-        "testVal INTEGER DEFAULT 0" +
-        ");");
+    db.execSQL(
+        "CREATE TABLE "
+            + table
+            + " ("
+            + "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+            + "testVal INTEGER DEFAULT 0"
+            + ");");
   }
+
   private void insertData(SQLiteDatabase db, String table, int[] values) {
     for (int i : values) {
       ContentValues cv = new ContentValues();
@@ -154,8 +162,9 @@ public class SQLiteOpenHelperTest {
   }
 
   private void verifyData(SQLiteDatabase db, String table, int expectedVals) {
-    assertThat(db.query(table, null, null, null,
-          null, null, null).getCount()).isEqualTo(expectedVals);
+    try (Cursor cursor = db.query(table, null, null, null, null, null, null)) {
+      assertThat(cursor.getCount()).isEqualTo(expectedVals);
+    }
   }
 
   @Test
@@ -163,14 +172,15 @@ public class SQLiteOpenHelperTest {
     final String TABLE_NAME1 = "fart", TABLE_NAME2 = "fart2";
     SQLiteDatabase db1 = helper.getWritableDatabase();
     setupTable(db1, TABLE_NAME1);
-    insertData(db1, TABLE_NAME1, new int[]{1, 2});
+    insertData(db1, TABLE_NAME1, new int[] {1, 2});
     TestOpenHelper helper2 =
         new TestOpenHelper(ApplicationProvider.getApplicationContext(), "path2", null, 1);
     SQLiteDatabase db2 = helper2.getWritableDatabase();
     setupTable(db2, TABLE_NAME2);
-    insertData(db2, TABLE_NAME2, new int[]{4, 5, 6});
+    insertData(db2, TABLE_NAME2, new int[] {4, 5, 6});
     verifyData(db1, TABLE_NAME1, 2);
     verifyData(db2, TABLE_NAME2, 3);
+    helper2.close();
   }
 
   @Test
@@ -182,8 +192,8 @@ public class SQLiteOpenHelperTest {
     SQLiteDatabase db2 = helper2.getWritableDatabase();
     setupTable(db1, TABLE_NAME1);
     setupTable(db2, TABLE_NAME2);
-    insertData(db1, TABLE_NAME1, new int[]{1, 2});
-    insertData(db2, TABLE_NAME2, new int[]{4, 5, 6});
+    insertData(db1, TABLE_NAME1, new int[] {1, 2});
+    insertData(db2, TABLE_NAME2, new int[] {4, 5, 6});
     verifyData(db1, TABLE_NAME1, 2);
     verifyData(db2, TABLE_NAME2, 3);
     db1.close();
@@ -191,6 +201,7 @@ public class SQLiteOpenHelperTest {
     db1 = helper.getWritableDatabase();
     verifyData(db1, TABLE_NAME1, 2);
     verifyData(db2, TABLE_NAME2, 3);
+    helper2.close();
   }
 
   @Test
@@ -205,7 +216,7 @@ public class SQLiteOpenHelperTest {
     final String TABLE_NAME1 = "fart";
     SQLiteDatabase db1 = helper.getWritableDatabase();
     setupTable(db1, TABLE_NAME1);
-    insertData(db1, TABLE_NAME1, new int[]{1, 2});
+    insertData(db1, TABLE_NAME1, new int[] {1, 2});
     verifyData(db1, TABLE_NAME1, 2);
     db1.close();
     db1 = helper.getWritableDatabase();
@@ -239,9 +250,9 @@ public class SQLiteOpenHelperTest {
     }
 
     @Override
-      public void onCreate(SQLiteDatabase database) {
-        onCreateCalled = true;
-      }
+    public void onCreate(SQLiteDatabase database) {
+      onCreateCalled = true;
+    }
 
     @Override
     public void onUpgrade(SQLiteDatabase database, int oldVersion, int newVersion) {

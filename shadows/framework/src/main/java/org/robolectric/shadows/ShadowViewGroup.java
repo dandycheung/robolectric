@@ -9,7 +9,7 @@ import android.view.ViewGroup;
 import java.io.PrintStream;
 import org.robolectric.annotation.Implementation;
 import org.robolectric.annotation.Implements;
-import org.robolectric.annotation.LooperMode;
+import org.robolectric.annotation.LooperMode.Mode;
 import org.robolectric.annotation.RealObject;
 import org.robolectric.shadow.api.Shadow;
 import org.robolectric.util.reflector.Direct;
@@ -29,16 +29,16 @@ public class ShadowViewGroup extends ShadowView {
         () -> {
           reflector(ViewGroupReflector.class, realViewGroup).addView(child, index, params);
         };
-    if (ShadowLooper.looperMode() == LooperMode.Mode.PAUSED) {
-      addViewRunnable.run();
-    } else {
+    if (ShadowLooper.looperMode() == Mode.LEGACY) {
       shadowMainLooper().runPaused(addViewRunnable);
+    } else {
+      addViewRunnable.run();
     }
   }
 
   /**
-   * Returns a string representation of this {@code ViewGroup} by concatenating all of the
-   * strings contained in all of the descendants of this {@code ViewGroup}.
+   * Returns a string representation of this {@code ViewGroup} by concatenating all of the strings
+   * contained in all of the descendants of this {@code ViewGroup}.
    */
   @Override
   public String innerText() {
@@ -60,6 +60,7 @@ public class ShadowViewGroup extends ShadowView {
 
   /**
    * Dumps the state of this {@code ViewGroup} to {@code System.out}.
+   *
    * @deprecated - Please use {@link androidx.test.espresso.util.HumanReadables#describe(View)}
    */
   @Override
@@ -84,6 +85,8 @@ public class ShadowViewGroup extends ShadowView {
 
   @Implementation
   protected void requestDisallowInterceptTouchEvent(boolean disallowIntercept) {
+    reflector(ViewGroupReflector.class, realViewGroup)
+        .requestDisallowInterceptTouchEvent(disallowIntercept);
     disallowInterceptTouchEvent = disallowIntercept;
   }
 
@@ -113,5 +116,8 @@ public class ShadowViewGroup extends ShadowView {
 
     @Direct
     void addView(View child, int index, ViewGroup.LayoutParams params);
+
+    @Direct
+    void requestDisallowInterceptTouchEvent(boolean disallowIntercept);
   }
 }

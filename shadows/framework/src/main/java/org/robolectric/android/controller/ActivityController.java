@@ -1,7 +1,11 @@
 package org.robolectric.android.controller;
 
 import static android.os.Build.VERSION_CODES.M;
+import static android.os.Build.VERSION_CODES.N_MR1;
 import static android.os.Build.VERSION_CODES.O_MR1;
+import static android.os.Build.VERSION_CODES.P;
+import static android.os.Build.VERSION_CODES.Q;
+import static android.os.Build.VERSION_CODES.TIRAMISU;
 import static com.google.common.base.Preconditions.checkNotNull;
 import static org.robolectric.shadow.api.Shadow.extract;
 import static org.robolectric.util.reflector.Reflector.reflector;
@@ -13,11 +17,15 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ActivityInfo;
+import android.content.pm.ActivityInfo.Config;
 import android.content.pm.PackageManager;
 import android.content.res.Configuration;
 import android.os.Bundle;
+import android.util.DisplayMetrics;
+import android.view.Display;
 import android.view.ViewRootImpl;
 import android.view.WindowManager;
+import com.google.errorprone.annotations.CanIgnoreReturnValue;
 import javax.annotation.Nullable;
 import org.robolectric.RuntimeEnvironment;
 import org.robolectric.shadow.api.Shadow;
@@ -27,6 +35,7 @@ import org.robolectric.shadows.ShadowPackageManager;
 import org.robolectric.shadows.ShadowViewRootImpl;
 import org.robolectric.shadows._Activity_;
 import org.robolectric.util.ReflectionHelpers;
+import org.robolectric.util.ReflectionHelpers.ClassParameter;
 import org.robolectric.util.reflector.Accessor;
 import org.robolectric.util.reflector.ForType;
 import org.robolectric.util.reflector.WithType;
@@ -57,23 +66,23 @@ public class ActivityController<T extends Activity>
     DESTROYED
   }
 
+  // ActivityInfo constant.
+  private static final int CONFIG_WINDOW_CONFIGURATION = 0x20000000;
+
   private _Activity_ _component_;
   private LifecycleState currentState = LifecycleState.INITIAL;
 
   public static <T extends Activity> ActivityController<T> of(
       T activity, Intent intent, @Nullable Bundle activityOptions) {
-    return new ActivityController<>(activity, intent)
-        .attach(activityOptions, /* lastNonConfigurationInstances= */ null);
+    return new ActivityController<>(activity, intent).attach(activityOptions);
   }
 
   public static <T extends Activity> ActivityController<T> of(T activity, Intent intent) {
-    return new ActivityController<>(activity, intent)
-        .attach(/* activityOptions= */ null, /* lastNonConfigurationInstances= */ null);
+    return new ActivityController<>(activity, intent).attach(/* activityOptions= */ null);
   }
 
   public static <T extends Activity> ActivityController<T> of(T activity) {
-    return new ActivityController<>(activity, null)
-        .attach(/* activityOptions= */ null, /* lastNonConfigurationInstances= */ null);
+    return new ActivityController<>(activity, null).attach(/* activityOptions= */ null);
   }
 
   private ActivityController(T activity, Intent intent) {
@@ -82,10 +91,16 @@ public class ActivityController<T extends Activity>
     _component_ = reflector(_Activity_.class, component);
   }
 
+  private ActivityController<T> attach(@Nullable Bundle activityOptions) {
+    return attach(
+        activityOptions, /* lastNonConfigurationInstances= */ null, /* overrideConfig= */ null);
+  }
+
   private ActivityController<T> attach(
       @Nullable Bundle activityOptions,
       @Nullable @WithType("android.app.Activity$NonConfigurationInstances")
-          Object lastNonConfigurationInstances) {
+          Object lastNonConfigurationInstances,
+      @Nullable Configuration overrideConfig) {
     if (attached) {
       return this;
     }
@@ -95,13 +110,11 @@ public class ActivityController<T extends Activity>
     ComponentName componentName =
         new ComponentName(context.getPackageName(), this.component.getClass().getName());
     ((ShadowPackageManager) extract(packageManager)).addActivityIfNotPresent(componentName);
-    packageManager
-        .setComponentEnabledSetting(
-            componentName,
-            PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
-            0);
+    packageManager.setComponentEnabledSetting(
+        componentName, PackageManager.COMPONENT_ENABLED_STATE_ENABLED, 0);
     ShadowActivity shadowActivity = Shadow.extract(component);
-    shadowActivity.callAttach(getIntent(), activityOptions, lastNonConfigurationInstances);
+    shadowActivity.callAttach(
+        getIntent(), activityOptions, lastNonConfigurationInstances, overrideConfig);
     shadowActivity.attachController(this);
     attached = true;
     return this;
@@ -127,7 +140,8 @@ public class ActivityController<T extends Activity>
     return this;
   }
 
-  @Override public ActivityController<T> create() {
+  @Override
+  public ActivityController<T> create() {
     return create(null);
   }
 
@@ -136,8 +150,10 @@ public class ActivityController<T extends Activity>
         () -> {
           if (RuntimeEnvironment.getApiLevel() <= O_MR1) {
             _component_.performRestart();
-          } else {
+          } else if (RuntimeEnvironment.getApiLevel() <= TIRAMISU) {
             _component_.performRestart(true, "restart()");
+          } else {
+            _component_.performRestart(true);
           }
           currentState = LifecycleState.RESTARTED;
         });
@@ -189,6 +205,20 @@ public class ActivityController<T extends Activity>
     return this;
   }
 
+  /**
+   * Calls the same lifecycle methods on the Activity called by Android when an Activity is the top
+   * most resumed activity on Q+.
+   */
+  @CanIgnoreReturnValue
+  public ActivityController<T> topActivityResumed(boolean isTop) {
+    if (RuntimeEnvironment.getApiLevel() < Q) {
+      return this;
+    }
+    invokeWhilePaused(
+        () -> _component_.performTopResumedActivityChanged(isTop, "topStateChangedWhenResumed"));
+    return this;
+  }
+
   public ActivityController<T> visible() {
     shadowMainLooper.runPaused(
         () -> {
@@ -204,7 +234,6 @@ public class ActivityController<T extends Activity>
     // root can be null if activity does not have content attached, or if looper is paused.
     // this is unusual but leave the check here for legacy compatibility
     if (root != null) {
-      callDispatchResized(root);
       shadowMainLooper.idleIfPaused();
     }
     return this;
@@ -228,8 +257,8 @@ public class ActivityController<T extends Activity>
       callDispatchResized(root);
     }
 
-    reflector(ViewRootImplActivityControllerReflector.class, root)
-        .windowFocusChanged(hasFocus, false);
+    ((ShadowViewRootImpl) extract(root)).callWindowFocusChanged(hasFocus);
+
     shadowMainLooper.idleIfPaused();
     return this;
   }
@@ -301,12 +330,13 @@ public class ActivityController<T extends Activity>
   }
 
   /**
-   * Calls the same lifecycle methods on the Activity called by Android the first time the Activity is created.
+   * Calls the same lifecycle methods on the Activity called by Android the first time the Activity
+   * is created.
    *
    * @return Activity controller instance.
    */
   public ActivityController<T> setup() {
-    return create().start().postCreate(null).resume().visible();
+    return create().start().postCreate(null).resume().visible().topActivityResumed(true);
   }
 
   /**
@@ -316,13 +346,14 @@ public class ActivityController<T extends Activity>
    * @param savedInstanceState Saved instance state.
    * @return Activity controller instance.
    */
-  public ActivityController<T> setup(@Nullable Bundle savedInstanceState) {
+  public ActivityController<T> setup(Bundle savedInstanceState) {
     return create(savedInstanceState)
         .start()
         .restoreInstanceState(savedInstanceState)
         .postCreate(savedInstanceState)
         .resume()
-        .visible();
+        .visible()
+        .topActivityResumed(true);
   }
 
   public ActivityController<T> newIntent(Intent intent) {
@@ -331,20 +362,22 @@ public class ActivityController<T extends Activity>
   }
 
   /**
-   * Applies the current system configuration to the Activity.
-   *
-   * <p>This can be used in conjunction with {@link RuntimeEnvironment#setQualifiers(String)} to
-   * simulate configuration changes.
-   *
-   * <p>If the activity is configured to handle changes without being recreated, {@link
-   * Activity#onConfigurationChanged(Configuration)} will be called. Otherwise, the activity is
-   * recreated as described <a
-   * href="https://developer.android.com/guide/topics/resources/runtime-changes.html">here</a>.
-   *
-   * @return ActivityController instance
+   * Performs a configuration change on the Activity. See {@link #configurationChange(Configuration,
+   * DisplayMetrics, int)}. The configuration is taken from the application's configuration.
    */
+  @CanIgnoreReturnValue
   public ActivityController<T> configurationChange() {
     return configurationChange(component.getApplicationContext().getResources().getConfiguration());
+  }
+
+  /**
+   * Performs a configuration change on the Activity. See {@link #configurationChange(Configuration,
+   * DisplayMetrics, int)}. The changed configuration is calculated based on the activity's existing
+   * configuration.
+   */
+  @CanIgnoreReturnValue
+  public ActivityController<T> configurationChange(final Configuration newConfiguration) {
+    return configurationChange(newConfiguration, component.getResources().getDisplayMetrics());
   }
 
   /**
@@ -355,19 +388,88 @@ public class ActivityController<T extends Activity>
    * recreated as described <a
    * href="https://developer.android.com/guide/topics/resources/runtime-changes.html">here</a>.
    *
+   * <p>Typically configuration should be applied using {@link RuntimeEnvironment#setQualifiers} and
+   * then propagated to the activity controller, e.g.
+   *
+   * <pre>{@code
+   * RuntimeEnvironment.setQualifiers("+ar-rXB");
+   * activityController.configurationChange();
+   * }</pre>
+   *
    * @param newConfiguration The new configuration to be set.
    * @return ActivityController instance
    */
-  public ActivityController<T> configurationChange(final Configuration newConfiguration) {
-    final Configuration currentConfig = component.getResources().getConfiguration();
-    final int changedBits = currentConfig.diff(newConfiguration);
-    currentConfig.setTo(newConfiguration);
+  @CanIgnoreReturnValue
+  public ActivityController<T> configurationChange(
+      Configuration newConfiguration, DisplayMetrics newMetrics) {
+    ActivityReflector activityReflector = reflector(ActivityReflector.class, component);
+    Configuration currentConfig =
+        System.getProperty("robolectric.configurationChangeFix", "true").equals("true")
+            ? activityReflector.getCurrentConfig()
+            : component.getResources().getConfiguration();
+    return configurationChange(newConfiguration, newMetrics, currentConfig.diff(newConfiguration));
+  }
 
-    // TODO: throw on changedBits == 0 since it non-intuitively calls onConfigurationChanged
+  /**
+   * Performs a configuration change on the Activity.
+   *
+   * <p>If the activity is configured to handle changes without being recreated, {@link
+   * Activity#onConfigurationChanged(Configuration)} will be called. Otherwise, the activity is
+   * recreated as described <a
+   * href="https://developer.android.com/guide/topics/resources/runtime-changes.html">here</a>.
+   *
+   * <p>Typically configuration should be applied using {@link RuntimeEnvironment#setQualifiers} and
+   * then propagated to the activity controller, e.g.
+   *
+   * <pre>{@code
+   * Resources resources = RuntimeEnvironment.getApplication().getResources();
+   * Configuration oldConfig = new Configuration(resources.getConfiguration());
+   * RuntimeEnvironment.setQualifiers("+ar-rXB");
+   * Configuration newConfig = resources.getConfiguration();
+   * activityController.configurationChange(
+   *     newConfig, resources.getDisplayMetrics(), oldConfig.diff(newConfig));
+   * }</pre>
+   *
+   * @param newConfiguration The new configuration to be set.
+   * @param changedConfig The changed configuration properties bitmask (e.g. the result of calling
+   *     {@link Configuration#diff(Configuration)}). This will be used to determine whether the
+   *     activity handles the configuration change or not, and whether it must be recreated.
+   * @return ActivityController instance
+   * @deprecated The config change should be calculated internally by the activity controller based
+   *     on the previous configuration, use {@link #configurationChange(Configuration,
+   *     DisplayMetrics)} instead.
+   */
+  @Deprecated
+  @CanIgnoreReturnValue
+  public ActivityController<T> configurationChange(
+      Configuration newConfiguration, DisplayMetrics newMetrics, @Config int changedConfig) {
+    component.getResources().updateConfiguration(newConfiguration, newMetrics);
+
+    int filteredChanges = filterConfigChanges(changedConfig);
+    // TODO: throw on changedConfig == 0 since it non-intuitively calls onConfigurationChanged
 
     // Can the activity handle itself ALL configuration changes?
-    if ((getActivityInfo(component.getApplication()).configChanges & changedBits) == changedBits) {
-      shadowMainLooper.runPaused(() -> component.onConfigurationChanged(newConfiguration));
+    if ((getActivityInfo(component.getApplication()).configChanges & filteredChanges)
+        == filteredChanges) {
+      shadowMainLooper.runPaused(
+          () -> {
+            reflector(ActivityReflector.class, component)
+                .getCurrentConfig()
+                .setTo(newConfiguration);
+            component.onConfigurationChanged(newConfiguration);
+            ViewRootImpl root = getViewRoot();
+            if (root != null) {
+              if (RuntimeEnvironment.getApiLevel() <= N_MR1) {
+                ReflectionHelpers.callInstanceMethod(
+                    root,
+                    "updateConfiguration",
+                    ClassParameter.from(Configuration.class, newConfiguration),
+                    ClassParameter.from(boolean.class, false));
+              } else {
+                root.updateConfiguration(Display.INVALID_DISPLAY);
+              }
+            }
+          });
 
       return this;
     } else {
@@ -379,21 +481,29 @@ public class ActivityController<T extends Activity>
           () -> {
             // Set flags
             _component_.setChangingConfigurations(true);
-            _component_.setConfigChangeFlags(changedBits);
+            _component_.setConfigChangeFlags(filteredChanges);
 
             // Perform activity destruction
             final Bundle outState = new Bundle();
 
             // The order of onPause/onStop/onSaveInstanceState is undefined, but is usually:
-            // onPause -> onSaveInstanceState -> onStop
-            _component_.performPause();
-            _component_.performSaveInstanceState(outState);
-            if (RuntimeEnvironment.getApiLevel() <= M) {
-              _component_.performStop();
-            } else if (RuntimeEnvironment.getApiLevel() <= O_MR1) {
-              _component_.performStop(true);
+            // onPause -> onSaveInstanceState -> onStop before API P, and onPause -> onStop ->
+            // onSaveInstanceState from API P.
+            // See
+            // https://developer.android.com/reference/android/app/Activity#onSaveInstanceState(android.os.Bundle) for documentation explained.
+            // And see ActivityThread#callActivityOnStop for related code.
+            getInstrumentation().callActivityOnPause(component);
+            if (RuntimeEnvironment.getApiLevel() < P) {
+              _component_.performSaveInstanceState(outState);
+              if (RuntimeEnvironment.getApiLevel() <= M) {
+                _component_.performStop();
+              } else {
+                // API from N to O_MR1(both including)
+                _component_.performStop(true);
+              }
             } else {
               _component_.performStop(true, "configurationChange");
+              _component_.performSaveInstanceState(outState);
             }
 
             // This is the true and complete retained state, including loaders and retained
@@ -405,7 +515,7 @@ public class ActivityController<T extends Activity>
                     ? null // No framework or user state.
                     : reflector(_NonConfigurationInstances_.class, nonConfigInstance).getActivity();
 
-            _component_.performDestroy();
+            getInstrumentation().callActivityOnDestroy(component);
             makeActivityEligibleForGc();
 
             // Restore theme in case it was set in the test manually.
@@ -419,11 +529,25 @@ public class ActivityController<T extends Activity>
             component = recreatedActivity;
             _component_ = _recreatedActivity_;
 
+            // TODO: Because robolectric is currently not creating unique context objects per
+            //  activity and that the app compat framework uses weak maps to cache resources per
+            //  context the caches end up with stale objects between activity creations (which would
+            //  typically be flushed by an onConfigurationChanged when running in real android). To
+            //  workaround this we can invoke a gc after running the configuration change and
+            //  destroying the old activity which will flush the object references from the weak
+            //  maps (the side effect otherwise is flaky tests that behave differently based on when
+            //  garbage collection last happened to run).
+            //  This should be removed when robolectric.createActivityContexts is enabled.
+            System.gc();
+
             // TODO: Pass nonConfigurationInstance here instead of setting
             // mLastNonConfigurationInstances directly below. This field must be set before
             // attach. Since current implementation sets it after attach(), initialization is not
             // done correctly. For instance, fragment marked as retained is not retained.
-            attach(/* activityOptions= */ null, /* lastNonConfigurationInstances= */ null);
+            attach(
+                /* activityOptions= */ null,
+                /* lastNonConfigurationInstances= */ null,
+                newConfiguration);
 
             if (theme != 0) {
               recreatedActivity.setTheme(theme);
@@ -435,7 +559,7 @@ public class ActivityController<T extends Activity>
             shadowActivity.setLastNonConfigurationInstance(activityConfigInstance);
 
             // Create lifecycle
-            _recreatedActivity_.performCreate(outState);
+            getInstrumentation().callActivityOnCreate(recreatedActivity, outState);
 
             if (RuntimeEnvironment.getApiLevel() <= O_MR1) {
 
@@ -445,7 +569,7 @@ public class ActivityController<T extends Activity>
               _recreatedActivity_.performStart("configurationChange");
             }
 
-            _recreatedActivity_.performRestoreInstanceState(outState);
+            getInstrumentation().callActivityOnRestoreInstanceState(recreatedActivity, outState);
             _recreatedActivity_.onPostCreate(outState);
             if (RuntimeEnvironment.getApiLevel() <= O_MR1) {
               _recreatedActivity_.performResume();
@@ -454,6 +578,9 @@ public class ActivityController<T extends Activity>
             }
             _recreatedActivity_.onPostResume();
             // TODO: Call visible() too.
+            if (RuntimeEnvironment.getApiLevel() >= Q) {
+              _recreatedActivity_.performTopResumedActivityChanged(true, "configurationChange");
+            }
           });
     }
 
@@ -474,25 +601,17 @@ public class ActivityController<T extends Activity>
     switch (originalState) {
       case INITIAL:
         create();
-        // fall through
+      // fall through
       case CREATED:
       case RESTARTED:
         start();
         postCreate(null);
-        // fall through
+      // fall through
       case STARTED:
         resume();
-        // fall through
-      case RESUMED:
-        pause();
-        // fall through
-      case PAUSED:
-        stop();
-        // fall through
-      case STOPPED:
-        break;
+      // fall through
       default:
-        throw new IllegalStateException("Cannot recreate activity since it's destroyed already");
+        // fall through
     }
 
     // Activity#mChangingConfigurations flag should be set prior to Activity recreation process
@@ -503,15 +622,33 @@ public class ActivityController<T extends Activity>
     // ea495c4/core/java/android/app/ActivityThread.java#4806
     _component_.setChangingConfigurations(true);
 
+    switch (originalState) {
+      case INITIAL:
+      case CREATED:
+      case RESTARTED:
+      case STARTED:
+      case RESUMED:
+        pause();
+      // fall through
+      case PAUSED:
+        stop();
+      // fall through
+      case STOPPED:
+        break;
+      default:
+        throw new IllegalStateException("Cannot recreate activity since it's destroyed already");
+    }
+
     Bundle outState = new Bundle();
     saveInstanceState(outState);
     Object lastNonConfigurationInstances = _component_.retainNonConfigurationInstances();
+    Configuration overrideConfig = component.getResources().getConfiguration();
     destroy();
 
     component = (T) ReflectionHelpers.callConstructor(component.getClass());
     _component_ = reflector(_Activity_.class, component);
     attached = false;
-    attach(/* activityOptions= */ null, lastNonConfigurationInstances);
+    attach(/* activityOptions= */ null, lastNonConfigurationInstances, overrideConfig);
     create(outState);
     start();
     restoreInstanceState(outState);
@@ -520,6 +657,7 @@ public class ActivityController<T extends Activity>
     postResume();
     visible();
     windowFocusChanged(true);
+    topActivityResumed(true);
 
     // Move back to the original stage. If the original stage was transient stage, it will bring it
     // to resumed state to match the on device behavior.
@@ -556,21 +694,31 @@ public class ActivityController<T extends Activity>
         return;
       case RESUMED:
         pause();
-        // fall through
+      // fall through
       case PAUSED:
-        // fall through
+      // fall through
       case RESTARTED:
-        // fall through
+      // fall through
       case STARTED:
         stop();
-        // fall through
+      // fall through
       case STOPPED:
-        // fall through
+      // fall through
       case CREATED:
         break;
     }
 
     destroy();
+  }
+
+  // See ActivityRecord#getConfigurationChanges for the config changes that are considered for
+  // activity recreation by the window manager.
+  private static int filterConfigChanges(int changedConfig) {
+    // We don't want window configuration to cause relaunches.
+    if ((changedConfig & CONFIG_WINDOW_CONFIGURATION) != 0) {
+      changedConfig &= ~CONFIG_WINDOW_CONFIGURATION;
+    }
+    return changedConfig;
   }
 
   /** Accessor interface for android.app.Activity.NonConfigurationInstances's internals. */
@@ -581,9 +729,9 @@ public class ActivityController<T extends Activity>
     Object getActivity();
   }
 
-  @ForType(ViewRootImpl.class)
-  interface ViewRootImplActivityControllerReflector {
-    void windowFocusChanged(boolean hasFocus, boolean inTouchMode);
+  @ForType(Activity.class)
+  interface ActivityReflector {
+    @Accessor("mCurrentConfig")
+    Configuration getCurrentConfig();
   }
 }
-

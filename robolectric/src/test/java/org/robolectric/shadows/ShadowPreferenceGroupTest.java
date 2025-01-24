@@ -15,8 +15,11 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.robolectric.Robolectric;
+import org.robolectric.annotation.ResourcesMode;
+import org.robolectric.annotation.ResourcesMode.Mode;
 
 @RunWith(AndroidJUnit4.class)
+@ResourcesMode(Mode.BINARY)
 public class ShadowPreferenceGroupTest {
 
   private TestPreferenceGroup group;
@@ -28,7 +31,7 @@ public class ShadowPreferenceGroupTest {
   @Before
   public void setUp() throws Exception {
     activity = buildActivity(Activity.class).create().get();
-    attrs =  Robolectric.buildAttributeSet().build();
+    attrs = Robolectric.buildAttributeSet().build();
 
     group = new TestPreferenceGroup(activity, attrs);
     shadow = shadowOf(group);

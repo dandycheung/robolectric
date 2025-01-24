@@ -1,6 +1,5 @@
 package org.robolectric.shadows;
 
-import static android.os.Build.VERSION_CODES.KITKAT;
 import static org.robolectric.util.reflector.Reflector.reflector;
 
 import android.app.ResourcesManager;
@@ -13,7 +12,7 @@ import org.robolectric.util.reflector.Accessor;
 import org.robolectric.util.reflector.ForType;
 import org.robolectric.util.reflector.Static;
 
-@Implements(value = ResourcesManager.class, isInAndroidSdk = false, minSdk = KITKAT)
+@Implements(value = ResourcesManager.class, isInAndroidSdk = false)
 public class ShadowResourcesManager {
   @RealObject ResourcesManager realResourcesManager;
 
@@ -22,11 +21,9 @@ public class ShadowResourcesManager {
     reflector(_ResourcesManager_.class).setResourcesManager(null);
   }
 
-  /**
-   * Exposes {@link ResourcesManager#applyCompatConfigurationLocked(int, Configuration)}.
-   */
-  public boolean callApplyConfigurationToResourcesLocked(Configuration configuration,
-      CompatibilityInfo compatibilityInfo) {
+  /** Exposes {@link ResourcesManager#applyCompatConfigurationLocked(int, Configuration)}. */
+  public boolean callApplyConfigurationToResourcesLocked(
+      Configuration configuration, CompatibilityInfo compatibilityInfo) {
     return reflector(_ResourcesManager_.class, realResourcesManager)
         .applyConfigurationToResourcesLocked(configuration, compatibilityInfo);
   }
@@ -36,7 +33,8 @@ public class ShadowResourcesManager {
   private interface _ResourcesManager_ {
     boolean applyConfigurationToResourcesLocked(Configuration config, CompatibilityInfo compat);
 
-    @Static @Accessor("sResourcesManager")
+    @Static
+    @Accessor("sResourcesManager")
     void setResourcesManager(ResourcesManager resourcesManager);
   }
 }

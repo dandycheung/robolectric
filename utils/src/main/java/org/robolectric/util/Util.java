@@ -1,6 +1,5 @@
 package org.robolectric.util;
 
-import com.google.common.io.ByteStreams;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
@@ -9,12 +8,8 @@ import java.net.URISyntaxException;
 import java.net.URL;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.ArrayList;
-import java.util.List;
 
-/**
- * Generic collection of utility methods.
- */
+/** Generic collection of utility methods. */
 public class Util {
 
   /**
@@ -39,9 +34,10 @@ public class Util {
         version.substring(0, dotPos > -1 ? dotPos : dashPos > -1 ? dashPos : version.length()));
   }
 
+  @SuppressWarnings({"AndroidJdkLibsChecker", "NewApi"}) // not relevant, always runs on JVM
   public static void copy(InputStream in, OutputStream out) throws IOException {
     try {
-      ByteStreams.copy(in, out);
+      in.transferTo(out);
     } finally {
       in.close();
     }
@@ -54,9 +50,10 @@ public class Util {
    * @return The bytes read from the stream.
    * @throws IOException Error reading from stream.
    */
+  @SuppressWarnings({"AndroidJdkLibsChecker", "NewApi"}) // not relevant, always runs on JVM
   public static byte[] readBytes(InputStream is) throws IOException {
     try {
-      return ByteStreams.toByteArray(is);
+      return is.readAllBytes();
     } finally {
       is.close();
     }
@@ -98,14 +95,6 @@ public class Util {
     }
   }
 
-  public static List<Integer> intArrayToList(int[] ints) {
-    List<Integer> youSuckJava = new ArrayList<>();
-    for (int attr1 : ints) {
-      youSuckJava.add(attr1);
-    }
-    return youSuckJava;
-  }
-
   public static int parseInt(String valueFor) {
     if (valueFor.startsWith("0x")) {
       return Integer.parseInt(valueFor.substring(2), 16);
@@ -117,15 +106,16 @@ public class Util {
   /**
    * Re-throw {@code t} (even if it's a checked exception) without requiring a {@code throws}
    * declaration.
-   * <p>
-   * This function declares a return type of {@link RuntimeException} but will never actually return
-   * a value. This allows you to use it with a {@code throw} statement to convince the compiler that
-   * the current branch will not complete.
+   *
+   * <p>This function declares a return type of {@link RuntimeException} but will never actually
+   * return a value. This allows you to use it with a {@code throw} statement to convince the
+   * compiler that the current branch will not complete.
+   *
    * <pre>{@code
    * throw Util.sneakyThrow(new IOException());
    * }</pre>
-   * <p>
-   * Adapted from https://www.mail-archive.com/javaposse@googlegroups.com/msg05984.html
+   *
+   * <p>Adapted from https://www.mail-archive.com/javaposse@googlegroups.com/msg05984.html
    */
   @SuppressWarnings("unchecked")
   public static <T extends Throwable> RuntimeException sneakyThrow(Throwable t) throws T {

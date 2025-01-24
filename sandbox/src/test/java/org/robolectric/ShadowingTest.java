@@ -26,7 +26,7 @@ public class ShadowingTest {
 
   @Test
   @SandboxConfig(shadows = {ShadowAccountManagerForTests.class})
-  public void testStaticMethodsAreDelegated() throws Exception {
+  public void testStaticMethodsAreDelegated() {
     Object arg = mock(Object.class);
     AccountManager.get(arg);
     assertThat(ShadowAccountManagerForTests.wasCalled).isTrue();
@@ -45,8 +45,7 @@ public class ShadowingTest {
     }
   }
 
-  static class Context {
-  }
+  static class Context {}
 
   static class AccountManager {
     public static AccountManager get(Object arg) {
@@ -56,7 +55,7 @@ public class ShadowingTest {
 
   @Test
   @SandboxConfig(shadows = {ShadowClassWithProtectedMethod.class})
-  public void testProtectedMethodsAreDelegated() throws Exception {
+  public void testProtectedMethodsAreDelegated() {
     ClassWithProtectedMethod overlay = new ClassWithProtectedMethod();
     assertEquals("shadow name", overlay.getName());
   }
@@ -78,7 +77,7 @@ public class ShadowingTest {
 
   @Test
   @SandboxConfig(shadows = {ShadowPaintForTests.class})
-  public void testNativeMethodsAreDelegated() throws Exception {
+  public void testNativeMethodsAreDelegated() {
     Paint paint = new Paint();
     paint.setColor(1234);
 
@@ -88,6 +87,7 @@ public class ShadowingTest {
   @Instrument
   static class Paint {
     public native void setColor(int color);
+
     public native int getColor();
   }
 
@@ -121,15 +121,15 @@ public class ShadowingTest {
     }
   }
 
-  @Instrument @SuppressWarnings({"UnusedDeclaration"})
+  @Instrument
+  @SuppressWarnings({"UnusedDeclaration"})
   public static class ClassWithNoDefaultConstructor {
-    ClassWithNoDefaultConstructor(String string) {
-    }
+    ClassWithNoDefaultConstructor(String string) {}
   }
 
   @Test
   @SandboxConfig(shadows = {Pony.ShadowPony.class})
-  public void directlyOn_shouldCallThroughToOriginalMethodBody() throws Exception {
+  public void directlyOn_shouldCallThroughToOriginalMethodBody() {
     Pony pony = new Pony();
 
     assertEquals("Fake whinny! You're on my neck!", pony.ride("neck"));
@@ -140,20 +140,17 @@ public class ShadowingTest {
 
   @Test
   @SandboxConfig(shadows = {Pony.ShadowPony.class})
-  public void shouldCallRealForUnshadowedMethod() throws Exception {
+  public void shouldCallRealForUnshadowedMethod() {
     assertEquals("Off I saunter to the salon!", new Pony().saunter("the salon"));
   }
 
-  static class TextView {
-  }
+  static class TextView {}
 
   static class ColorStateList {
-    public ColorStateList(int[][] ints, int[] ints1) {
-    }
+    public ColorStateList(int[][] ints, int[] ints1) {}
   }
 
-  static class TypedArray {
-  }
+  static class TypedArray {}
 
   @Implements(TextView.class)
   public static class TextViewWithDummyGetTextColorsMethod {
@@ -168,7 +165,8 @@ public class ShadowingTest {
     ClassWithSomeConstructors o = new ClassWithSomeConstructors("my name");
     assertNull(o.name);
 
-    Method realConstructor = o.getClass().getDeclaredMethod(ShadowConstants.CONSTRUCTOR_METHOD_NAME, String.class);
+    Method realConstructor =
+        o.getClass().getDeclaredMethod(ShadowConstants.CONSTRUCTOR_METHOD_NAME, String.class);
     realConstructor.setAccessible(true);
     realConstructor.invoke(o, "my name");
     assertEquals("my name", o.name);
@@ -186,13 +184,12 @@ public class ShadowingTest {
   @Implements(ClassWithSomeConstructors.class)
   public static class ShadowOfClassWithSomeConstructors {
     @Implementation
-    protected void __constructor__(String s) {
-    }
+    protected void __constructor__(String s) {}
   }
 
   @Test
   @SandboxConfig(shadows = {ShadowApiImplementedClass.class})
-  public void withNonApiSubclassesWhichExtendApi_shouldStillBeInvoked() throws Exception {
+  public void withNonApiSubclassesWhichExtendApi_shouldStillBeInvoked() {
     assertEquals("did foo", new NonApiSubclass().doSomething("foo"));
   }
 
@@ -203,12 +200,10 @@ public class ShadowingTest {
   }
 
   @Instrument
-  public static class ApiImplementedClass {
-  }
+  public static class ApiImplementedClass {}
 
   @Implements(ApiImplementedClass.class)
-  public static class ShadowApiImplementedClass {
-  }
+  public static class ShadowApiImplementedClass {}
 
   @Test
   public void shouldNotInstrumentClassIfNotAddedToConfig() {

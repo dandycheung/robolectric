@@ -1,8 +1,8 @@
 package android.webkit;
 
 import java.io.UnsupportedEncodingException;
-import java.net.URI;
-import java.net.URISyntaxException;
+import java.net.MalformedURLException;
+import java.net.URL;
 import java.net.URLDecoder;
 import java.text.DateFormat;
 import java.text.ParseException;
@@ -10,6 +10,7 @@ import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
+import java.util.Objects;
 import javax.annotation.Nullable;
 
 /**
@@ -29,14 +30,30 @@ public class RoboCookieManager extends CookieManager {
   public void setCookie(String url, String value) {
     Cookie cookie = parseCookie(url, value);
     if (cookie != null) {
+      Cookie existingCookie = null;
+      for (Cookie c : store) {
+        if (c == null) {
+          continue;
+        }
+        if (Objects.equals(c.getName(), cookie.getName())
+            && Objects.equals(c.mHostname, cookie.mHostname)) {
+          existingCookie = c;
+          break;
+        }
+      }
+      if (existingCookie != null) {
+        store.remove(existingCookie);
+      }
       store.add(cookie);
     }
   }
 
   @Override
-  public void setCookie(String url, String value, ValueCallback<Boolean> valueCallback) {
+  public void setCookie(String url, String value, @Nullable ValueCallback<Boolean> valueCallback) {
     setCookie(url, value);
-    valueCallback.onReceiveValue(true);
+    if (valueCallback != null) {
+      valueCallback.onReceiveValue(true);
+    }
   }
 
   @Override
@@ -48,7 +65,7 @@ public class RoboCookieManager extends CookieManager {
   }
 
   @Override
-  public void removeAllCookies(ValueCallback<Boolean> valueCallback) {
+  public void removeAllCookies(@Nullable ValueCallback<Boolean> valueCallback) {
     store.clear();
     if (valueCallback != null) {
       valueCallback.onReceiveValue(Boolean.TRUE);
@@ -59,12 +76,14 @@ public class RoboCookieManager extends CookieManager {
   public void flush() {}
 
   @Override
-  public void removeSessionCookies(ValueCallback<Boolean> valueCallback) {
+  public void removeSessionCookies(@Nullable ValueCallback<Boolean> valueCallback) {
     boolean value;
     synchronized (store) {
       value = clearAndAddPersistentCookies();
     }
-    valueCallback.onReceiveValue(value);
+    if (valueCallback != null) {
+      valueCallback.onReceiveValue(value);
+    }
   }
 
   @Override
@@ -204,7 +223,7 @@ public class RoboCookieManager extends CookieManager {
       String field = fields[i].trim();
       if (field.startsWith(EXPIRATION_FIELD_NAME)) {
         expiration = getExpiration(field);
-      } else if (field.toUpperCase().equals(SECURE_ATTR_NAME)) {
+      } else if (field.equalsIgnoreCase(SECURE_ATTR_NAME)) {
         isSecure = true;
       }
     }
@@ -223,8 +242,8 @@ public class RoboCookieManager extends CookieManager {
     }
 
     try {
-      return new URI(url).getHost();
-    } catch (URISyntaxException e) {
+      return new URL(url).getHost();
+    } catch (MalformedURLException e) {
       throw new IllegalArgumentException("wrong URL : " + url, e);
     }
   }

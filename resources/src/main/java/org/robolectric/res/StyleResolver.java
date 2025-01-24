@@ -13,8 +13,13 @@ public class StyleResolver implements Style {
   private final ResName myResName;
   private final ResTable_config config;
 
-  public StyleResolver(ResourceTable appResourceTable, ResourceTable systemResourceTable, StyleData styleData,
-                       Style theme, ResName myResName, ResTable_config config) {
+  public StyleResolver(
+      ResourceTable appResourceTable,
+      ResourceTable systemResourceTable,
+      StyleData styleData,
+      Style theme,
+      ResName myResName,
+      ResTable_config config) {
     this.appResourceTable = appResourceTable;
     this.systemResourceTable = systemResourceTable;
     this.theme = theme;
@@ -23,7 +28,8 @@ public class StyleResolver implements Style {
     styles.add(styleData);
   }
 
-  @Override public AttributeResource getAttrValue(ResName resName) {
+  @Override
+  public AttributeResource getAttrValue(ResName resName) {
     for (StyleData style : styles) {
       AttributeResource value = style.getAttrValue(resName);
       if (value != null) return value;
@@ -45,8 +51,7 @@ public class StyleResolver implements Style {
 
     // todo: is this tested?
     if (theme != null) {
-      AttributeResource value = theme.getAttrValue(resName);
-      if (value != null) return value;
+      return theme.getAttrValue(resName);
     }
 
     return null;
@@ -88,27 +93,34 @@ public class StyleResolver implements Style {
     styleRef = dereferenceResName(styleRef);
 
     // TODO: Refactor this to a ResourceLoaderChooser
-    ResourceTable resourceProvider = "android".equals(styleRef.packageName) ? systemResourceTable : appResourceTable;
+    ResourceTable resourceProvider =
+        "android".equals(styleRef.packageName) ? systemResourceTable : appResourceTable;
     TypedResource typedResource = resourceProvider.getValue(styleRef, config);
 
     if (typedResource == null) {
-      StringBuilder builder = new StringBuilder("Could not find any resource")
-          .append(" from reference ").append(styleRef)
-          .append(" from ").append(style)
-          .append(" with ").append(theme);
-      throw new RuntimeException(builder.toString());
+      String builder =
+          "Could not find any resource from reference "
+              + styleRef
+              + " from "
+              + style
+              + " with "
+              + theme;
+      throw new RuntimeException(builder);
     }
 
     Object data = typedResource.getData();
     if (data instanceof StyleData) {
       return (StyleData) data;
     } else {
-      StringBuilder builder = new StringBuilder(styleRef.toString())
-          .append(" does not resolve to a Style.")
-          .append(" got ").append(data).append(" instead. ")
-          .append(" from ").append(style)
-          .append(" with ").append(theme);
-      throw new RuntimeException(builder.toString());
+      String builder =
+          styleRef
+              + " does not resolve to a Style. got "
+              + data
+              + " instead. from "
+              + style
+              + " with "
+              + theme;
+      throw new RuntimeException(builder);
     }
   }
 
@@ -172,5 +184,4 @@ public class StyleResolver implements Style {
   public String toString() {
     return styles.get(0) + " (and parents)";
   }
-
 }

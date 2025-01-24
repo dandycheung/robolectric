@@ -10,6 +10,8 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.MalformedURLException;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.net.URL;
 import java.net.URLClassLoader;
 import java.nio.file.Files;
@@ -35,6 +37,7 @@ public class SandboxClassLoader extends URLClassLoader {
   private final ClassInstrumentor classInstrumentor;
   private final ClassNodeProvider classNodeProvider;
   private final String dumpClassesDirectory;
+  private boolean isClosed;
 
   /** Constructor for use by tests. */
   SandboxClassLoader(InstrumentationConfiguration config) {
@@ -90,9 +93,9 @@ public class SandboxClassLoader extends URLClassLoader {
         try {
           urls.add(new File(entry).toURI().toURL());
         } catch (SecurityException e) { // File.toURI checks to see if the file is a directory
-          urls.add(new URL("file", null, new File(entry).getAbsolutePath()));
+          urls.add(new URI("file", null, new File(entry).getAbsolutePath()).toURL());
         }
-      } catch (MalformedURLException e) {
+      } catch (MalformedURLException | URISyntaxException e) {
         Logger.strict("malformed classpath entry: " + entry, e);
       }
     }
@@ -126,7 +129,9 @@ public class SandboxClassLoader extends URLClassLoader {
       if (loadedClass != null) {
         return loadedClass;
       }
-
+      if (isClosed) {
+        throw new ClassNotFoundException("This ClassLoader is closed");
+      }
       if (config.shouldAcquire(name)) {
         loadedClass =
             PerfStatsCollector.getInstance()
@@ -144,25 +149,14 @@ public class SandboxClassLoader extends URLClassLoader {
   }
 
   protected Class<?> maybeInstrumentClass(String className) throws ClassNotFoundException {
-    final byte[] origClassBytes = getByteCode(className);
-
-    try {
-      final byte[] bytes;
-      ClassDetails classDetails = new ClassDetails(origClassBytes);
-      if (config.shouldInstrument(classDetails)) {
-        bytes = classInstrumentor.instrument(classDetails, config, classNodeProvider);
-        maybeDumpClassBytes(classDetails, bytes);
-      } else {
-        bytes = postProcessUninstrumentedClass(classDetails);
-      }
-      ensurePackage(className);
-      return defineClass(className, bytes, 0, bytes.length);
-    } catch (Exception e) {
-      throw new ClassNotFoundException("couldn't load " + className, e);
-    } catch (OutOfMemoryError e) {
-      System.err.println("[ERROR] couldn't load " + className + " in " + this);
-      throw e;
+    byte[] classBytes = getByteCode(className);
+    ClassDetails classDetails = new ClassDetails(classBytes);
+    if (config.shouldInstrument(classDetails)) {
+      classBytes = classInstrumentor.instrument(classDetails, config, classNodeProvider);
+      maybeDumpClassBytes(classDetails, classBytes);
     }
+    ensurePackage(className);
+    return defineClass(className, classBytes, 0, classBytes.length);
   }
 
   private void maybeDumpClassBytes(ClassDetails classDetails, byte[] classBytes) {
@@ -176,10 +170,6 @@ public class SandboxClassLoader extends URLClassLoader {
         throw new AssertionError(e);
       }
     }
-  }
-
-  protected byte[] postProcessUninstrumentedClass(ClassDetails classDetails) {
-    return classDetails.getClassBytes();
   }
 
   protected byte[] getByteCode(String className) throws ClassNotFoundException {
@@ -204,5 +194,12 @@ public class SandboxClassLoader extends URLClassLoader {
         definePackage(pckgName, null, null, null, null, null, null, null);
       }
     }
+  }
+
+  @Override
+  public void close() throws IOException {
+    super.close();
+    resourceProvider.close();
+    isClosed = true;
   }
 }

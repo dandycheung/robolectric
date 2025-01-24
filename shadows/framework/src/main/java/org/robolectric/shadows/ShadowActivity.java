@@ -1,21 +1,27 @@
 package org.robolectric.shadows;
 
-import static android.os.Build.VERSION_CODES.JELLY_BEAN;
-import static android.os.Build.VERSION_CODES.KITKAT;
-import static android.os.Build.VERSION_CODES.LOLLIPOP;
 import static android.os.Build.VERSION_CODES.M;
 import static android.os.Build.VERSION_CODES.N;
 import static android.os.Build.VERSION_CODES.O;
+import static android.os.Build.VERSION_CODES.O_MR1;
+import static android.os.Build.VERSION_CODES.Q;
+import static android.os.Build.VERSION_CODES.S;
+import static android.os.Build.VERSION_CODES.UPSIDE_DOWN_CAKE;
 import static org.robolectric.util.reflector.Reflector.reflector;
 
+import android.annotation.AnimRes;
+import android.annotation.ColorInt;
+import android.annotation.RequiresApi;
 import android.app.Activity;
 import android.app.ActivityManager;
 import android.app.ActivityOptions;
 import android.app.ActivityThread;
 import android.app.Application;
 import android.app.Dialog;
+import android.app.DirectAction;
 import android.app.Instrumentation;
 import android.app.LoadedApk;
+import android.app.PendingIntent;
 import android.app.PictureInPictureParams;
 import android.content.ComponentName;
 import android.content.Context;
@@ -24,13 +30,21 @@ import android.content.IntentSender;
 import android.content.pm.ActivityInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.PackageManager.NameNotFoundException;
+import android.content.res.Configuration;
 import android.database.Cursor;
+import android.os.Binder;
+import android.os.Build;
 import android.os.Build.VERSION;
 import android.os.Build.VERSION_CODES;
 import android.os.Bundle;
+import android.os.CancellationSignal;
+import android.os.Handler;
 import android.os.IBinder;
+import android.os.Looper;
+import android.os.Parcel;
 import android.text.Selection;
 import android.text.SpannableStringBuilder;
+import android.util.SparseArray;
 import android.view.Display;
 import android.view.LayoutInflater;
 import android.view.Menu;
@@ -39,21 +53,23 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
 import com.android.internal.app.IVoiceInteractor;
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
 import javax.annotation.Nullable;
 import org.robolectric.RuntimeEnvironment;
 import org.robolectric.android.controller.ActivityController;
+import org.robolectric.annotation.ClassName;
 import org.robolectric.annotation.HiddenApi;
 import org.robolectric.annotation.Implementation;
 import org.robolectric.annotation.Implements;
 import org.robolectric.annotation.LooperMode;
 import org.robolectric.annotation.RealObject;
+import org.robolectric.fakes.RoboIntentSender;
 import org.robolectric.fakes.RoboMenuItem;
+import org.robolectric.fakes.RoboSplashScreen;
 import org.robolectric.shadow.api.Shadow;
 import org.robolectric.shadows.ShadowContextImpl._ContextImpl_;
 import org.robolectric.shadows.ShadowInstrumentation.TargetAndRequestCode;
@@ -61,9 +77,10 @@ import org.robolectric.shadows.ShadowLoadedApk._LoadedApk_;
 import org.robolectric.util.ReflectionHelpers;
 import org.robolectric.util.reflector.ForType;
 import org.robolectric.util.reflector.WithType;
+import org.robolectric.versioning.AndroidVersions.V;
 
 @SuppressWarnings("NewApi")
-@Implements(Activity.class)
+@Implements(value = Activity.class)
 public class ShadowActivity extends ShadowContextThemeWrapper {
 
   @RealObject protected Activity realActivity;
@@ -76,9 +93,11 @@ public class ShadowActivity extends ShadowContextThemeWrapper {
   private Integer lastShownDialogId = null;
   private int pendingTransitionEnterAnimResId = -1;
   private int pendingTransitionExitAnimResId = -1;
+  private final SparseArray<OverriddenActivityTransition> overriddenActivityTransitions =
+      new SparseArray<>();
   private Object lastNonConfigurationInstance;
-  private Map<Integer, Dialog> dialogForId = new HashMap<>();
-  private ArrayList<Cursor> managedCursors = new ArrayList<>();
+  private final Map<Integer, Dialog> dialogForId = new HashMap<>();
+  private final ArrayList<Cursor> managedCursors = new ArrayList<>();
   private int mDefaultKeyMode = Activity.DEFAULT_KEYS_DISABLE;
   private SpannableStringBuilder mDefaultKeySsb = null;
   private int streamType = -1;
@@ -92,18 +111,22 @@ public class ShadowActivity extends ShadowContextThemeWrapper {
   private boolean throwIntentSenderException;
   private boolean hasReportedFullyDrawn = false;
   private boolean isInPictureInPictureMode = false;
+  private Object splashScreen = null;
+  private boolean showWhenLocked = false;
+  private boolean turnScreenOn = false;
+  private boolean isTaskMovedToBack = false;
 
   public void setApplication(Application application) {
     reflector(_Activity_.class, realActivity).setApplication(application);
   }
 
   public void callAttach(Intent intent) {
-    callAttach(intent, /*activityOptions=*/ null, /*lastNonConfigurationInstances=*/ null);
+    callAttach(intent, /* activityOptions= */ null, /* lastNonConfigurationInstances= */ null);
   }
 
   public void callAttach(Intent intent, @Nullable Bundle activityOptions) {
     callAttach(
-        intent, /*activityOptions=*/ activityOptions, /*lastNonConfigurationInstances=*/ null);
+        intent, /* activityOptions= */ activityOptions, /* lastNonConfigurationInstances= */ null);
   }
 
   public void callAttach(
@@ -111,6 +134,19 @@ public class ShadowActivity extends ShadowContextThemeWrapper {
       @Nullable Bundle activityOptions,
       @Nullable @WithType("android.app.Activity$NonConfigurationInstances")
           Object lastNonConfigurationInstances) {
+    callAttach(
+        intent,
+        /* activityOptions= */ activityOptions,
+        /* lastNonConfigurationInstances= */ null,
+        /* overrideConfig= */ null);
+  }
+
+  public void callAttach(
+      Intent intent,
+      @Nullable Bundle activityOptions,
+      @Nullable @WithType("android.app.Activity$NonConfigurationInstances")
+          Object lastNonConfigurationInstances,
+      @Nullable Configuration overrideConfig) {
     Application application = RuntimeEnvironment.getApplication();
     Context baseContext = application.getBaseContext();
 
@@ -124,56 +160,67 @@ public class ShadowActivity extends ShadowContextThemeWrapper {
     } catch (NameNotFoundException e) {
       throw new RuntimeException("Activity is not resolved even if we made sure it exists", e);
     }
+    Binder token = new Binder();
 
     CharSequence activityTitle = activityInfo.loadLabel(baseContext.getPackageManager());
 
     ActivityThread activityThread = (ActivityThread) RuntimeEnvironment.getActivityThread();
     Instrumentation instrumentation = activityThread.getInstrumentation();
 
-    // If a non-default display is specified in the activity options, create a new context
-    // using createActivityContext with the correct display ID set, instead of using the shared
-    // application context.
-    //
-    // This is more closely aligned with real android and ensures the correct display
-    // is used, but has a couple of caveats:
-    // - Qualifiers set via RuntimeEnvironment.setQualifiers won't be propagated to this activity
-    // - Calling getSystemService on the activity will return a different object than when calling
-    //   on the application, meaning non-static shadow system service state will not be shared.
-    if (activityOptions != null && VERSION.SDK_INT >= VERSION_CODES.O) {
-      int displayId = ActivityOptions.fromBundle(activityOptions).getLaunchDisplayId();
-      if (displayId != Display.DEFAULT_DISPLAY
-          // INVALID_DISPLAY indicates no display was set in the options bundle
-          && displayId != Display.INVALID_DISPLAY) {
+    if (RuntimeEnvironment.getApiLevel() >= O_MR1) {
+      // ActivityInfo.FLAG_SHOW_WHEN_LOCKED
+      showWhenLocked = (activityInfo.flags & 0x800000) != 0;
+    }
 
-        LoadedApk loadedApk =
-            activityThread.getPackageInfo(
-                ShadowActivityThread.getApplicationInfo(), null, Context.CONTEXT_INCLUDE_CODE);
-        _LoadedApk_ loadedApkReflector = reflector(_LoadedApk_.class, loadedApk);
-        loadedApkReflector.setResources(application.getResources());
-        loadedApkReflector.setApplication(application);
-
-        baseContext =
-            reflector(_ContextImpl_.class)
-                .createActivityContext(
-                    activityThread,
-                    loadedApk,
-                    activityInfo,
-                    reflector(_ContextImpl_.class, baseContext).getActivityToken(),
-                    displayId,
-                    /* overrideConfiguration= */ application.getResources().getConfiguration());
-        reflector(_ContextImpl_.class, baseContext).setOuterContext(realActivity);
+    Context activityContext;
+    int displayId =
+        activityOptions != null
+            ? ActivityOptions.fromBundle(activityOptions).getLaunchDisplayId()
+            : Display.DEFAULT_DISPLAY;
+    // There's no particular reason to only do this above O, however the createActivityContext
+    // method signature changed between versions so just for convenience only the latest version is
+    // plumbed through, older versions will use the previous robolectric behavior of sharing
+    // activity and application ContextImpl objects.
+    // TODO(paulsowden): This should be enabled always but many service shadows are storing instance
+    //  state that should be represented globally, we'll have to update these one by one to use
+    //  static (i.e. global) state instead of instance state. For now enable only when the display
+    //  is requested to a non-default display which requires a separate context to function
+    //  properly.
+    if ((Boolean.getBoolean("robolectric.createActivityContexts")
+            || (displayId != Display.DEFAULT_DISPLAY && displayId != Display.INVALID_DISPLAY))
+        && RuntimeEnvironment.getApiLevel() >= O) {
+      LoadedApk loadedApk =
+          activityThread.getPackageInfo(
+              ShadowActivityThread.getApplicationInfo(), null, Context.CONTEXT_INCLUDE_CODE);
+      _LoadedApk_ loadedApkReflector = reflector(_LoadedApk_.class, loadedApk);
+      loadedApkReflector.setResources(application.getResources());
+      loadedApkReflector.setApplication(application);
+      activityContext =
+          reflector(_ContextImpl_.class)
+              .createActivityContext(
+                  activityThread, loadedApk, activityInfo, token, displayId, overrideConfig);
+      reflector(_ContextImpl_.class, activityContext).setOuterContext(realActivity);
+      // This is not what the SDK does but for backwards compatibility with previous versions of
+      // robolectric, which did not use a separate activity context, move the theme from the
+      // application context (previously tests would configure the theme on the application context
+      // with the expectation that it modify the activity).
+      if (baseContext.getThemeResId() != 0) {
+        activityContext.setTheme(baseContext.getThemeResId());
       }
+    } else {
+      activityContext = baseContext;
     }
 
     reflector(_Activity_.class, realActivity)
         .callAttach(
             realActivity,
-            baseContext,
+            activityContext,
             activityThread,
             instrumentation,
             application,
             intent,
             activityInfo,
+            token,
             activityTitle,
             lastNonConfigurationInstances);
 
@@ -243,13 +290,33 @@ public class ShadowActivity extends ShadowContextThemeWrapper {
     return mDefaultKeyMode;
   }
 
+  @Implementation(minSdk = O_MR1)
+  protected void setShowWhenLocked(boolean showWhenLocked) {
+    this.showWhenLocked = showWhenLocked;
+  }
+
+  @RequiresApi(api = O_MR1)
+  public boolean getShowWhenLocked() {
+    return showWhenLocked;
+  }
+
+  @Implementation(minSdk = O_MR1)
+  protected void setTurnScreenOn(boolean turnScreenOn) {
+    this.turnScreenOn = turnScreenOn;
+  }
+
+  @RequiresApi(api = O_MR1)
+  public boolean getTurnScreenOn() {
+    return turnScreenOn;
+  }
+
   @Implementation
-  protected final void setResult(int resultCode) {
+  protected void setResult(int resultCode) {
     this.resultCode = resultCode;
   }
 
   @Implementation
-  protected final void setResult(int resultCode, Intent data) {
+  protected void setResult(int resultCode, Intent data) {
     this.resultCode = resultCode;
     this.resultIntent = data;
   }
@@ -277,7 +344,7 @@ public class ShadowActivity extends ShadowContextThemeWrapper {
   }
 
   @Implementation
-  protected final Activity getParent() {
+  protected Activity getParent() {
     return parent;
   }
 
@@ -300,32 +367,35 @@ public class ShadowActivity extends ShadowContextThemeWrapper {
   @Implementation
   protected void finish() {
     // Sets the mFinished field in the real activity so NoDisplay activities can be tested.
-    ReflectionHelpers.setField(Activity.class, realActivity, "mFinished", true);
+    reflector(_Activity_.class, realActivity).setFinished(true);
   }
 
-  @Implementation(minSdk = LOLLIPOP)
+  @Implementation
   protected void finishAndRemoveTask() {
     // Sets the mFinished field in the real activity so NoDisplay activities can be tested.
-    ReflectionHelpers.setField(Activity.class, realActivity, "mFinished", true);
+    reflector(_Activity_.class, realActivity).setFinished(true);
   }
 
-  @Implementation(minSdk = JELLY_BEAN)
+  @Implementation
   protected void finishAffinity() {
     // Sets the mFinished field in the real activity so NoDisplay activities can be tested.
-    ReflectionHelpers.setField(Activity.class, realActivity, "mFinished", true);
+    reflector(_Activity_.class, realActivity).setFinished(true);
   }
 
   public void resetIsFinishing() {
-    ReflectionHelpers.setField(Activity.class, realActivity, "mFinished", false);
+    reflector(_Activity_.class, realActivity).setFinished(false);
   }
 
   /**
    * Returns whether {@link #finish()} was called.
    *
-   * @deprecated Use {@link Activity#isFinishing()} instead.
+   * <p>Note: this method seems redundant, but removing it will cause problems for Mockito spies of
+   * Activities that call {@link Activity#finish()} followed by {@link Activity#isFinishing()}. This
+   * is because `finish` modifies the members of {@link ShadowActivity#realActivity}, so
+   * `isFinishing` should refer to those same members.
    */
-  @Deprecated
-  public boolean isFinishing() {
+  @Implementation
+  protected boolean isFinishing() {
     return reflector(DirectActivityReflector.class, realActivity).isFinishing();
   }
 
@@ -351,16 +421,27 @@ public class ShadowActivity extends ShadowContextThemeWrapper {
     return window;
   }
 
+  /**
+   * @return fake SplashScreen
+   */
+  @Implementation(minSdk = S)
+  protected synchronized @ClassName("android.window.SplashScreen") Object getSplashScreen() {
+    if (splashScreen == null) {
+      splashScreen = new RoboSplashScreen();
+    }
+    return splashScreen;
+  }
+
   public void setWindow(Window window) {
     reflector(_Activity_.class, realActivity).setWindow(window);
   }
 
   @Implementation
   protected void runOnUiThread(Runnable action) {
-    if (ShadowLooper.looperMode() == LooperMode.Mode.PAUSED) {
-      reflector(DirectActivityReflector.class, realActivity).runOnUiThread(action);
-    } else {
+    if (ShadowLooper.looperMode() == LooperMode.Mode.LEGACY) {
       ShadowApplication.getInstance().getForegroundThreadScheduler().post(action);
+    } else {
+      reflector(DirectActivityReflector.class, realActivity).runOnUiThread(action);
     }
   }
 
@@ -403,29 +484,38 @@ public class ShadowActivity extends ShadowContextThemeWrapper {
     lastIntentSenderRequest =
         new IntentSenderRequest(
             intentSender, requestCode, fillInIntent, flagsMask, flagsValues, extraFlags, options);
+    lastIntentSenderRequest.send();
   }
 
-  @Implementation(minSdk = KITKAT)
+  @Implementation
   protected void reportFullyDrawn() {
     hasReportedFullyDrawn = true;
   }
 
-  /** @return whether {@code ReportFullyDrawn()} methods has been called. */
+  /**
+   * @return whether {@code ReportFullyDrawn()} methods has been called.
+   */
   public boolean getReportFullyDrawn() {
     return hasReportedFullyDrawn;
   }
 
-  /** @return the {@code contentView} set by one of the {@code setContentView()} methods */
+  /**
+   * @return the {@code contentView} set by one of the {@code setContentView()} methods
+   */
   public View getContentView() {
     return ((ViewGroup) getWindow().findViewById(android.R.id.content)).getChildAt(0);
   }
 
-  /** @return the {@code resultCode} set by one of the {@code setResult()} methods */
+  /**
+   * @return the {@code resultCode} set by one of the {@code setResult()} methods
+   */
   public int getResultCode() {
     return resultCode;
   }
 
-  /** @return the {@code Intent} set by {@link #setResult(int, android.content.Intent)} */
+  /**
+   * @return the {@code Intent} set by {@link #setResult(int, android.content.Intent)}
+   */
   public Intent getResultIntent() {
     return resultIntent;
   }
@@ -436,6 +526,7 @@ public class ShadowActivity extends ShadowContextThemeWrapper {
    * @return the next started {@code Intent} for an activity, wrapped in an {@link
    *     ShadowActivity.IntentForResult} object
    */
+  @Override
   public IntentForResult getNextStartedActivityForResult() {
     ActivityThread activityThread = (ActivityThread) RuntimeEnvironment.getActivityThread();
     ShadowInstrumentation shadowInstrumentation =
@@ -450,6 +541,7 @@ public class ShadowActivity extends ShadowContextThemeWrapper {
    * @return the most recently started {@code Intent}, wrapped in an {@link
    *     ShadowActivity.IntentForResult} object
    */
+  @Override
   public IntentForResult peekNextStartedActivityForResult() {
     ActivityThread activityThread = (ActivityThread) RuntimeEnvironment.getActivityThread();
     ShadowInstrumentation shadowInstrumentation =
@@ -465,13 +557,17 @@ public class ShadowActivity extends ShadowContextThemeWrapper {
     return reflector(DirectActivityReflector.class, realActivity).getLastNonConfigurationInstance();
   }
 
-  /** @deprecated use {@link ActivityController#recreate()}. */
+  /**
+   * @deprecated use {@link ActivityController#recreate()}.
+   */
   @Deprecated
   public void setLastNonConfigurationInstance(Object lastNonConfigurationInstance) {
     this.lastNonConfigurationInstance = lastNonConfigurationInstance;
   }
 
-  /** @param view View to focus. */
+  /**
+   * @param view View to focus.
+   */
   public void setCurrentFocus(View view) {
     currentFocus = view;
   }
@@ -487,6 +583,24 @@ public class ShadowActivity extends ShadowContextThemeWrapper {
 
   public int getPendingTransitionExitAnimationResourceId() {
     return pendingTransitionExitAnimResId;
+  }
+
+  /**
+   * Get the overridden {@link Activity} transition, set by {@link
+   * Activity#overrideActivityTransition}.
+   *
+   * @param overrideType Use {@link Activity#OVERRIDE_TRANSITION_OPEN} to get the overridden
+   *     activity transition animation details when starting/entering an activity. Use {@link
+   *     Activity#OVERRIDE_TRANSITION_CLOSE} to get the overridden activity transition animation
+   *     details when finishing/closing an activity.
+   * @return overridden activity transition details after calling {@link
+   *     Activity#overrideActivityTransition(int, int, int, int)} or null if was not overridden.
+   * @see #clearOverrideActivityTransition(int)
+   */
+  @Nullable
+  @RequiresApi(Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
+  public OverriddenActivityTransition getOverriddenActivityTransition(int overrideType) {
+    return overriddenActivityTransitions.get(overrideType, null);
   }
 
   @Implementation
@@ -517,30 +631,18 @@ public class ShadowActivity extends ShadowContextThemeWrapper {
 
   @Deprecated
   public void callOnActivityResult(int requestCode, int resultCode, Intent resultData) {
-    final ActivityInvoker invoker = new ActivityInvoker();
-    invoker
-        .call("onActivityResult", Integer.TYPE, Integer.TYPE, Intent.class)
-        .with(requestCode, resultCode, resultData);
+    reflector(_Activity_.class, realActivity).onActivityResult(requestCode, resultCode, resultData);
   }
 
   /** For internal use only. Not for public use. */
   public void internalCallDispatchActivityResult(
       String who, int requestCode, int resultCode, Intent data) {
-    final ActivityInvoker invoker = new ActivityInvoker();
     if (VERSION.SDK_INT >= VERSION_CODES.P) {
-      invoker
-          .call(
-              "dispatchActivityResult",
-              String.class,
-              Integer.TYPE,
-              Integer.TYPE,
-              Intent.class,
-              String.class)
-          .with(who, requestCode, resultCode, data, "ACTIVITY_RESULT");
+      reflector(_Activity_.class, realActivity)
+          .dispatchActivityResult(who, requestCode, resultCode, data, "ACTIVITY_RESULT");
     } else {
-      invoker
-          .call("dispatchActivityResult", String.class, Integer.TYPE, Integer.TYPE, Intent.class)
-          .with(who, requestCode, resultCode, data);
+      reflector(_Activity_.class, realActivity)
+          .dispatchActivityResult(who, requestCode, resultCode, data);
     }
   }
 
@@ -600,42 +702,24 @@ public class ShadowActivity extends ShadowContextThemeWrapper {
   }
 
   @Implementation
-  protected final void showDialog(int id) {
+  protected void showDialog(int id) {
     showDialog(id, null);
   }
 
   @Implementation
-  protected final void dismissDialog(int id) {
-    final Dialog dialog = dialogForId.get(id);
-    if (dialog == null) {
-      throw new IllegalArgumentException();
-    }
-
-    dialog.dismiss();
-  }
-
-  @Implementation
-  protected final void removeDialog(int id) {
-    dialogForId.remove(id);
-  }
-
-  @Implementation
-  protected final boolean showDialog(int id, Bundle bundle) {
+  protected boolean showDialog(int id, Bundle bundle) {
     this.lastShownDialogId = id;
     Dialog dialog = dialogForId.get(id);
 
     if (dialog == null) {
-      final ActivityInvoker invoker = new ActivityInvoker();
-      dialog = (Dialog) invoker.call("onCreateDialog", Integer.TYPE).with(id);
+      dialog = reflector(_Activity_.class, realActivity).onCreateDialog(id);
       if (dialog == null) {
         return false;
       }
       if (bundle == null) {
-        invoker.call("onPrepareDialog", Integer.TYPE, Dialog.class).with(id, dialog);
+        reflector(_Activity_.class, realActivity).onPrepareDialog(id, dialog);
       } else {
-        invoker
-            .call("onPrepareDialog", Integer.TYPE, Dialog.class, Bundle.class)
-            .with(id, dialog, bundle);
+        reflector(_Activity_.class, realActivity).onPrepareDialog(id, dialog, bundle);
       }
 
       dialogForId.put(id, dialog);
@@ -645,12 +729,27 @@ public class ShadowActivity extends ShadowContextThemeWrapper {
     return true;
   }
 
+  @Implementation
+  protected void dismissDialog(int id) {
+    final Dialog dialog = dialogForId.get(id);
+    if (dialog == null) {
+      throw new IllegalArgumentException();
+    }
+
+    dialog.dismiss();
+  }
+
+  @Implementation
+  protected void removeDialog(int id) {
+    dialogForId.remove(id);
+  }
+
   public void setIsTaskRoot(boolean isRoot) {
     mIsTaskRoot = isRoot;
   }
 
   @Implementation
-  protected final boolean isTaskRoot() {
+  protected boolean isTaskRoot() {
     return mIsTaskRoot;
   }
 
@@ -672,6 +771,27 @@ public class ShadowActivity extends ShadowContextThemeWrapper {
     pendingTransitionExitAnimResId = exitAnim;
   }
 
+  @Implementation(minSdk = UPSIDE_DOWN_CAKE)
+  protected void overrideActivityTransition(
+      int overrideType,
+      @AnimRes int enterAnim,
+      @AnimRes int exitAnim,
+      @ColorInt int backgroundColor) {
+    overriddenActivityTransitions.put(
+        overrideType, new OverriddenActivityTransition(enterAnim, exitAnim, backgroundColor));
+
+    reflector(DirectActivityReflector.class, realActivity)
+        .overrideActivityTransition(overrideType, enterAnim, exitAnim, backgroundColor);
+  }
+
+  @Implementation(minSdk = UPSIDE_DOWN_CAKE)
+  protected void clearOverrideActivityTransition(int overrideType) {
+    overriddenActivityTransitions.remove(overrideType);
+
+    reflector(DirectActivityReflector.class, realActivity)
+        .clearOverrideActivityTransition(overrideType);
+  }
+
   public Dialog getDialogById(int dialogId) {
     return dialogForId.get(dialogId);
   }
@@ -688,7 +808,8 @@ public class ShadowActivity extends ShadowContextThemeWrapper {
   @Implementation
   protected void recreate() {
     if (controller != null) {
-      controller.recreate();
+      // Post the call to recreate to simulate ActivityThread behavior.
+      new Handler(Looper.getMainLooper()).post(controller::recreate);
     } else {
       throw new IllegalStateException(
           "Cannot use an Activity that is not managed by an ActivityController");
@@ -710,20 +831,27 @@ public class ShadowActivity extends ShadowContextThemeWrapper {
   }
 
   @Implementation
-  protected final void setVolumeControlStream(int streamType) {
+  protected void setVolumeControlStream(int streamType) {
     this.streamType = streamType;
   }
 
   @Implementation
-  protected final int getVolumeControlStream() {
+  protected int getVolumeControlStream() {
     return streamType;
   }
 
-  @Implementation(minSdk = M)
-  protected final void requestPermissions(String[] permissions, int requestCode) {
+  @Implementation(minSdk = M, maxSdk = UPSIDE_DOWN_CAKE)
+  protected void requestPermissions(String[] permissions, int requestCode) {
     lastRequestedPermission = new PermissionsRequest(permissions, requestCode);
     reflector(DirectActivityReflector.class, realActivity)
         .requestPermissions(permissions, requestCode);
+  }
+
+  @Implementation(minSdk = V.SDK_INT)
+  protected void requestPermissions(String[] permissions, int requestCode, int deviceId) {
+    lastRequestedPermission = new PermissionsRequest(permissions, requestCode, deviceId);
+    reflector(DirectActivityReflector.class, realActivity)
+        .requestPermissions(permissions, requestCode, deviceId);
   }
 
   /**
@@ -732,7 +860,7 @@ public class ShadowActivity extends ShadowContextThemeWrapper {
    * <p>The status of the lock task can be verified using {@link #isLockTask} method. Otherwise this
    * implementation has no effect.
    */
-  @Implementation(minSdk = LOLLIPOP)
+  @Implementation
   protected void startLockTask() {
     Shadow.<ShadowActivityManager>extract(getActivityManager())
         .setLockTaskModeState(ActivityManager.LOCK_TASK_MODE_LOCKED);
@@ -744,7 +872,7 @@ public class ShadowActivity extends ShadowContextThemeWrapper {
    * <p>The status of the lock task can be verified using {@link #isLockTask} method. Otherwise this
    * implementation has no effect.
    */
-  @Implementation(minSdk = LOLLIPOP)
+  @Implementation
   protected void stopLockTask() {
     Shadow.<ShadowActivityManager>extract(getActivityManager())
         .setLockTaskModeState(ActivityManager.LOCK_TASK_MODE_NONE);
@@ -792,8 +920,24 @@ public class ShadowActivity extends ShadowContextThemeWrapper {
 
   @Implementation
   protected boolean moveTaskToBack(boolean nonRoot) {
+    // If task has already moved to back, return true.
+    if (isTaskMovedToBack) {
+      return true;
+    }
+    // If nonRoot is false then #moveTaskToBack only works when activity is the root of the task.
+    if (!nonRoot && !mIsTaskRoot) {
+      return false;
+    }
+    isTaskMovedToBack = true;
     isInPictureInPictureMode = false;
     return true;
+  }
+
+  /**
+   * @return whether the task containing this activity is moved to the back of the activity stack.
+   */
+  public boolean isTaskMovedToBack() {
+    return isTaskMovedToBack;
   }
 
   /**
@@ -827,29 +971,40 @@ public class ShadowActivity extends ShadowContextThemeWrapper {
         .setVoiceInteractor(ReflectionHelpers.createDeepProxy(IVoiceInteractor.class));
   }
 
-  private final class ActivityInvoker {
-    private Method method;
-
-    public ActivityInvoker call(final String methodName, final Class... argumentClasses) {
-      try {
-        method = Activity.class.getDeclaredMethod(methodName, argumentClasses);
-        method.setAccessible(true);
-        return this;
-      } catch (NoSuchMethodException e) {
-        throw new RuntimeException(e);
-      }
+  /**
+   * Calls Activity#onGetDirectActions with the given parameters. This method also simulates the
+   * Parcel serialization/deserialization which occurs when assistant requests DirectAction.
+   */
+  public void callOnGetDirectActions(
+      CancellationSignal cancellationSignal, Consumer<List<DirectAction>> callback) {
+    if (RuntimeEnvironment.getApiLevel() < Q) {
+      throw new IllegalStateException("callOnGetDirectActions requires API " + Q);
     }
+    realActivity.onGetDirectActions(
+        cancellationSignal,
+        directActions -> {
+          Parcel parcel = Parcel.obtain();
+          parcel.writeParcelableList(directActions, 0);
+          parcel.setDataPosition(0);
+          List<DirectAction> output = new ArrayList<>();
+          parcel.readParcelableList(output, DirectAction.class.getClassLoader());
+          callback.accept(output);
+        });
+  }
 
-    public Object withNothing() {
-      return with();
-    }
+  /**
+   * Class to hold overridden activity transition details after calling {@link
+   * Activity#overrideActivityTransition(int, int, int, int)}
+   */
+  public static class OverriddenActivityTransition {
+    @AnimRes public final int enterAnim;
+    @AnimRes public final int exitAnim;
+    @ColorInt public final int backgroundColor;
 
-    public Object with(final Object... parameters) {
-      try {
-        return method.invoke(realActivity, parameters);
-      } catch (IllegalAccessException | IllegalArgumentException | InvocationTargetException e) {
-        throw new RuntimeException(e);
-      }
+    public OverriddenActivityTransition(int enterAnim, int exitAnim, int backgroundColor) {
+      this.enterAnim = enterAnim;
+      this.exitAnim = exitAnim;
+      this.backgroundColor = backgroundColor;
     }
   }
 
@@ -857,10 +1012,16 @@ public class ShadowActivity extends ShadowContextThemeWrapper {
   public static class PermissionsRequest {
     public final int requestCode;
     public final String[] requestedPermissions;
+    public final int deviceId;
 
     public PermissionsRequest(String[] requestedPermissions, int requestCode) {
+      this(requestedPermissions, requestCode, Context.DEVICE_ID_DEFAULT);
+    }
+
+    public PermissionsRequest(String[] requestedPermissions, int requestCode, int deviceId) {
       this.requestedPermissions = requestedPermissions;
       this.requestCode = requestCode;
+      this.deviceId = deviceId;
     }
   }
 
@@ -890,6 +1051,25 @@ public class ShadowActivity extends ShadowContextThemeWrapper {
       this.extraFlags = extraFlags;
       this.options = options;
     }
+
+    public void send() {
+      if (intentSender instanceof RoboIntentSender) {
+        try {
+          Shadow.<ShadowPendingIntent>extract(((RoboIntentSender) intentSender).getPendingIntent())
+              .send(
+                  RuntimeEnvironment.getApplication(),
+                  0,
+                  null,
+                  null,
+                  null,
+                  null,
+                  null,
+                  requestCode);
+        } catch (PendingIntent.CanceledException e) {
+          throw new RuntimeException(e);
+        }
+      }
+    }
   }
 
   private ShadowPackageManager shadowOf(PackageManager packageManager) {
@@ -905,6 +1085,11 @@ public class ShadowActivity extends ShadowContextThemeWrapper {
 
     boolean isFinishing();
 
+    void overrideActivityTransition(
+        int overrideType, int enterAnim, int exitAnim, int backgroundColor);
+
+    void clearOverrideActivityTransition(int overrideType);
+
     Window getWindow();
 
     Object getLastNonConfigurationInstance();
@@ -912,5 +1097,7 @@ public class ShadowActivity extends ShadowContextThemeWrapper {
     boolean onCreateOptionsMenu(Menu menu);
 
     void requestPermissions(String[] permissions, int requestCode);
+
+    void requestPermissions(String[] permissions, int requestCode, int deviceId);
   }
 }

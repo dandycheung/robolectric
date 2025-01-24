@@ -38,22 +38,29 @@ public class ResName {
     name = matcher.group(NAME).trim();
 
     hashCode = computeHashCode();
-    if (packageName.equals("xmlns")) throw new IllegalStateException("\"" + fullyQualifiedName + "\" unexpected");
+    if (packageName.equals("xmlns"))
+      throw new IllegalStateException("\"" + fullyQualifiedName + "\" unexpected");
   }
 
-  /**
-   * @return null if the resource could not be qualified.
-   */
-  public static String qualifyResourceName(@Nonnull String possiblyQualifiedResourceName, String defaultPackageName, String defaultType) {
-    ResName resName = qualifyResName(possiblyQualifiedResourceName, defaultPackageName, defaultType);
+  /** Returns the fully qualified resource name if null if the resource could not be qualified. */
+  public static String qualifyResourceName(
+      @Nonnull String possiblyQualifiedResourceName,
+      String defaultPackageName,
+      String defaultType) {
+    ResName resName =
+        qualifyResName(possiblyQualifiedResourceName, defaultPackageName, defaultType);
     return resName != null ? resName.getFullyQualifiedName() : null;
   }
 
-  public static ResName qualifyResName(@Nonnull String possiblyQualifiedResourceName, ResName defaults) {
+  public static ResName qualifyResName(
+      @Nonnull String possiblyQualifiedResourceName, ResName defaults) {
     return qualifyResName(possiblyQualifiedResourceName, defaults.packageName, defaults.type);
   }
 
-  public static ResName qualifyResName(@Nonnull String possiblyQualifiedResourceName, String defaultPackageName, String defaultType) {
+  public static ResName qualifyResName(
+      @Nonnull String possiblyQualifiedResourceName,
+      String defaultPackageName,
+      String defaultType) {
     int indexOfColon = possiblyQualifiedResourceName.indexOf(':');
     int indexOfSlash = possiblyQualifiedResourceName.indexOf('/');
     String type = null;
@@ -64,7 +71,7 @@ public class ResName {
         type = possiblyQualifiedResourceName.substring(0, indexOfSlash);
       }
       packageName = possiblyQualifiedResourceName.substring(indexOfSlash + 1, indexOfColon);
-      name =  possiblyQualifiedResourceName.substring(indexOfColon + 1);
+      name = possiblyQualifiedResourceName.substring(indexOfColon + 1);
     } else if (indexOfSlash > indexOfColon) {
       if (indexOfColon > 0) {
         packageName = possiblyQualifiedResourceName.substring(0, indexOfColon);
@@ -73,7 +80,8 @@ public class ResName {
       name = possiblyQualifiedResourceName.substring(indexOfSlash + 1);
     }
 
-    if ((type == null && defaultType == null) || (packageName == null && defaultPackageName == null)) {
+    if ((type == null && defaultType == null)
+        || (packageName == null && defaultPackageName == null)) {
       return null;
     }
 
@@ -86,7 +94,8 @@ public class ResName {
     return new ResName(packageName, type == null ? defaultType : type, name);
   }
 
-  public static String qualifyResName(String possiblyQualifiedResourceName, String contextPackageName) {
+  public static String qualifyResName(
+      String possiblyQualifiedResourceName, String contextPackageName) {
     if (possiblyQualifiedResourceName == null) {
       return null;
     }
@@ -96,7 +105,8 @@ public class ResName {
     }
 
     // Was not able to fully qualify the resource name
-    String fullyQualifiedResourceName = qualifyResourceName(possiblyQualifiedResourceName, contextPackageName, null);
+    String fullyQualifiedResourceName =
+        qualifyResourceName(possiblyQualifiedResourceName, contextPackageName, null);
     if (fullyQualifiedResourceName == null) {
       return null;
     }
@@ -104,7 +114,8 @@ public class ResName {
     return fullyQualifiedResourceName.replaceAll("[@+]", "");
   }
 
-  public static ResName qualifyFromFilePath(@Nonnull final String packageName, @Nonnull final String filePath) {
+  public static ResName qualifyFromFilePath(
+      @Nonnull final String packageName, @Nonnull final String filePath) {
     final File file = new File(filePath);
     final String type = file.getParentFile().getName().split("-", 0)[0];
     final String name = Fs.baseNameFor(file.toPath());
@@ -115,7 +126,7 @@ public class ResName {
   @Override
   public boolean equals(Object o) {
     if (this == o) return true;
-    if (o == null || getClass() != o.getClass()) return false;
+    if (!(o instanceof ResName)) return false;
 
     ResName resName = (ResName) o;
 
@@ -123,9 +134,7 @@ public class ResName {
 
     if (!packageName.equals(resName.packageName)) return false;
     if (!type.equals(resName.type)) return false;
-    if (!name.equals(resName.name)) return false;
-
-    return true;
+    return name.equals(resName.name);
   }
 
   @Override
@@ -153,7 +162,8 @@ public class ResName {
 
   public void mustBe(String expectedType) {
     if (!type.equals(expectedType)) {
-      throw new RuntimeException("expected " + getFullyQualifiedName() + " to be a " + expectedType + ", is a " + type);
+      throw new RuntimeException(
+          "expected " + getFullyQualifiedName() + " to be a " + expectedType + ", is a " + type);
     }
   }
 

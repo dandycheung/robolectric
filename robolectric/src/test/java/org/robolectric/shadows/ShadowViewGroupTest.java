@@ -8,8 +8,14 @@ import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 import static org.robolectric.Shadows.shadowOf;
+import static org.robolectric.shadows.ShadowLooper.idleMainLooper;
 
+import android.app.Activity;
 import android.app.Application;
+import android.content.Context;
+import android.graphics.Bitmap;
+import android.graphics.Canvas;
+import android.os.Bundle;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
@@ -22,13 +28,20 @@ import androidx.test.core.app.ApplicationProvider;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
+import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.robolectric.R;
+import org.robolectric.Robolectric;
+import org.robolectric.annotation.Config;
+import org.robolectric.annotation.GraphicsMode;
+import org.robolectric.annotation.GraphicsMode.Mode;
 
 @RunWith(AndroidJUnit4.class)
+@GraphicsMode(Mode.LEGACY)
 public class ShadowViewGroupTest {
   private String defaultLineSeparator;
   private ViewGroup root;
@@ -58,7 +71,7 @@ public class ShadowViewGroupTest {
     child3.addView(child3a);
     child3.addView(child3b);
 
-    defaultLineSeparator = System.getProperty("line.separator");
+    defaultLineSeparator = System.lineSeparator();
     System.setProperty("line.separator", "\n");
   }
 
@@ -76,19 +89,17 @@ public class ShadowViewGroupTest {
   public void testLayoutAnimationListener() {
     assertThat(root.getLayoutAnimationListener()).isNull();
 
-    AnimationListener animationListener = new AnimationListener() {
-      @Override
-      public void onAnimationEnd(Animation a) {
-      }
+    AnimationListener animationListener =
+        new AnimationListener() {
+          @Override
+          public void onAnimationEnd(Animation a) {}
 
-      @Override
-      public void onAnimationRepeat(Animation a) {
-      }
+          @Override
+          public void onAnimationRepeat(Animation a) {}
 
-      @Override
-      public void onAnimationStart(Animation a) {
-      }
-    };
+          @Override
+          public void onAnimationStart(Animation a) {}
+        };
     root.setLayoutAnimationListener(animationListener);
 
     assertThat(root.getLayoutAnimationListener()).isSameInstanceAs(animationListener);
@@ -152,7 +163,7 @@ public class ShadowViewGroupTest {
   }
 
   @Test
-  public void shouldfindViewWithTagFromCorrectViewGroup() {
+  public void shouldFindViewWithTagFromCorrectViewGroup() {
     root.removeAllViews();
     child1.setTag("tag1");
     child2.setTag("tag2");
@@ -175,32 +186,71 @@ public class ShadowViewGroupTest {
   }
 
   @Test
+  @Config(minSdk = 17) // TODO: mysteriously fails on github CI on API 16
   public void hasFocus_shouldReturnTrueIfAnyChildHasFocus() {
-    makeFocusable(root, child1, child2, child3, child3a, child3b);
-    assertFalse(root.hasFocus());
+    ContainerActivity containerActivity = Robolectric.setupActivity(ContainerActivity.class);
+    makeFocusable(
+        containerActivity.root,
+        containerActivity.child1,
+        containerActivity.child2,
+        containerActivity.child3,
+        containerActivity.child3a,
+        containerActivity.child3b);
 
-    child1.requestFocus();
-    assertTrue(root.hasFocus());
+    containerActivity.child1.requestFocus();
+    assertTrue(containerActivity.root.hasFocus());
 
-    child1.clearFocus();
-    assertFalse(child1.hasFocus());
-    assertTrue(root.hasFocus());
+    containerActivity.child1.clearFocus();
+    assertFalse(containerActivity.child1.hasFocus());
+    assertTrue(containerActivity.root.hasFocus());
 
-    child3b.requestFocus();
-    assertTrue(root.hasFocus());
+    containerActivity.child3b.requestFocus();
+    assertTrue(containerActivity.root.hasFocus());
 
-    child3b.clearFocus();
-    assertFalse(child3b.hasFocus());
-    assertFalse(child3.hasFocus());
-    assertTrue(root.hasFocus());
+    containerActivity.child3b.clearFocus();
+    assertFalse(containerActivity.child3b.hasFocus());
+    assertFalse(containerActivity.child3.hasFocus());
+    assertTrue(containerActivity.root.hasFocus());
 
-    child2.requestFocus();
-    assertFalse(child3.hasFocus());
-    assertTrue(child2.hasFocus());
-    assertTrue(root.hasFocus());
+    containerActivity.child2.requestFocus();
+    assertFalse(containerActivity.child3.hasFocus());
+    assertTrue(containerActivity.child2.hasFocus());
+    assertTrue(containerActivity.root.hasFocus());
 
-    root.requestFocus();
-    assertTrue(root.hasFocus());
+    containerActivity.root.requestFocus();
+    assertTrue(containerActivity.root.hasFocus());
+  }
+
+  private static class ContainerActivity extends Activity {
+
+    ViewGroup root;
+    View child1;
+    View child2;
+    ViewGroup child3;
+    View child3a;
+    View child3b;
+
+    @Override
+    protected void onCreate(@Nullable Bundle savedInstanceState) {
+      super.onCreate(savedInstanceState);
+
+      root = new FrameLayout(this);
+
+      child1 = new View(this);
+      child2 = new View(this);
+      child3 = new FrameLayout(this);
+      child3a = new View(this);
+      child3b = new View(this);
+
+      root.addView(child1);
+      root.addView(child2);
+      root.addView(child3);
+
+      child3.addView(child3a);
+      child3.addView(child3b);
+
+      setContentView(root);
+    }
   }
 
   @Test
@@ -229,22 +279,27 @@ public class ShadowViewGroupTest {
 
     ByteArrayOutputStream out = new ByteArrayOutputStream();
     shadowOf(root).dump(new PrintStream(out), 0);
-    String expected = "<FrameLayout>\n" +
-        "  <View/>\n" +
-        "  <View/>\n" +
-        "  <FrameLayout id=\"org.robolectric:id/snippet_text\">\n" +
-        "    <View/>\n" +
-        "    <View visibility=\"GONE\"/>\n" +
-        "    <TextView visibility=\"INVISIBLE\" text=\"Here&#39;s some text!\"/>\n" +
-        "  </FrameLayout>\n" +
-        "</FrameLayout>\n";
+    String expected =
+        "<FrameLayout>\n"
+            + "  <View/>\n"
+            + "  <View/>\n"
+            + "  <FrameLayout id=\"org.robolectric:id/snippet_text\">\n"
+            + "    <View/>\n"
+            + "    <View visibility=\"GONE\"/>\n"
+            + "    <TextView visibility=\"INVISIBLE\" text=\"Here&#39;s some text!\"/>\n"
+            + "  </FrameLayout>\n"
+            + "</FrameLayout>\n";
     assertEquals(expected.replaceAll("\n", System.lineSeparator()), out.toString());
   }
 
   @Test
   public void addViewWithLayoutParams_shouldStoreLayoutParams() {
-    FrameLayout.LayoutParams layoutParams1 = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-    FrameLayout.LayoutParams layoutParams2 = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+    FrameLayout.LayoutParams layoutParams1 =
+        new FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+    FrameLayout.LayoutParams layoutParams2 =
+        new FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
     View child1 = new View(ApplicationProvider.getApplicationContext());
     View child2 = new View(ApplicationProvider.getApplicationContext());
     root.addView(child1, layoutParams1);
@@ -253,26 +308,27 @@ public class ShadowViewGroupTest {
     assertSame(layoutParams2, child2.getLayoutParams());
   }
 
-//  todo: re-enable this
-//  @Test @Config(minSdk = FROYO)
-//  public void getChildAt_shouldThrowIndexOutOfBoundsForInvalidIndices() { // 'cause that's what Android does
-//    assertThat(root.getChildCount()).isEqualTo(3);
-//    assertThrowsExceptionForBadIndex(13);
-//    assertThrowsExceptionForBadIndex(3);
-//    assertThrowsExceptionForBadIndex(-1);
-//  }
-//
-//  private void assertThrowsExceptionForBadIndex(int index) {
-//    try {
-//      assertThat(root.getChildAt(index)).isNull();
-//      fail("no exception");
-//    } catch (IndexOutOfBoundsException ex) {
-//      //noinspection UnnecessaryReturnStatement
-//      return;
-//    } catch (Exception ex) {
-//      fail("wrong exception type");
-//    }
-//  }
+  //  todo: re-enable this
+  //  @Test @Config(minSdk = FROYO)
+  //  public void getChildAt_shouldThrowIndexOutOfBoundsForInvalidIndices() { // 'cause that's what
+  // Android does
+  //    assertThat(root.getChildCount()).isEqualTo(3);
+  //    assertThrowsExceptionForBadIndex(13);
+  //    assertThrowsExceptionForBadIndex(3);
+  //    assertThrowsExceptionForBadIndex(-1);
+  //  }
+  //
+  //  private void assertThrowsExceptionForBadIndex(int index) {
+  //    try {
+  //      assertThat(root.getChildAt(index)).isNull();
+  //      fail("no exception");
+  //    } catch (IndexOutOfBoundsException ex) {
+  //      //noinspection UnnecessaryReturnStatement
+  //      return;
+  //    } catch (Exception ex) {
+  //      fail("wrong exception type");
+  //    }
+  //  }
 
   @Test
   public void layoutParams_shouldBeViewGroupLayoutParams() {
@@ -384,6 +440,76 @@ public class ShadowViewGroupTest {
     assertTrue(testListener.wasCalled());
   }
 
+  @Test
+  public void requestDisallowInterceptTouchEvent_storedOnShadow() {
+    child3.requestDisallowInterceptTouchEvent(true);
+
+    assertTrue(shadowOf(child3).getDisallowInterceptTouchEvent());
+  }
+
+  @Test
+  public void requestDisallowInterceptTouchEvent_bubblesUp() {
+    child3.requestDisallowInterceptTouchEvent(true);
+
+    assertTrue(shadowOf(child3).getDisallowInterceptTouchEvent());
+    assertTrue(shadowOf(root).getDisallowInterceptTouchEvent());
+  }
+
+  @Test
+  public void requestDisallowInterceptTouchEvent_isReflected() {
+    // Set up an Activity to accurately dispatch touch events.
+    Activity activity = Robolectric.setupActivity(Activity.class);
+    activity.setContentView(root);
+    idleMainLooper();
+    // Set a no-op click listener so we collect all the touch events.
+    child3a.setOnClickListener(view -> {});
+    // Request our parent not intercept our touch events.
+    // This must be _during the initial down MotionEvent_ and not before.
+    // The down event will reset this state (and so we do not need to reset it).
+    // The value in getDisallowInterceptTouchEvent() is not in-sync with the flag and
+    // only records the last call to requestDisallowInterceptTouchEvent().
+    child3a.setOnTouchListener(
+        (view, event) -> {
+          if (event.getAction() == MotionEvent.ACTION_DOWN) {
+            view.getParent().requestDisallowInterceptTouchEvent(true);
+          }
+          return false;
+        });
+
+    MotionEvent downEvent = MotionEvent.obtain(0, 0, MotionEvent.ACTION_DOWN, 0, 0, 0);
+    MotionEvent moveEvent = MotionEvent.obtain(0, 0, MotionEvent.ACTION_MOVE, 0, 0, 0);
+    MotionEvent upEvent = MotionEvent.obtain(0, 0, MotionEvent.ACTION_UP, 0, 0, 0);
+
+    root.dispatchTouchEvent(downEvent);
+    // Down event is _always_ intercepted by the root.
+    assertTrue(shadowOf(root).getDisallowInterceptTouchEvent());
+    assertSame(shadowOf(root).getInterceptedTouchEvent(), downEvent);
+    assertSame(shadowOf(child3a).getLastTouchEvent(), downEvent);
+
+    root.dispatchTouchEvent(moveEvent);
+    // Subsequent event types are _not_ intercepted:
+    assertTrue(shadowOf(root).getDisallowInterceptTouchEvent());
+    assertSame(shadowOf(root).getInterceptedTouchEvent(), downEvent);
+    assertSame(shadowOf(child3a).getLastTouchEvent(), moveEvent);
+
+    root.dispatchTouchEvent(upEvent);
+    // Subsequent event types are _not_ intercepted:
+    assertTrue(shadowOf(root).getDisallowInterceptTouchEvent());
+    assertSame(shadowOf(root).getInterceptedTouchEvent(), downEvent);
+    assertSame(shadowOf(child3a).getLastTouchEvent(), upEvent);
+  }
+
+  @Test
+  public void draw_drawsChildren() {
+    DrawRecordView view = new DrawRecordView(context);
+    ViewGroup viewGroup = new FrameLayout(context);
+    viewGroup.addView(view);
+    Bitmap bitmap = Bitmap.createBitmap(100, 100, Bitmap.Config.ARGB_8888);
+    Canvas canvas = new Canvas(bitmap);
+    viewGroup.draw(canvas);
+    assertThat(view.wasDrawn).isTrue();
+  }
+
   private void makeFocusable(View... views) {
     for (View view : views) {
       view.setFocusable(true);
@@ -394,8 +520,7 @@ public class ShadowViewGroupTest {
     boolean wasCalled = false;
 
     @Override
-    public void onChildViewAdded(View parent, View child) {
-    }
+    public void onChildViewAdded(View parent, View child) {}
 
     @Override
     public void onChildViewRemoved(View parent, View child) {
@@ -404,6 +529,21 @@ public class ShadowViewGroupTest {
 
     public boolean wasCalled() {
       return wasCalled;
+    }
+  }
+
+  static class DrawRecordView extends View {
+
+    boolean wasDrawn;
+
+    public DrawRecordView(Context context) {
+      super(context);
+    }
+
+    @Override
+    public void draw(@Nonnull Canvas canvas) {
+      super.draw(canvas);
+      wasDrawn = true;
     }
   }
 }
