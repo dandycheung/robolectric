@@ -10,6 +10,7 @@ import android.view.ViewGroup;
 import android.widget.CursorAdapter;
 import androidx.test.core.app.ApplicationProvider;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
+import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -26,11 +27,11 @@ public class ShadowCursorAdapterTest {
     database = SQLiteDatabase.create(null);
     database.execSQL("CREATE TABLE table_name(_id INT PRIMARY KEY, name VARCHAR(255));");
     String[] inserts = {
-        "INSERT INTO table_name (_id, name) VALUES(1234, 'Chuck');",
-        "INSERT INTO table_name (_id, name) VALUES(1235, 'Julie');",
-        "INSERT INTO table_name (_id, name) VALUES(1236, 'Chris');",
-        "INSERT INTO table_name (_id, name) VALUES(1237, 'Brenda');",
-        "INSERT INTO table_name (_id, name) VALUES(1238, 'Jane');"
+      "INSERT INTO table_name (_id, name) VALUES(1234, 'Chuck');",
+      "INSERT INTO table_name (_id, name) VALUES(1235, 'Julie');",
+      "INSERT INTO table_name (_id, name) VALUES(1236, 'Chris');",
+      "INSERT INTO table_name (_id, name) VALUES(1237, 'Brenda');",
+      "INSERT INTO table_name (_id, name) VALUES(1238, 'Jane');"
     };
 
     for (String insert : inserts) {
@@ -41,6 +42,12 @@ public class ShadowCursorAdapterTest {
     curs = database.rawQuery(sql, null);
 
     adapter = new TestAdapter(curs);
+  }
+
+  @After
+  public void tearDown() {
+    database.close();
+    curs.close();
   }
 
   @Test
@@ -80,10 +87,13 @@ public class ShadowCursorAdapterTest {
     }
   }
 
-  @Test public void shouldNotErrorOnCursorChangeWhenNoFlagsAreSet() throws Exception {
-    adapter = new TestAdapterWithFlags(curs, 0);
-    adapter.changeCursor(database.rawQuery("SELECT * FROM table_name;", null));
-    assertThat(adapter.getCursor()).isNotSameInstanceAs(curs);
+  @Test
+  public void shouldNotErrorOnCursorChangeWhenNoFlagsAreSet() {
+    try (Cursor newCursor = database.rawQuery("SELECT * FROM table_name;", null)) {
+      adapter = new TestAdapterWithFlags(curs, 0);
+      adapter.changeCursor(newCursor);
+      assertThat(adapter.getCursor()).isNotSameInstanceAs(curs);
+    }
   }
 
   private static class TestAdapter extends CursorAdapter {
@@ -93,8 +103,7 @@ public class ShadowCursorAdapterTest {
     }
 
     @Override
-    public void bindView(View view, Context context, Cursor cursor) {
-    }
+    public void bindView(View view, Context context, Cursor cursor) {}
 
     @Override
     public View newView(Context context, Cursor cursor, ViewGroup parent) {
@@ -107,11 +116,12 @@ public class ShadowCursorAdapterTest {
       super(ApplicationProvider.getApplicationContext(), c, flags);
     }
 
-    @Override public View newView(Context context, Cursor cursor, ViewGroup parent) {
+    @Override
+    public View newView(Context context, Cursor cursor, ViewGroup parent) {
       return null;
     }
 
-    @Override public void bindView(View view, Context context, Cursor cursor) {
-    }
+    @Override
+    public void bindView(View view, Context context, Cursor cursor) {}
   }
 }

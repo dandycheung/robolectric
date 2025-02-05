@@ -3,19 +3,20 @@ package org.robolectric.shadows;
 import static android.os.Build.VERSION_CODES.M;
 import static android.os.Build.VERSION_CODES.N;
 import static android.os.Build.VERSION_CODES.N_MR1;
+import static android.os.Build.VERSION_CODES.P;
+import static android.os.Build.VERSION_CODES.Q;
 import static org.robolectric.util.ReflectionHelpers.ClassParameter.from;
 import static org.robolectric.util.ReflectionHelpers.callConstructor;
 import static org.robolectric.util.ReflectionHelpers.getStaticField;
 
-import android.annotation.Nullable;
-import android.annotation.TargetApi;
+import android.annotation.RequiresApi;
 import android.content.Intent;
 import android.hardware.usb.UsbAccessory;
 import android.hardware.usb.UsbDevice;
+import android.hardware.usb.UsbDeviceConnection;
 import android.hardware.usb.UsbManager;
 import android.hardware.usb.UsbPort;
 import android.hardware.usb.UsbPortStatus;
-import android.os.Build;
 import android.os.ParcelFileDescriptor;
 import com.google.common.base.Preconditions;
 import java.io.File;
@@ -23,15 +24,18 @@ import java.io.FileNotFoundException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import javax.annotation.Nullable;
 import org.robolectric.RuntimeEnvironment;
+import org.robolectric.annotation.ClassName;
 import org.robolectric.annotation.HiddenApi;
 import org.robolectric.annotation.Implementation;
 import org.robolectric.annotation.Implements;
 import org.robolectric.annotation.RealObject;
+import org.robolectric.annotation.Resetter;
 import org.robolectric.util.reflector.ForType;
 
 /** Robolectric implementation of {@link android.hardware.usb.UsbManager}. */
-@Implements(value = UsbManager.class, looseSignatures = true)
+@Implements(value = UsbManager.class)
 public class ShadowUsbManager {
 
   @RealObject private UsbManager realUsbManager;
@@ -39,22 +43,39 @@ public class ShadowUsbManager {
   /**
    * A mapping from the package names to a list of USB devices for which permissions are granted.
    */
-  private final HashMap<String, List<UsbDevice>> grantedPermissions = new HashMap<>();
+  private static final HashMap<String, List<UsbDevice>> grantedDevicePermissions = new HashMap<>();
+
+  /**
+   * A mapping from the package names to a list of USB accessories for which permissions are
+   * granted.
+   */
+  private static final HashMap<String, List<UsbAccessory>> grantedAccessoryPermissions =
+      new HashMap<>();
 
   /**
    * A mapping from the USB device names to the USB device instances.
    *
    * @see UsbManager#getDeviceList()
    */
-  private final HashMap<String, UsbDevice> usbDevices = new HashMap<>();
+  private static final HashMap<String, UsbDevice> usbDevices = new HashMap<>();
 
   /** A mapping from USB port ID to the port object. */
-  private final HashMap<String, UsbPort> usbPorts = new HashMap<>();
+  private static final HashMap<String, UsbPort> usbPorts = new HashMap<>();
 
   /** A mapping from USB port to the status of that port. */
-  private final HashMap<UsbPort, UsbPortStatus> usbPortStatuses = new HashMap<>();
+  private static final HashMap<UsbPort, UsbPortStatus> usbPortStatuses = new HashMap<>();
 
-  private UsbAccessory attachedUsbAccessory = null;
+  private static UsbAccessory attachedUsbAccessory = null;
+
+  @Resetter
+  public static void reset() {
+    grantedDevicePermissions.clear();
+    grantedAccessoryPermissions.clear();
+    usbDevices.clear();
+    usbPorts.clear();
+    usbPortStatuses.clear();
+    attachedUsbAccessory = null;
+  }
 
   /** Returns true if the caller has permission to access the device. */
   @Implementation
@@ -64,8 +85,20 @@ public class ShadowUsbManager {
 
   /** Returns true if the given package has permission to access the device. */
   public boolean hasPermissionForPackage(UsbDevice device, String packageName) {
-    List<UsbDevice> usbDevices = grantedPermissions.get(packageName);
+    List<UsbDevice> usbDevices = grantedDevicePermissions.get(packageName);
     return usbDevices != null && usbDevices.contains(device);
+  }
+
+  /** Returns true if the caller has permission to access the accessory. */
+  @Implementation
+  protected boolean hasPermission(UsbAccessory accessory) {
+    return hasPermissionForPackage(accessory, RuntimeEnvironment.getApplication().getPackageName());
+  }
+
+  /** Returns true if the given package has permission to access the device. */
+  public boolean hasPermissionForPackage(UsbAccessory accessory, String packageName) {
+    List<UsbAccessory> usbAccessories = grantedAccessoryPermissions.get(packageName);
+    return usbAccessories != null && usbAccessories.contains(accessory);
   }
 
   @Implementation(minSdk = N)
@@ -77,12 +110,23 @@ public class ShadowUsbManager {
   @Implementation(minSdk = N_MR1)
   @HiddenApi // SystemApi
   protected void grantPermission(UsbDevice device, String packageName) {
-    List<UsbDevice> usbDevices = grantedPermissions.get(packageName);
+    List<UsbDevice> usbDevices = grantedDevicePermissions.get(packageName);
     if (usbDevices == null) {
       usbDevices = new ArrayList<>();
-      grantedPermissions.put(packageName, usbDevices);
+      grantedDevicePermissions.put(packageName, usbDevices);
     }
     usbDevices.add(device);
+  }
+
+  /** Grants permission for the accessory. */
+  public void grantPermission(UsbAccessory accessory) {
+    String packageName = RuntimeEnvironment.getApplication().getPackageName();
+    List<UsbAccessory> usbAccessories = grantedAccessoryPermissions.get(packageName);
+    if (usbAccessories == null) {
+      usbAccessories = new ArrayList<>();
+      grantedAccessoryPermissions.put(packageName, usbAccessories);
+    }
+    usbAccessories.add(accessory);
   }
 
   /**
@@ -90,9 +134,20 @@ public class ShadowUsbManager {
    * package doesn't have permission to access the device.
    */
   public void revokePermission(UsbDevice device, String packageName) {
-    List<UsbDevice> usbDevices = grantedPermissions.get(packageName);
+    List<UsbDevice> usbDevices = grantedDevicePermissions.get(packageName);
     if (usbDevices != null) {
       usbDevices.remove(device);
+    }
+  }
+
+  /**
+   * Revokes permission to a USB accessory granted to a package. This method does nothing if the
+   * package doesn't have permission to access the accessory.
+   */
+  public void revokePermission(UsbAccessory accessory, String packageName) {
+    List<UsbAccessory> usbAccessories = grantedAccessoryPermissions.get(packageName);
+    if (usbAccessories != null) {
+      usbAccessories.remove(accessory);
     }
   }
 
@@ -119,7 +174,7 @@ public class ShadowUsbManager {
 
   /** Sets the currently attached Usb accessory returned in #getAccessoryList. */
   public void setAttachedUsbAccessory(UsbAccessory usbAccessory) {
-    this.attachedUsbAccessory = usbAccessory;
+    attachedUsbAccessory = usbAccessory;
   }
 
   /**
@@ -144,14 +199,16 @@ public class ShadowUsbManager {
     revokePermission(usbDevice, RuntimeEnvironment.getApplication().getPackageName());
   }
 
-  @Implementation(minSdk = M)
+  @Implementation(minSdk = M, maxSdk = P)
   @HiddenApi
-  protected /* UsbPort[] */ Object getPorts() {
-    if (RuntimeEnvironment.getApiLevel() >= Build.VERSION_CODES.Q) {
-      return new ArrayList<>(usbPortStatuses.keySet());
-    }
+  protected @ClassName("android.hardware.usb.UsbPort[]") Object getPorts() {
+    return usbPortStatuses.keySet().toArray(new UsbPort[0]);
+  }
 
-    return usbPortStatuses.keySet().toArray(new UsbPort[usbPortStatuses.size()]);
+  @Implementation(minSdk = Q, methodName = "getPorts")
+  @HiddenApi
+  protected List</*android.hardware.usb.UsbPort*/ ?> getPortsFromQ() {
+    return new ArrayList<>(usbPortStatuses.keySet());
   }
 
   /** Remove all added ports from UsbManager. */
@@ -162,7 +219,7 @@ public class ShadowUsbManager {
 
   /** Adds a USB port with given ID to UsbManager. */
   public void addPort(String portId) {
-    if (RuntimeEnvironment.getApiLevel() >= Build.VERSION_CODES.Q) {
+    if (RuntimeEnvironment.getApiLevel() >= Q) {
       addPort(
           portId,
           UsbPortStatus.MODE_DUAL,
@@ -189,14 +246,14 @@ public class ShadowUsbManager {
   }
 
   /** Adds a USB port with given ID and {@link UsbPortStatus} parameters to UsbManager for Q+. */
-  @TargetApi(Build.VERSION_CODES.Q)
+  @RequiresApi(Q)
   public void addPort(
       String portId,
       int statusCurrentMode,
       int statusCurrentPowerRole,
       int statusCurrentDataRole,
       int statusSupportedRoleCombinations) {
-    Preconditions.checkState(RuntimeEnvironment.getApiLevel() >= Build.VERSION_CODES.Q);
+    Preconditions.checkState(RuntimeEnvironment.getApiLevel() >= Q);
     UsbPort usbPort = (UsbPort) createUsbPort(realUsbManager, portId, statusCurrentMode);
     usbPorts.put(portId, usbPort);
     usbPortStatuses.put(
@@ -220,25 +277,32 @@ public class ShadowUsbManager {
 
   @Implementation(minSdk = M)
   @HiddenApi
-  protected /* UsbPortStatus */ Object getPortStatus(/* UsbPort */ Object port) {
+  protected @ClassName("android.hardware.usb.UsbPortStatus") Object getPortStatus(
+      @ClassName("android.hardware.usb.UsbPort") Object port) {
     return usbPortStatuses.get(port);
   }
 
   @Implementation(minSdk = M)
   @HiddenApi
   protected void setPortRoles(
-      /* UsbPort */ Object port, /* int */ Object powerRole, /* int */ Object dataRole) {
+      @ClassName("android.hardware.usb.UsbPort") Object port, int powerRole, int dataRole) {
     UsbPortStatus status = usbPortStatuses.get(port);
     usbPortStatuses.put(
         (UsbPort) port,
         (UsbPortStatus)
             createUsbPortStatus(
                 status.getCurrentMode(),
-                (int) powerRole,
-                (int) dataRole,
+                powerRole,
+                dataRole,
                 status.getSupportedRoleCombinations()));
     RuntimeEnvironment.getApplication()
         .sendBroadcast(new Intent(UsbManager.ACTION_USB_PORT_CHANGED));
+  }
+
+  /** Opens a file descriptor from a temporary file. */
+  @Implementation
+  protected UsbDeviceConnection openDevice(UsbDevice device) {
+    return createUsbDeviceConnection(device);
   }
 
   /** Opens a file descriptor from a temporary file. */
@@ -262,7 +326,7 @@ public class ShadowUsbManager {
    */
   private static Object createUsbPortStatus(
       int currentMode, int currentPowerRole, int currentDataRole, int supportedRoleCombinations) {
-    if (RuntimeEnvironment.getApiLevel() >= Build.VERSION_CODES.Q) {
+    if (RuntimeEnvironment.getApiLevel() >= Q) {
       return new UsbPortStatus(
           currentMode, currentPowerRole, currentDataRole, supportedRoleCombinations, 0, 0);
     }
@@ -280,7 +344,7 @@ public class ShadowUsbManager {
    * <p>Returns Object to avoid referencing the API M+ UsbPort when running on older platforms.
    */
   private static Object createUsbPort(UsbManager usbManager, String id, int supportedModes) {
-    if (RuntimeEnvironment.getApiLevel() >= Build.VERSION_CODES.Q) {
+    if (RuntimeEnvironment.getApiLevel() >= Q) {
       return new UsbPort(usbManager, id, supportedModes, 0, false, false);
     }
     return callConstructor(
@@ -288,6 +352,11 @@ public class ShadowUsbManager {
         from(UsbManager.class, usbManager),
         from(String.class, id),
         from(int.class, supportedModes));
+  }
+
+  /** Helper method for creating a {@link UsbDeviceConnection}. */
+  private static UsbDeviceConnection createUsbDeviceConnection(UsbDevice device) {
+    return callConstructor(UsbDeviceConnection.class, from(UsbDevice.class, device));
   }
 
   /** Accessor interface for {@link UsbManager}'s internals. */

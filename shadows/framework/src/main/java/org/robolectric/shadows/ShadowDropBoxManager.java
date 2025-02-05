@@ -8,11 +8,12 @@ import java.util.SortedMap;
 import java.util.TreeMap;
 import org.robolectric.annotation.Implementation;
 import org.robolectric.annotation.Implements;
+import org.robolectric.annotation.Resetter;
 
 /** Fake dropbox manager that starts with no entries. */
 @Implements(value = DropBoxManager.class)
 public class ShadowDropBoxManager {
-  private final SortedMap<Long, Entry> entries = new TreeMap<>();
+  private static final SortedMap<Long, Entry> entries = new TreeMap<>();
 
   public ShadowDropBoxManager() {
     reset();
@@ -30,7 +31,7 @@ public class ShadowDropBoxManager {
    * DropBoxManager.Entry#getText} can be used.
    *
    * @param tag can be any arbitrary string
-   * @param timestamp a unique timestamp for the entry, relative to {@link
+   * @param wallTimestamp a unique timestamp for the entry, relative to {@link
    *     System#currentTimeMillis()}
    * @param data must not be null
    */
@@ -55,10 +56,9 @@ public class ShadowDropBoxManager {
     addData(tag, ShadowSystem.currentTimeMillis(), data.getBytes(UTF_8));
   }
 
-  /**
-   * Clears all entries.
-   */
-  public void reset() {
+  /** Clears all entries. */
+  @Resetter
+  public static void reset() {
     entries.clear();
   }
 

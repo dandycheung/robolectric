@@ -15,15 +15,16 @@ import android.os.Handler;
 import android.os.Looper;
 import org.robolectric.annotation.Implementation;
 import org.robolectric.annotation.Implements;
+import org.robolectric.annotation.Resetter;
 
 /** Shadow Implementation of {@link android.net.wifi.aware.WifiAwareManager} */
 @Implements(value = WifiAwareManager.class, minSdk = O)
 public class ShadowWifiAwareManager {
-  private boolean available = true;
-  private WifiAwareSession session;
-  private boolean sessionDetached = true;
-  private PublishDiscoverySession discoverySessionToPublish;
-  private SubscribeDiscoverySession discoverySessionToSubscribe;
+  private static boolean available = true;
+  private static WifiAwareSession session;
+  private static boolean sessionDetached = true;
+  private static PublishDiscoverySession discoverySessionToPublish;
+  private static SubscribeDiscoverySession discoverySessionToSubscribe;
 
   @Implementation
   protected boolean isAvailable() {
@@ -83,30 +84,39 @@ public class ShadowWifiAwareManager {
 
   /** Sets the availability of the wifiAwareManager. */
   public void setAvailable(boolean available) {
-    this.available = available;
+    ShadowWifiAwareManager.available = available;
   }
 
   /** Sets parameter to pass to AttachCallback#onAttach(WifiAwareSession session) */
   public void setWifiAwareSession(WifiAwareSession session) {
-    this.session = session;
+    ShadowWifiAwareManager.session = session;
   }
 
   /** Sets the boolean value indicating if a wifiAwareSession has been detached. */
   public void setSessionDetached(boolean sessionDetached) {
-    this.sessionDetached = sessionDetached;
+    ShadowWifiAwareManager.sessionDetached = sessionDetached;
   }
 
   /**
    * Sets parameter to pass to DiscoverySessionCallback#onPublishStarted(PublishDiscoverySession)
    */
   public void setDiscoverySessionToPublish(PublishDiscoverySession publishDiscoverySession) {
-    this.discoverySessionToPublish = publishDiscoverySession;
+    discoverySessionToPublish = publishDiscoverySession;
   }
 
   /**
    * Sets param to pass to DiscoverySessionCallback#onSubscribeStarted(SubscribeDiscoverySession)
    */
   public void setDiscoverySessionToSubscribe(SubscribeDiscoverySession subscribeDiscoverySession) {
-    this.discoverySessionToSubscribe = subscribeDiscoverySession;
+    discoverySessionToSubscribe = subscribeDiscoverySession;
+  }
+
+  @Resetter
+  public static void reset() {
+    available = true;
+    session = null;
+    sessionDetached = true;
+    discoverySessionToPublish = null;
+    discoverySessionToSubscribe = null;
   }
 }

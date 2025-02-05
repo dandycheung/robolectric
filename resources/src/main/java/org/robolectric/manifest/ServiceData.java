@@ -4,9 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
-/**
- * Holds parsed service data from manifest.
- */
+/** Holds parsed service data from manifest. */
 public class ServiceData extends PackageItemData {
 
   private static final String EXPORTED = "android:exported";
@@ -16,7 +14,7 @@ public class ServiceData extends PackageItemData {
 
   private final Map<String, String> attributes;
   private final List<String> actions;
-  private List<IntentFilterData> intentFilters;
+  private final List<IntentFilterData> intentFilters;
 
   public ServiceData(
       Map<String, String> attributes, MetaData metaData, List<IntentFilterData> intentFilters) {
@@ -73,6 +71,6 @@ public class ServiceData extends PackageItemData {
   }
 
   public boolean isEnabled() {
-    return attributes.containsKey(ENABLED) ? Boolean.parseBoolean(attributes.get(ENABLED)) : true;
+    return !attributes.containsKey(ENABLED) || Boolean.parseBoolean(attributes.get(ENABLED));
   }
 }

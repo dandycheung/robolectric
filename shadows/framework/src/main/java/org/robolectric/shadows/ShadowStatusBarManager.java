@@ -2,10 +2,17 @@ package org.robolectric.shadows;
 
 import static android.os.Build.VERSION_CODES.M;
 import static android.os.Build.VERSION_CODES.Q;
+import static android.os.Build.VERSION_CODES.TIRAMISU;
+import static org.robolectric.util.reflector.Reflector.reflector;
 
 import android.app.StatusBarManager;
+import com.android.internal.annotations.VisibleForTesting;
 import org.robolectric.annotation.Implementation;
 import org.robolectric.annotation.Implements;
+import org.robolectric.annotation.Resetter;
+import org.robolectric.util.reflector.Accessor;
+import org.robolectric.util.reflector.ForType;
+import org.robolectric.util.reflector.Static;
 
 /** Robolectric implementation of {@link android.app.StatusBarManager}. */
 @Implements(value = StatusBarManager.class, isInAndroidSdk = false)
@@ -23,8 +30,10 @@ public class ShadowStatusBarManager {
   public static final int DISABLE2_ROTATE_SUGGESTIONS = 1 << 4;
   public static final int DISABLE2_NONE = 0x00000000;
 
-  private int disabled = StatusBarManager.DISABLE_NONE;
-  private int disabled2 = StatusBarManager.DISABLE2_NONE;
+  private static int disabled = StatusBarManager.DISABLE_NONE;
+  private static int disabled2 = StatusBarManager.DISABLE2_NONE;
+
+  private static int navBarMode = StatusBarManager.NAV_BAR_MODE_DEFAULT;
 
   @Implementation
   protected void disable(int what) {
@@ -38,10 +47,18 @@ public class ShadowStatusBarManager {
 
   @Implementation(minSdk = Q)
   protected void setDisabledForSetup(boolean disabled) {
-    disable(
-        disabled ? StatusBarManager.DEFAULT_SETUP_DISABLE_FLAGS : StatusBarManager.DISABLE_NONE);
-    disable2(
-        disabled ? StatusBarManager.DEFAULT_SETUP_DISABLE2_FLAGS : StatusBarManager.DISABLE2_NONE);
+    disable(disabled ? getDefaultSetupDisableFlags() : StatusBarManager.DISABLE_NONE);
+    disable2(disabled ? getDefaultSetupDisable2Flags() : StatusBarManager.DISABLE2_NONE);
+  }
+
+  @VisibleForTesting
+  static int getDefaultSetupDisableFlags() {
+    return reflector(StatusBarManagerReflector.class).getDefaultSetupDisableFlags();
+  }
+
+  @VisibleForTesting
+  static int getDefaultSetupDisable2Flags() {
+    return reflector(StatusBarManagerReflector.class).getDefaultSetupDisable2Flags();
   }
 
   /** Returns the disable flags previously set in {@link #disable}. */
@@ -52,5 +69,33 @@ public class ShadowStatusBarManager {
   /** Returns the disable flags previously set in {@link #disable2}. */
   public int getDisable2Flags() {
     return disabled2;
+  }
+
+  @Implementation(minSdk = TIRAMISU)
+  protected void setNavBarMode(int mode) {
+    navBarMode = mode;
+  }
+
+  @Implementation(minSdk = TIRAMISU)
+  protected int getNavBarMode() {
+    return navBarMode;
+  }
+
+  @Resetter
+  public static void reset() {
+    disabled = StatusBarManager.DISABLE_NONE;
+    disabled2 = StatusBarManager.DISABLE2_NONE;
+    navBarMode = StatusBarManager.NAV_BAR_MODE_DEFAULT;
+  }
+
+  @ForType(StatusBarManager.class)
+  interface StatusBarManagerReflector {
+    @Static
+    @Accessor("DEFAULT_SETUP_DISABLE_FLAGS")
+    int getDefaultSetupDisableFlags();
+
+    @Static
+    @Accessor("DEFAULT_SETUP_DISABLE2_FLAGS")
+    int getDefaultSetupDisable2Flags();
   }
 }

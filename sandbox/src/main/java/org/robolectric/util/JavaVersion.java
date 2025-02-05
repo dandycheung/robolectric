@@ -9,13 +9,14 @@ public class JavaVersion implements Comparable<JavaVersion> {
 
   public JavaVersion(String version) {
     versions = new ArrayList<>();
-    Scanner s = new Scanner(version).useDelimiter("[^\\d]+");
+    Scanner s = new Scanner(version).useDelimiter("\\D+");
     while (s.hasNext()) {
       versions.add(s.nextInt());
     }
   }
 
-  @Override public int compareTo(JavaVersion o) {
+  @Override
+  public int compareTo(JavaVersion o) {
     List<Integer> versions2 = o.versions;
     int max = Math.min(versions.size(), versions2.size());
     for (int i = 0; i < max; i++) {

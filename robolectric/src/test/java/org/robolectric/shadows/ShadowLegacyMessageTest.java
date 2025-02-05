@@ -1,7 +1,5 @@
 package org.robolectric.shadows;
 
-import static android.os.Build.VERSION_CODES.KITKAT_WATCH;
-import static android.os.Build.VERSION_CODES.LOLLIPOP;
 import static com.google.common.truth.Truth.assertThat;
 import static com.google.common.truth.Truth.assertWithMessage;
 import static org.robolectric.Shadows.shadowOf;
@@ -13,7 +11,6 @@ import androidx.test.ext.junit.runners.AndroidJUnit4;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.robolectric.Robolectric;
-import org.robolectric.annotation.Config;
 import org.robolectric.annotation.LooperMode;
 import org.robolectric.annotation.LooperMode.Mode;
 import org.robolectric.shadow.api.Shadow;
@@ -173,7 +170,7 @@ public class ShadowLegacyMessageTest {
     Message.obtain(h, 123).sendToTarget();
     assertThat(h.hasMessages(123)).isTrue();
   }
-  
+
   @Test
   public void testSetGetNext() {
     Message msg = Message.obtain();
@@ -184,36 +181,22 @@ public class ShadowLegacyMessageTest {
   }
 
   @Test
-  @Config(maxSdk = KITKAT_WATCH)
-  public void recycle_shouldInvokeRealObject19() {
-    recycle_shouldInvokeRealObject("recycle");
-  }
-
-  @Test
-  @Config(minSdk = LOLLIPOP)
   public void recycle_shouldInvokeRealObject21() {
     recycle_shouldInvokeRealObject("recycleUnchecked");
   }
-  
+
   private void recycle_shouldInvokeRealObject(String recycleMethod) {
     Handler h = new Handler();
     Message msg = Message.obtain(h, 234);
     ReflectionHelpers.callInstanceMethod(msg, recycleMethod);
     assertThat(msg.what).isEqualTo(0);
   }
-  
+
   @Test
-  @Config(maxSdk = KITKAT_WATCH)
-  public void recycle_shouldRemoveMessageFromScheduler19() {
-    recycle_shouldRemoveMessageFromScheduler();
-  }
-  
-  @Test
-  @Config(minSdk = LOLLIPOP)
   public void recycle_shouldRemoveMessageFromScheduler21() {
     recycle_shouldRemoveMessageFromScheduler();
   }
-  
+
   private void recycle_shouldRemoveMessageFromScheduler() {
     ShadowLooper.pauseMainLooper();
     Handler h = new Handler();
@@ -224,7 +207,7 @@ public class ShadowLegacyMessageTest {
     shadowOf(msg).recycleUnchecked();
     assertWithMessage("after recycle").that(scheduler.size()).isEqualTo(0);
   }
-  
+
   @Test
   public void reset_shouldEmptyMessagePool() {
     Message dummy1 = Message.obtain();

@@ -3,10 +3,12 @@ package org.robolectric.shadows;
 import static android.content.Context.ACCESSIBILITY_SERVICE;
 import static android.os.Build.VERSION_CODES.O;
 import static android.os.Build.VERSION_CODES.O_MR1;
+import static android.os.Build.VERSION_CODES.Q;
 import static com.google.common.truth.Truth.assertThat;
 import static org.robolectric.Shadows.shadowOf;
 
 import android.accessibilityservice.AccessibilityServiceInfo;
+import android.app.Activity;
 import android.content.Context;
 import android.content.pm.ServiceInfo;
 import android.view.accessibility.AccessibilityEvent;
@@ -16,9 +18,12 @@ import androidx.test.ext.junit.runners.AndroidJUnit4;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.robolectric.Robolectric;
+import org.robolectric.android.controller.ActivityController;
 import org.robolectric.annotation.Config;
 import org.robolectric.util.ReflectionHelpers;
 
@@ -125,5 +130,171 @@ public class ShadowAccessibilityManagerTest {
     assertThat(shadowOf(accessibilityManager).getSentAccessibilityEvents())
         .containsExactly(event1, event2, event3)
         .inOrder();
+  }
+
+  @Test
+  public void addAccessibilityStateChangeListener_shouldAddListener() {
+    TestAccessibilityStateChangeListener listener1 = new TestAccessibilityStateChangeListener();
+    TestAccessibilityStateChangeListener listener2 = new TestAccessibilityStateChangeListener();
+
+    accessibilityManager.addAccessibilityStateChangeListener(listener1);
+    accessibilityManager.addAccessibilityStateChangeListener(listener2);
+
+    shadowOf(accessibilityManager).setEnabled(true);
+
+    assertThat(listener1.isEnabled()).isTrue();
+    assertThat(listener2.isEnabled()).isTrue();
+  }
+
+  @Test
+  public void removeAccessibilityStateChangeListener_shouldRemoveListeners() {
+    // Add two different callbacks.
+    TestAccessibilityStateChangeListener listener1 = new TestAccessibilityStateChangeListener();
+    TestAccessibilityStateChangeListener listener2 = new TestAccessibilityStateChangeListener();
+    accessibilityManager.addAccessibilityStateChangeListener(listener1);
+    accessibilityManager.addAccessibilityStateChangeListener(listener2);
+
+    shadowOf(accessibilityManager).setEnabled(true);
+
+    assertThat(listener1.isEnabled()).isTrue();
+    assertThat(listener2.isEnabled()).isTrue();
+    // Remove one at the time.
+    accessibilityManager.removeAccessibilityStateChangeListener(listener2);
+
+    shadowOf(accessibilityManager).setEnabled(false);
+
+    assertThat(listener1.isEnabled()).isFalse();
+    assertThat(listener2.isEnabled()).isTrue();
+
+    accessibilityManager.removeAccessibilityStateChangeListener(listener1);
+
+    shadowOf(accessibilityManager).setEnabled(true);
+
+    assertThat(listener1.isEnabled()).isFalse();
+    assertThat(listener2.isEnabled()).isTrue();
+  }
+
+  @Test
+  public void removeAccessibilityStateChangeListener_returnsTrueIfRemoved() {
+    TestAccessibilityStateChangeListener listener = new TestAccessibilityStateChangeListener();
+    accessibilityManager.addAccessibilityStateChangeListener(listener);
+
+    assertThat(accessibilityManager.removeAccessibilityStateChangeListener(listener)).isTrue();
+  }
+
+  @Test
+  public void removeAccessibilityStateChangeListener_returnsFalseIfNotRegistered() {
+    assertThat(
+            accessibilityManager.removeAccessibilityStateChangeListener(
+                new TestAccessibilityStateChangeListener()))
+        .isFalse();
+    assertThat(accessibilityManager.removeAccessibilityStateChangeListener(null)).isFalse();
+  }
+
+  @Test
+  public void setTouchExplorationEnabled_invokesCallbacks() {
+    AtomicBoolean enabled = new AtomicBoolean(false);
+    accessibilityManager.addTouchExplorationStateChangeListener(enabled::set);
+    shadowOf(accessibilityManager).setTouchExplorationEnabled(true);
+    assertThat(enabled.get()).isTrue();
+    shadowOf(accessibilityManager).setTouchExplorationEnabled(false);
+    assertThat(enabled.get()).isFalse();
+  }
+
+  @Test
+  @Config(minSdk = Q)
+  public void getRecommendedTimeoutMillis_default() {
+    int flags =
+        AccessibilityManager.FLAG_CONTENT_ICONS
+            | AccessibilityManager.FLAG_CONTENT_TEXT
+            | AccessibilityManager.FLAG_CONTENT_CONTROLS;
+
+    assertThat(accessibilityManager.getRecommendedTimeoutMillis(1, flags)).isEqualTo(1);
+  }
+
+  @Test
+  @Config(minSdk = Q)
+  public void getRecommendedTimeoutMillis_interactive() {
+    int flags =
+        AccessibilityManager.FLAG_CONTENT_ICONS
+            | AccessibilityManager.FLAG_CONTENT_TEXT
+            | AccessibilityManager.FLAG_CONTENT_CONTROLS;
+    shadowOf(accessibilityManager).setNonInteractiveUiTimeout(2);
+    shadowOf(accessibilityManager).setInteractiveUiTimeout(3);
+
+    assertThat(accessibilityManager.getRecommendedTimeoutMillis(1, flags)).isEqualTo(3);
+  }
+
+  @Test
+  @Config(minSdk = Q)
+  public void getRecommendedTimeoutMillis_nonInteractive() {
+    int flags = AccessibilityManager.FLAG_CONTENT_ICONS | AccessibilityManager.FLAG_CONTENT_TEXT;
+    shadowOf(accessibilityManager).setNonInteractiveUiTimeout(2);
+    shadowOf(accessibilityManager).setInteractiveUiTimeout(3);
+
+    assertThat(accessibilityManager.getRecommendedTimeoutMillis(1, flags)).isEqualTo(2);
+  }
+
+  @Test
+  @Config(minSdk = Q)
+  public void getRecommendedTimeoutMillis_empty() {
+    int flags = 0;
+    shadowOf(accessibilityManager).setNonInteractiveUiTimeout(2);
+    shadowOf(accessibilityManager).setInteractiveUiTimeout(3);
+
+    assertThat(accessibilityManager.getRecommendedTimeoutMillis(1, flags)).isEqualTo(1);
+  }
+
+  private static class TestAccessibilityStateChangeListener
+      implements AccessibilityManager.AccessibilityStateChangeListener {
+
+    private boolean enabled = false;
+
+    @Override
+    public void onAccessibilityStateChanged(boolean enabled) {
+      this.enabled = enabled;
+    }
+
+    public boolean isEnabled() {
+      return enabled;
+    }
+  }
+
+  @Test
+  public void getAccessibilityServiceList_doesNotNPE() {
+    assertThat(accessibilityManager.getAccessibilityServiceList()).isEmpty();
+    assertThat(accessibilityManager.getInstalledAccessibilityServiceList()).isEmpty();
+    assertThat(
+            accessibilityManager.getEnabledAccessibilityServiceList(
+                AccessibilityServiceInfo.FEEDBACK_SPOKEN))
+        .isEmpty();
+  }
+
+  @Test
+  @Config(minSdk = O)
+  public void accessibilityManager_activityContextEnabled_differentInstancesHaveSameServices() {
+    String originalProperty = System.getProperty("robolectric.createActivityContexts", "");
+    System.setProperty("robolectric.createActivityContexts", "true");
+    try (ActivityController<Activity> controller =
+        Robolectric.buildActivity(Activity.class).setup()) {
+      AccessibilityManager applicationAccessibilityManager =
+          (AccessibilityManager)
+              ApplicationProvider.getApplicationContext()
+                  .getSystemService(Context.ACCESSIBILITY_SERVICE);
+      Activity activity = controller.get();
+      AccessibilityManager activityAccessibilityManager =
+          (AccessibilityManager) activity.getSystemService(Context.ACCESSIBILITY_SERVICE);
+
+      assertThat(applicationAccessibilityManager).isSameInstanceAs(activityAccessibilityManager);
+
+      List<AccessibilityServiceInfo> applicationServices =
+          applicationAccessibilityManager.getInstalledAccessibilityServiceList();
+      List<AccessibilityServiceInfo> activityServices =
+          activityAccessibilityManager.getInstalledAccessibilityServiceList();
+
+      assertThat(activityServices).isEqualTo(applicationServices);
+    } finally {
+      System.setProperty("robolectric.createActivityContexts", originalProperty);
+    }
   }
 }

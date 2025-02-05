@@ -1,13 +1,14 @@
 package org.robolectric.errorprone.bugpatterns;
 
 import com.google.errorprone.BugCheckerRefactoringTestHelper;
-import java.io.IOException;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
 
-/** @author christianw@google.com (Christian Williams) */
+/**
+ * @author christianw@google.com (Christian Williams)
+ */
 @RunWith(JUnit4.class)
 public class RobolectricShadowTest {
   private BugCheckerRefactoringTestHelper testHelper;
@@ -19,7 +20,7 @@ public class RobolectricShadowTest {
   }
 
   @Test
-  public void implMethodsShouldBeProtected() throws IOException {
+  public void implMethodsShouldBeProtected() {
     testHelper
         .addInputLines(
             "in/SomeShadow.java",
@@ -53,7 +54,7 @@ public class RobolectricShadowTest {
   }
 
   @Test
-  public void implMethodsNotProtectedForClassesNotInAndroidSdk() throws IOException {
+  public void implMethodsNotProtectedForClassesNotInAndroidSdk() {
     testHelper
         .addInputLines(
             "in/SomeShadow.java",
@@ -87,7 +88,7 @@ public class RobolectricShadowTest {
   }
 
   @Test
-  public void implMethodJavadocShouldBeMarkdown() throws Exception {
+  public void implMethodJavadocShouldBeMarkdown() {
     testHelper
         .addInputLines(
             "in/SomeShadow.java",

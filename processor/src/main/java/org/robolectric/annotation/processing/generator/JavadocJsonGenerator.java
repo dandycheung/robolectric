@@ -6,6 +6,7 @@ import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Map;
 import javax.annotation.processing.Messager;
@@ -33,9 +34,7 @@ public class JavadocJsonGenerator extends Generator {
 
     this.model = model;
     this.messager = environment.getMessager();
-    gson = new GsonBuilder()
-        .setPrettyPrinting()
-        .create();
+    gson = new GsonBuilder().setPrettyPrinting().create();
     this.jsonDocsDir = jsonDocsDir;
   }
 
@@ -56,8 +55,8 @@ public class JavadocJsonGenerator extends Generator {
       for (DocumentedType documentedType : documentedPackage.getDocumentedTypes()) {
         String shadowedType = shadowedTypes.get(documentedType.getName());
         if (shadowedType == null) {
-          messager.printMessage(Kind.WARNING,
-              "Couldn't find shadowed type for " + documentedType.getName());
+          messager.printMessage(
+              Kind.WARNING, "Couldn't find shadowed type for " + documentedType.getName());
         } else {
           writeJson(documentedType, new File(jsonDocsDir, shadowedType + ".json"));
         }
@@ -69,7 +68,8 @@ public class JavadocJsonGenerator extends Generator {
     try {
       file.getParentFile().mkdirs();
 
-      try (BufferedWriter writer = new BufferedWriter(new FileWriter(file))) {
+      try (BufferedWriter writer =
+          new BufferedWriter(new FileWriter(file, StandardCharsets.UTF_8))) {
         gson.toJson(object, writer);
       }
     } catch (IOException e) {
@@ -77,5 +77,4 @@ public class JavadocJsonGenerator extends Generator {
       throw new RuntimeException(e);
     }
   }
-
 }

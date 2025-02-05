@@ -19,12 +19,11 @@ import org.robolectric.shadow.api.Shadow;
 @SuppressWarnings({"UnusedDeclaration"})
 @Implements(TabHost.class)
 public class ShadowTabHost extends ShadowViewGroup {
-  private List<TabHost.TabSpec> tabSpecs = new ArrayList<>();
+  private final List<TabHost.TabSpec> tabSpecs = new ArrayList<>();
   private TabHost.OnTabChangeListener listener;
   private int currentTab = -1;
 
-  @RealObject
-  private TabHost realObject;
+  @RealObject private TabHost realObject;
 
   @Implementation
   protected android.widget.TabHost.TabSpec newTabSpec(java.lang.String tag) {
@@ -67,7 +66,7 @@ public class ShadowTabHost extends ShadowViewGroup {
 
   @Implementation
   protected int getCurrentTab() {
-    if (currentTab == -1 && tabSpecs.size() > 0) currentTab = 0;
+    if (currentTab == -1 && !tabSpecs.isEmpty()) currentTab = 0;
     return currentTab;
   }
 
@@ -108,7 +107,7 @@ public class ShadowTabHost extends ShadowViewGroup {
   protected TabWidget getTabWidget() {
     Context context = realView.getContext();
     if (context instanceof Activity) {
-      return (TabWidget) ((Activity)context).findViewById(R.id.tabs);
+      return ((Activity) context).findViewById(R.id.tabs);
     } else {
       return null;
     }
@@ -127,8 +126,7 @@ public class ShadowTabHost extends ShadowViewGroup {
   @Implements(TabSpec.class)
   public static class ShadowTabSpec {
 
-    @RealObject
-    TabSpec realObject;
+    @RealObject TabSpec realObject;
     private String tag;
     private View indicatorView;
     private Intent intent;

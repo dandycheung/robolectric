@@ -1,6 +1,5 @@
 package org.robolectric.shadows;
 
-import static android.os.Build.VERSION_CODES.KITKAT;
 import static android.os.Build.VERSION_CODES.M;
 import static android.os.Build.VERSION_CODES.N;
 import static android.os.Build.VERSION_CODES.Q;
@@ -39,12 +38,14 @@ public class ShadowWindow {
       new HashSet<>();
 
   public static Window create(Context context) throws ClassNotFoundException {
-    String className = getApiLevel() >= M
-        ? "com.android.internal.policy.PhoneWindow"
-        : "com.android.internal.policy.impl.PhoneWindow";
+    String className =
+        getApiLevel() >= M
+            ? "com.android.internal.policy.PhoneWindow"
+            : "com.android.internal.policy.impl.PhoneWindow";
     Class<? extends Window> phoneWindowClass =
         (Class<? extends Window>) Window.class.getClassLoader().loadClass(className);
-    return ReflectionHelpers.callConstructor(phoneWindowClass, ClassParameter.from(Context.class, context));
+    return ReflectionHelpers.callConstructor(
+        phoneWindowClass, ClassParameter.from(Context.class, context));
   }
 
   @Implementation
@@ -60,7 +61,7 @@ public class ShadowWindow {
     reflector(WindowReflector.class, realWindow).addSystemFlags(flags);
   }
 
-  @Implementation(minSdk = KITKAT, maxSdk = R)
+  @Implementation(maxSdk = R)
   @HiddenApi
   protected void addPrivateFlags(int flags) {
     this.privateFlags |= flags;
@@ -116,16 +117,16 @@ public class ShadowWindow {
   }
 
   /**
-   * Calls {@link Window.OnFrameMetrisAvailableListener#onFrameMetricsAvailable()} on each current
-   * listener with 0 as the dropCountSinceLastInvocation.
+   * Calls {@link Window.OnFrameMetricsAvailableListener#onFrameMetricsAvailable(Window,
+   * FrameMetrics, int)} on each current listener with 0 as the dropCountSinceLastInvocation.
    */
   public void reportOnFrameMetricsAvailable(FrameMetrics frameMetrics) {
     reportOnFrameMetricsAvailable(frameMetrics, /* dropCountSinceLastInvocation= */ 0);
   }
 
   /**
-   * Calls {@link Window.OnFrameMetrisAvailableListener#onFrameMetricsAvailable()} on each current
-   * listener.
+   * Calls {@link Window.OnFrameMetricsAvailableListener#onFrameMetricsAvailable(Window,
+   * FrameMetrics, int)} on each current listener.
    *
    * @param frameMetrics the {@link FrameMetrics} instance passed to the listeners.
    * @param dropCountSinceLastInvocation the dropCountSinceLastInvocation passed to the listeners.

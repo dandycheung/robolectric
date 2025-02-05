@@ -34,11 +34,11 @@ public class ShadowPathParser {
     int start = 0;
     int end = 1;
 
-    ArrayList<PathDataNode> list = new ArrayList<PathDataNode>();
+    ArrayList<PathDataNode> list = new ArrayList<>();
     while (end < pathData.length()) {
       end = nextStart(pathData, end);
       String s = pathData.substring(start, end).trim();
-      if (s.length() > 0) {
+      if (!s.isEmpty()) {
         float[] val = getFloats(s);
         addNode(list, s.charAt(0), val);
       }
@@ -49,7 +49,7 @@ public class ShadowPathParser {
     if ((end - start) == 1 && start < pathData.length()) {
       addNode(list, pathData.charAt(start), new float[0]);
     }
-    return list.toArray(new PathDataNode[list.size()]);
+    return list.toArray(new PathDataNode[0]);
   }
 
   @Implementation
@@ -95,7 +95,7 @@ public class ShadowPathParser {
       float[] results = new float[s.length()];
       int count = 0;
       int startPosition = 1;
-      int endPosition = 0;
+      int endPosition;
 
       ExtractFloatResult result = new ExtractFloatResult();
       int totalLength = s.length();
@@ -154,17 +154,12 @@ public class ShadowPathParser {
   }
 
   public static class PathDataNode {
-    private char mType;
-    private float[] mParams;
+    private final char mType;
+    private final float[] mParams;
 
     private PathDataNode(char type, float[] params) {
       mType = type;
       mParams = params;
-    }
-
-    private PathDataNode(PathDataNode n) {
-      mType = n.mType;
-      mParams = Arrays.copyOf(n.mParams, n.mParams.length);
     }
 
     /**
@@ -176,9 +171,9 @@ public class ShadowPathParser {
     public static void nodesToPath(PathDataNode[] node, Path path) {
       float[] current = new float[4];
       char previousCommand = 'm';
-      for (int i = 0; i < node.length; i++) {
-        addCommand(path, current, previousCommand, node[i].mType, node[i].mParams);
-        previousCommand = node[i].mType;
+      for (PathDataNode pathDataNode : node) {
+        addCommand(path, current, previousCommand, pathDataNode.mType, pathDataNode.mParams);
+        previousCommand = pathDataNode.mType;
       }
     }
 
@@ -577,52 +572,18 @@ public class ShadowPathParser {
     }
   }
 
-  @Implements(value = PathParser.PathData.class, minSdk = N, isInAndroidSdk = false)
-  public static class ShadowPathData {
-    long mNativePathData = 0;
+  @Implementation
+  protected static long nCreatePathDataFromString(String pathString, int stringLength) {
+    return 1;
+  }
 
-    @Implementation
-    public void __constructor__() {
-      // mNativePathData = nCreateEmptyPathData();
-    }
+  @Implementation
+  protected static long nCreateEmptyPathData() {
+    return 1;
+  }
 
-    @Implementation
-    public void __constructor__(PathParser.PathData data) {
-      // mNativePathData = nCreatePathData(data.mNativePathData);
-    }
-
-    @Implementation
-    public void __constructor__(String pathString) {
-      // mNativePathData = nCreatePathDataFromString(pathString, pathString.length());
-      // if (mNativePathData == 0) {
-      //     throw new IllegalArgumentException("Invalid pathData: " + pathString);
-      // }
-    }
-
-    @Implementation
-    public long getNativePtr() {
-      return mNativePathData;
-    }
-
-    /**
-     * Update the path data to match the source. Before calling this, make sure canMorph(target,
-     * source) is true.
-     *
-     * @param source The source path represented in PathData
-     */
-    @Implementation
-    public void setPathData(PathParser.PathData source) {
-      // nSetPathData(mNativePathData, source.mNativePathData);
-    }
-
-    @Override
-    @Implementation
-    protected void finalize() throws Throwable {
-      if (mNativePathData != 0) {
-        //   nFinalize(mNativePathData);
-        mNativePathData = 0;
-      }
-      super.finalize();
-    }
+  @Implementation
+  protected static long nCreatePathData(long nativePtr) {
+    return 1;
   }
 }

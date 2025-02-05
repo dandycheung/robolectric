@@ -1,23 +1,31 @@
 package org.robolectric.shadows;
 
+import static android.os.Build.VERSION_CODES.TIRAMISU;
 import static android.os.Looper.getMainLooper;
 import static com.google.common.truth.Truth.assertThat;
 import static org.junit.Assert.fail;
 import static org.robolectric.Shadows.shadowOf;
 
 import android.content.ComponentName;
+import android.content.Context;
 import android.content.Intent;
 import android.os.Bundle;
 import android.speech.RecognitionListener;
+import android.speech.RecognitionSupport;
+import android.speech.RecognitionSupportCallback;
 import android.speech.RecognizerIntent;
 import android.speech.SpeechRecognizer;
 import android.util.Log;
 import androidx.test.core.app.ApplicationProvider;
 import java.util.ArrayList;
+import javax.annotation.Nonnull;
+import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.robolectric.RobolectricTestRunner;
+import org.robolectric.android.util.concurrent.PausedExecutorService;
+import org.robolectric.annotation.Config;
 import org.robolectric.shadows.ShadowLog.LogItem;
 
 /** Unit tests for {@link ShadowSpeechRecognizer}. */
@@ -25,12 +33,20 @@ import org.robolectric.shadows.ShadowLog.LogItem;
 public class ShadowSpeechRecognizerTest {
   private SpeechRecognizer speechRecognizer;
   private TestRecognitionListener listener;
+  private Context applicationContext;
+  private TestRecognitionSupportCallback supportCallback;
 
   @Before
   public void setUp() {
-    speechRecognizer =
-        SpeechRecognizer.createSpeechRecognizer(ApplicationProvider.getApplicationContext());
+    applicationContext = ApplicationProvider.getApplicationContext();
+    speechRecognizer = SpeechRecognizer.createSpeechRecognizer(applicationContext);
     listener = new TestRecognitionListener();
+    supportCallback = new TestRecognitionSupportCallback();
+  }
+
+  @After
+  public void tearDown() {
+    speechRecognizer.destroy();
   }
 
   @Test
@@ -40,6 +56,20 @@ public class ShadowSpeechRecognizerTest {
     shadowOf(speechRecognizer).triggerOnError(-1);
 
     assertThat(listener.errorReceived).isEqualTo(-1);
+  }
+
+  @Test
+  public void onReadyForSpeechCalled() {
+    startListening();
+    Bundle expectedBundle = new Bundle();
+    ArrayList<String> results = new ArrayList<>();
+    String result = "onReadyForSpeech";
+    results.add(result);
+    expectedBundle.putStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION, results);
+
+    shadowOf(speechRecognizer).triggerOnReadyForSpeech(expectedBundle);
+
+    assertThat(listener.bundleReceived).isEqualTo(expectedBundle);
   }
 
   @Test
@@ -95,16 +125,31 @@ public class ShadowSpeechRecognizerTest {
     shadowOf(speechRecognizer).triggerOnResults(new Bundle());
     speechRecognizer.stopListening();
 
+    shadowOf(getMainLooper()).idle();
     assertNoErrorLogs();
+  }
+
+  /** Verify that isDestroyed is corrected set by destroy and unset by startListening */
+  @Test
+  public void startListeningThenDestroyAndStartListening() {
+    startListening();
+    assertThat(shadowOf(speechRecognizer).isDestroyed()).isFalse();
+    speechRecognizer.destroy();
+    shadowOf(getMainLooper()).idle();
+    assertThat(shadowOf(speechRecognizer).isDestroyed()).isTrue();
+    startListening();
+    assertThat(shadowOf(speechRecognizer).isDestroyed()).isFalse();
   }
 
   /** Verify the startlistening flow works when using custom component name. */
   @Test
   public void startListeningWithCustomComponent() {
+    speechRecognizer.destroy();
+
     speechRecognizer =
         SpeechRecognizer.createSpeechRecognizer(
             ApplicationProvider.getApplicationContext(),
-            new ComponentName("org.robolectrc", "FakeComponent"));
+            new ComponentName("org.robolectric", "FakeComponent"));
     speechRecognizer.setRecognitionListener(listener);
     speechRecognizer.startListening(new Intent());
     shadowOf(getMainLooper()).idle();
@@ -122,6 +167,7 @@ public class ShadowSpeechRecognizerTest {
     shadowOf(getMainLooper()).idle();
     assertThat(ShadowSpeechRecognizer.getLatestSpeechRecognizer())
         .isSameInstanceAs(newSpeechRecognizer);
+    newSpeechRecognizer.destroy();
   }
 
   @Test
@@ -135,6 +181,7 @@ public class ShadowSpeechRecognizerTest {
     newSpeechRecognizer.startListening(intent);
     shadowOf(getMainLooper()).idle();
     assertThat(shadowOf(newSpeechRecognizer).getLastRecognizerIntent()).isEqualTo(intent);
+    newSpeechRecognizer.destroy();
   }
 
   private void startListening() {
@@ -183,7 +230,9 @@ public class ShadowSpeechRecognizerTest {
     }
 
     @Override
-    public void onReadyForSpeech(Bundle params) {}
+    public void onReadyForSpeech(Bundle bundle) {
+      bundleReceived = bundle;
+    }
 
     @Override
     public void onResults(Bundle bundle) {
@@ -193,6 +242,79 @@ public class ShadowSpeechRecognizerTest {
     @Override
     public void onRmsChanged(float rmsdB) {
       rmsDbReceived = rmsdB;
+    }
+  }
+
+  @Config(minSdk = TIRAMISU)
+  @Test
+  public void onCreateOnDeviceRecognizer_setsLatestSpeechRecognizer() {
+    speechRecognizer.destroy();
+    speechRecognizer = SpeechRecognizer.createOnDeviceSpeechRecognizer(applicationContext);
+
+    assertThat(speechRecognizer)
+        .isSameInstanceAs(ShadowSpeechRecognizer.getLatestSpeechRecognizer());
+  }
+
+  @Config(minSdk = TIRAMISU)
+  @Test
+  public void setIsOnDeviceRecognitionAvailable_setsAvailability() {
+    ShadowSpeechRecognizer.setIsOnDeviceRecognitionAvailable(false);
+    assertThat(SpeechRecognizer.isOnDeviceRecognitionAvailable(applicationContext)).isFalse();
+
+    ShadowSpeechRecognizer.setIsOnDeviceRecognitionAvailable(true);
+    assertThat(SpeechRecognizer.isOnDeviceRecognitionAvailable(applicationContext)).isTrue();
+  }
+
+  @Config(minSdk = TIRAMISU)
+  @Test
+  public void onSupportResultCalled() {
+    PausedExecutorService executor = new PausedExecutorService();
+    RecognitionSupport recognitionSupport =
+        new RecognitionSupport.Builder().addInstalledOnDeviceLanguage("en-US").build();
+    speechRecognizer.checkRecognitionSupport(new Intent(), executor, supportCallback);
+
+    shadowOf(speechRecognizer).triggerSupportResult(recognitionSupport);
+    executor.runAll();
+
+    assertThat(supportCallback.recognitionSupportReceived).isEqualTo(recognitionSupport);
+  }
+
+  @Config(minSdk = TIRAMISU)
+  @Test
+  public void onSupportErrorCalled() {
+    PausedExecutorService executor = new PausedExecutorService();
+    TestRecognitionSupportCallback supportCallback = new TestRecognitionSupportCallback();
+    speechRecognizer.checkRecognitionSupport(new Intent(), executor, supportCallback);
+
+    shadowOf(speechRecognizer).triggerSupportError(1);
+    executor.runAll();
+
+    assertThat(supportCallback.errorReceived).isEqualTo(1);
+  }
+
+  @Config(minSdk = TIRAMISU)
+  @Test
+  public void triggerModelDownload_setsLatestModelDownloadIntent() {
+    Intent modelDownloadIntent = new Intent();
+    speechRecognizer.triggerModelDownload(modelDownloadIntent);
+
+    assertThat(shadowOf(speechRecognizer).getLatestModelDownloadIntent())
+        .isSameInstanceAs(modelDownloadIntent);
+  }
+
+  static final class TestRecognitionSupportCallback implements RecognitionSupportCallback {
+
+    int errorReceived;
+    RecognitionSupport recognitionSupportReceived;
+
+    @Override
+    public void onSupportResult(@Nonnull RecognitionSupport recognitionSupport) {
+      recognitionSupportReceived = recognitionSupport;
+    }
+
+    @Override
+    public void onError(int error) {
+      errorReceived = error;
     }
   }
 }

@@ -1,5 +1,6 @@
 package org.robolectric.shadows;
 
+import static android.os.Build.VERSION_CODES.R;
 import static org.robolectric.util.reflector.Reflector.reflector;
 
 import android.annotation.DrawableRes;
@@ -66,9 +67,10 @@ public class ShadowSuspendDialogInfo {
   /**
    * Returns the action expected to happen on neutral button tap.
    *
-   * @return {@link SuspendDialogInfo.BUTTON_ACTION_MORE_DETAILS} or {@link
-   *     SuspendDialogInfo.BUTTON_ACTION_UNSUSPEND}
+   * @return {@link SuspendDialogInfo#BUTTON_ACTION_MORE_DETAILS} or {@link
+   *     SuspendDialogInfo#BUTTON_ACTION_UNSUSPEND}
    */
+  @Implementation(minSdk = R)
   public int getNeutralButtonAction() {
     return reflector(SuspendDialogInfoReflector.class, realInfo).getNeutralButtonAction();
   }

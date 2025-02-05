@@ -10,8 +10,11 @@ import android.graphics.Paint;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.robolectric.annotation.GraphicsMode;
+import org.robolectric.annotation.GraphicsMode.Mode;
 
 @RunWith(AndroidJUnit4.class)
+@GraphicsMode(Mode.LEGACY)
 public class ShadowPaintTest {
 
   @Test
@@ -71,11 +74,38 @@ public class ShadowPaintTest {
   }
 
   @Test
+  public void shouldSetStrikeThruText() {
+    Paint paint = new Paint();
+    paint.setStrikeThruText(true);
+    assertThat(paint.isStrikeThruText()).isTrue();
+    paint.setStrikeThruText(false);
+    assertThat(paint.isStrikeThruText()).isFalse();
+  }
+
+  @Test
   public void measureTextActuallyMeasuresLength() {
     Paint paint = new Paint();
     assertThat(paint.measureText("Hello")).isEqualTo(5.0f);
     assertThat(paint.measureText("Hello", 1, 3)).isEqualTo(2.0f);
     assertThat(paint.measureText(new StringBuilder("Hello"), 1, 4)).isEqualTo(3.0f);
+  }
+
+  @Test
+  public void measureTextUsesTextScaleX() {
+    Paint paint = new Paint();
+    paint.setTextScaleX(1.5f);
+    assertThat(paint.measureText("Hello")).isEqualTo(7.5f);
+    assertThat(paint.measureText("Hello", 1, 3)).isEqualTo(3.0f);
+    assertThat(paint.measureText(new StringBuilder("Hello"), 1, 4)).isEqualTo(4.5f);
+  }
+
+  @Test
+  public void textWidthWithNegativeScaleXIsZero() {
+    Paint paint = new Paint();
+    paint.setTextScaleX(-1.5f);
+    assertThat(paint.measureText("Hello")).isEqualTo(0f);
+    assertThat(paint.measureText("Hello", 1, 3)).isEqualTo(0f);
+    assertThat(paint.measureText(new StringBuilder("Hello"), 1, 4)).isEqualTo(0f);
   }
 
   @Test
@@ -90,26 +120,64 @@ public class ShadowPaintTest {
     assertThat(
             paint.breakText(
                 new char[] {'H', 'e', 'l', 'l', 'o', ' ', 'W', 'o', 'r', 'l', 'd'},
-                /*index=*/ 0,
-                /*count=*/ 11,
-                /*maxWidth=*/ 100,
-                /*measuredWidth=*/ null))
+                /* index= */ 0,
+                /* count= */ 11,
+                /* maxWidth= */ 100,
+                /* measuredWidth= */ null))
         .isGreaterThan(0);
     assertThat(
             paint.breakText(
                 "Hello World",
-                /*start=*/ 0,
-                /*end=*/ 11,
-                /*measureForwards=*/ true,
-                /*maxWidth=*/ 100,
-                /*measuredWidth=*/ null))
+                /* start= */ 0,
+                /* end= */ 11,
+                /* measureForwards= */ true,
+                /* maxWidth= */ 100,
+                /* measuredWidth= */ null))
         .isGreaterThan(0);
     assertThat(
             paint.breakText(
                 "Hello World",
-                /*measureForwards=*/ true,
-                /*maxWidth=*/ 100,
-                /*measuredWidth=*/ null))
+                /* measureForwards= */ true,
+                /* maxWidth= */ 100,
+                /* measuredWidth= */ null))
         .isGreaterThan(0);
+  }
+
+  @Test
+  public void defaultTextScaleXIsOne() {
+    Paint paint = new Paint();
+    assertThat(paint.getTextScaleX()).isEqualTo(1f);
+  }
+
+  @Test
+  public void testSetFilterBitmapFlag() {
+    Paint paint = new Paint();
+    paint.setFlags(paint.getFlags() | Paint.FILTER_BITMAP_FLAG);
+    assertThat(paint.isFilterBitmap()).isTrue();
+    assertThat(paint.getFlags() & Paint.FILTER_BITMAP_FLAG).isNotEqualTo(0);
+  }
+
+  @Test
+  public void testClearFilterBitmapFlag() {
+    Paint paint = new Paint();
+    paint.setFlags(paint.getFlags() & ~Paint.FILTER_BITMAP_FLAG);
+    assertThat(paint.isFilterBitmap()).isFalse();
+    assertThat(paint.getFlags() & Paint.FILTER_BITMAP_FLAG).isEqualTo(0);
+  }
+
+  @Test
+  public void testSetFilterBitmap() {
+    Paint paint = new Paint();
+    paint.setFilterBitmap(true);
+    assertThat(paint.isFilterBitmap()).isTrue();
+    assertThat(paint.getFlags() & Paint.FILTER_BITMAP_FLAG).isNotEqualTo(0);
+  }
+
+  @Test
+  public void testClearFilterBitmap() {
+    Paint paint = new Paint();
+    paint.setFilterBitmap(false);
+    assertThat(paint.isFilterBitmap()).isFalse();
+    assertThat(paint.getFlags() & Paint.FILTER_BITMAP_FLAG).isEqualTo(0);
   }
 }

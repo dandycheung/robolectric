@@ -1,6 +1,5 @@
 package org.robolectric.shadows;
 
-import static android.os.Build.VERSION_CODES.JELLY_BEAN_MR1;
 import static com.google.common.truth.Truth.assertThat;
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.junit.Assert.fail;
@@ -17,7 +16,6 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.robolectric.Shadows;
-import org.robolectric.annotation.Config;
 
 @RunWith(AndroidJUnit4.class)
 public class ShadowCameraTest {
@@ -69,7 +67,7 @@ public class ShadowCameraTest {
     Camera.Parameters parameters = camera.getParameters();
     assertThat(parameters).isNotNull();
     assertThat(parameters.getSupportedPreviewFormats()).isNotNull();
-    assertThat(parameters.getSupportedPreviewFormats().size()).isNotEqualTo(0);
+    assertThat(parameters.getSupportedPreviewFormats()).isNotEmpty();
   }
 
   @Test
@@ -215,7 +213,7 @@ public class ShadowCameraTest {
 
     assertThat(shadowCamera.hasRequestedAutoFocus()).isTrue();
     shadowCamera.invokeAutoFocusCallback(true, camera);
-    assertThat(callback.success).isEqualTo(true);
+    assertThat(callback.success).isTrue();
     assertThat(callback.camera).isEqualTo(camera);
 
     assertThat(shadowCamera.hasRequestedAutoFocus()).isFalse();
@@ -279,6 +277,25 @@ public class ShadowCameraTest {
   }
 
   @Test
+  public void testCameraInfoShutterSound() {
+    Camera.CameraInfo cameraQueryCannotDisable = new Camera.CameraInfo();
+    Camera.CameraInfo cameraInfoCannotDisable = new Camera.CameraInfo();
+    cameraInfoCannotDisable.canDisableShutterSound = false;
+    ShadowCamera.addCameraInfo(0, cameraInfoCannotDisable);
+
+    Camera.CameraInfo cameraQueryCanDisable = new Camera.CameraInfo();
+    Camera.CameraInfo cameraInfoCanDisable = new Camera.CameraInfo();
+    cameraInfoCanDisable.canDisableShutterSound = true;
+    ShadowCamera.addCameraInfo(1, cameraInfoCanDisable);
+
+    assertThat(Camera.getNumberOfCameras()).isEqualTo(2);
+    Camera.getCameraInfo(0, cameraQueryCannotDisable);
+    assertThat(cameraQueryCannotDisable.canDisableShutterSound).isFalse();
+    Camera.getCameraInfo(1, cameraQueryCanDisable);
+    assertThat(cameraQueryCanDisable.canDisableShutterSound).isTrue();
+  }
+
+  @Test
   public void testTakePicture() {
     camera.takePicture(null, null, null);
 
@@ -293,7 +310,6 @@ public class ShadowCameraTest {
   }
 
   @Test
-  @Config(minSdk = JELLY_BEAN_MR1)
   public void testShutterEnabled() {
     Camera.CameraInfo cameraInfo = new Camera.CameraInfo();
     cameraInfo.facing = Camera.CameraInfo.CAMERA_FACING_BACK;
@@ -308,6 +324,27 @@ public class ShadowCameraTest {
     assertThat(shadowCamera.enableShutterSound(true)).isTrue();
     assertThat(shadowCamera.enableShutterSound(false)).isTrue();
     assertThat(shadowCamera.enableShutterSound(true)).isTrue();
+  }
+
+  @Test
+  public void cameraParameters_areCached() {
+    assertThat(camera.getParameters()).isSameInstanceAs(Camera.open().getParameters());
+  }
+
+  @Test
+  public void setSupportedFocusModes_empty_clearsCurrentFocusMode() {
+    Camera.Parameters parameters = camera.getParameters();
+    assertThat(parameters.getFocusMode()).isNotNull();
+    Shadows.shadowOf(parameters).setSupportedFocusModes();
+    assertThat(parameters.getFocusMode()).isNull();
+  }
+
+  @Test
+  public void setSupportedFlashModes_empty_clearsCurrentFocusMode() {
+    Camera.Parameters parameters = camera.getParameters();
+    assertThat(parameters.getFlashMode()).isNotNull();
+    Shadows.shadowOf(parameters).setSupportedFlashModes();
+    assertThat(parameters.getFlashMode()).isNull();
   }
 
   private void addBackCamera() {

@@ -3,20 +3,25 @@ package org.robolectric.shadows;
 import static android.app.usage.UsageStatsManager.INTERVAL_DAILY;
 import static android.app.usage.UsageStatsManager.INTERVAL_WEEKLY;
 import static android.content.Context.USAGE_STATS_SERVICE;
-import static android.os.Build.VERSION_CODES.LOLLIPOP;
 import static android.os.Build.VERSION_CODES.Q;
+import static android.os.Build.VERSION_CODES.TIRAMISU;
 import static com.google.common.truth.Truth.assertThat;
 import static java.util.concurrent.TimeUnit.HOURS;
 import static org.robolectric.Shadows.shadowOf;
+import static org.robolectric.util.reflector.Reflector.reflector;
 
+import android.app.Activity;
 import android.app.Application;
 import android.app.PendingIntent;
+import android.app.usage.BroadcastResponseStats;
 import android.app.usage.UsageEvents;
 import android.app.usage.UsageEvents.Event;
 import android.app.usage.UsageStats;
 import android.app.usage.UsageStatsManager;
+import android.content.Context;
 import android.content.Intent;
 import android.os.Build;
+import android.os.PersistableBundle;
 import androidx.test.core.app.ApplicationProvider;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import com.google.common.collect.ImmutableList;
@@ -28,20 +33,30 @@ import java.util.concurrent.TimeUnit;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.robolectric.Robolectric;
+import org.robolectric.android.controller.ActivityController;
 import org.robolectric.annotation.Config;
 import org.robolectric.shadows.ShadowUsageStatsManager.AppUsageLimitObserver;
 import org.robolectric.shadows.ShadowUsageStatsManager.AppUsageObserver;
+import org.robolectric.shadows.ShadowUsageStatsManager.EventReflector;
 import org.robolectric.shadows.ShadowUsageStatsManager.UsageSessionObserver;
 import org.robolectric.shadows.ShadowUsageStatsManager.UsageStatsBuilder;
+import org.robolectric.util.reflector.Constructor;
+import org.robolectric.util.reflector.ForType;
+import org.robolectric.util.reflector.WithType;
+import org.robolectric.versioning.AndroidVersions.V;
 
 /** Test for {@link ShadowUsageStatsManager}. */
 @RunWith(AndroidJUnit4.class)
-@Config(minSdk = LOLLIPOP)
 public class ShadowUsageStatsManagerTest {
 
   private static final String TEST_PACKAGE_NAME1 = "com.company1.pkg1";
   private static final String TEST_PACKAGE_NAME2 = "com.company2.pkg2";
   private static final String TEST_ACTIVITY_NAME = "com.company2.pkg2.Activity";
+  private static final String APP_1 = "test.app";
+  private static final String APP_2 = "some.other.app";
+  private static final int BUCKET_ID_1 = 10;
+  private static final int BUCKET_ID_2 = 42;
 
   private UsageStatsManager usageStatsManager;
   private Application context;
@@ -55,7 +70,7 @@ public class ShadowUsageStatsManagerTest {
   }
 
   @Test
-  public void testQueryEvents_emptyEvents() throws Exception {
+  public void testQueryEvents_emptyEvents() {
     UsageEvents events = usageStatsManager.queryEvents(1000L, 2000L);
     Event event = new Event();
 
@@ -64,7 +79,7 @@ public class ShadowUsageStatsManagerTest {
   }
 
   @Test
-  public void testQueryEvents_overlappingEvents() throws Exception {
+  public void testQueryEvents_overlappingEvents() {
     shadowOf(usageStatsManager).addEvent(TEST_PACKAGE_NAME1, 1000L, Event.MOVE_TO_BACKGROUND);
     shadowOf(usageStatsManager)
         .addEvent(
@@ -97,7 +112,7 @@ public class ShadowUsageStatsManagerTest {
   }
 
   @Test
-  public void testQueryEvents_appendEventData_shouldCombineWithPreviousData() throws Exception {
+  public void testQueryEvents_appendEventData_shouldCombineWithPreviousData() {
     shadowOf(usageStatsManager).addEvent(TEST_PACKAGE_NAME1, 500L, Event.MOVE_TO_FOREGROUND);
     shadowOf(usageStatsManager).addEvent(TEST_PACKAGE_NAME1, 1000L, Event.MOVE_TO_BACKGROUND);
     shadowOf(usageStatsManager)
@@ -139,8 +154,7 @@ public class ShadowUsageStatsManagerTest {
   }
 
   @Test
-  public void testQueryEvents_appendEventData_simulateTimeChange_shouldAddOffsetToPreviousData()
-      throws Exception {
+  public void testQueryEvents_appendEventData_simulateTimeChange_shouldAddOffsetToPreviousData() {
     shadowOf(usageStatsManager).addEvent(TEST_PACKAGE_NAME1, 500L, Event.MOVE_TO_FOREGROUND);
     shadowOf(usageStatsManager).addEvent(TEST_PACKAGE_NAME1, 1000L, Event.MOVE_TO_BACKGROUND);
     shadowOf(usageStatsManager)
@@ -184,7 +198,7 @@ public class ShadowUsageStatsManagerTest {
 
   @Test
   @Config(minSdk = Build.VERSION_CODES.P)
-  public void testGetAppStandbyBucket_withPackageName() throws Exception {
+  public void testGetAppStandbyBucket_withPackageName() {
     assertThat(shadowOf(usageStatsManager).getAppStandbyBuckets()).isEmpty();
 
     shadowOf(usageStatsManager).setAppStandbyBucket("app1", UsageStatsManager.STANDBY_BUCKET_RARE);
@@ -200,7 +214,7 @@ public class ShadowUsageStatsManagerTest {
 
   @Test
   @Config(minSdk = Build.VERSION_CODES.P)
-  public void testSetAppStandbyBuckets() throws Exception {
+  public void testSetAppStandbyBuckets() {
     assertThat(shadowOf(usageStatsManager).getAppStandbyBuckets()).isEmpty();
     assertThat(shadowOf(usageStatsManager).getAppStandbyBucket("app1"))
         .isEqualTo(UsageStatsManager.STANDBY_BUCKET_ACTIVE);
@@ -216,7 +230,7 @@ public class ShadowUsageStatsManagerTest {
 
   @Test
   @Config(minSdk = Build.VERSION_CODES.P)
-  public void testGetAppStandbyBucket_currentApp() throws Exception {
+  public void testGetAppStandbyBucket_currentApp() {
     shadowOf(usageStatsManager).setCurrentAppStandbyBucket(UsageStatsManager.STANDBY_BUCKET_RARE);
     assertThat(shadowOf(usageStatsManager).getAppStandbyBucket())
         .isEqualTo(UsageStatsManager.STANDBY_BUCKET_RARE);
@@ -335,7 +349,6 @@ public class ShadowUsageStatsManagerTest {
                 TimeUnit.MINUTES,
                 pendingIntent1));
   }
-
 
   @Test
   public void queryUsageStats_noStatsAdded() {
@@ -506,7 +519,7 @@ public class ShadowUsageStatsManagerTest {
   @Test
   @Config(minSdk = Build.VERSION_CODES.Q)
   public void
-  testRegisterUsageSessionObserver_duplicateObserverIds_shouldOverrideExistingObserver() {
+      testRegisterUsageSessionObserver_duplicateObserverIds_shouldOverrideExistingObserver() {
     PendingIntent sessionStepIntent1 =
         PendingIntent.getBroadcast(context, 0, new Intent("SESSION_STEP_ACTION1"), 0);
     PendingIntent sessionEndedIntent1 =
@@ -959,5 +972,197 @@ public class ShadowUsageStatsManagerTest {
     assertThat(event.getEventType()).isEqualTo(Event.ACTIVITY_STOPPED);
 
     assertThat(events.hasNextEvent()).isFalse();
+  }
+
+  @Config(minSdk = TIRAMISU)
+  @Test
+  public void addBroadcastResponseStats_returnsSeededData() {
+    BroadcastResponseStats stats = new BroadcastResponseStats(APP_1, BUCKET_ID_1);
+
+    shadowOf(usageStatsManager).addBroadcastResponseStats(stats);
+
+    assertThat(usageStatsManager.queryBroadcastResponseStats(APP_1, BUCKET_ID_1))
+        .containsExactly(stats);
+  }
+
+  @Config(minSdk = TIRAMISU)
+  @Test
+  public void addBroadcastResponseStats_multipleApps_returnsCorrectStats() {
+    BroadcastResponseStats app1Stats = new BroadcastResponseStats(APP_1, BUCKET_ID_1);
+    BroadcastResponseStats app2Stats = new BroadcastResponseStats(APP_2, BUCKET_ID_1);
+
+    shadowOf(usageStatsManager).addBroadcastResponseStats(app1Stats);
+    shadowOf(usageStatsManager).addBroadcastResponseStats(app2Stats);
+
+    assertThat(usageStatsManager.queryBroadcastResponseStats(APP_1, BUCKET_ID_1))
+        .containsExactly(app1Stats);
+    assertThat(usageStatsManager.queryBroadcastResponseStats(APP_2, BUCKET_ID_1))
+        .containsExactly(app2Stats);
+  }
+
+  @Config(minSdk = TIRAMISU)
+  @Test
+  public void addBroadcastResponseStats_multipleBuckets_returnsCorrectStats() {
+    BroadcastResponseStats bucket1Stats = new BroadcastResponseStats(APP_1, BUCKET_ID_1);
+    BroadcastResponseStats bucket2Stats = new BroadcastResponseStats(APP_1, BUCKET_ID_2);
+
+    shadowOf(usageStatsManager).addBroadcastResponseStats(bucket1Stats);
+    shadowOf(usageStatsManager).addBroadcastResponseStats(bucket2Stats);
+
+    assertThat(usageStatsManager.queryBroadcastResponseStats(APP_1, BUCKET_ID_1))
+        .containsExactly(bucket1Stats);
+    assertThat(usageStatsManager.queryBroadcastResponseStats(APP_1, BUCKET_ID_2))
+        .containsExactly(bucket2Stats);
+  }
+
+  @Config(minSdk = TIRAMISU)
+  @Test
+  public void queryBroadcastResponseStats_zeroBucketId_returnsAllBuckets() {
+    BroadcastResponseStats bucket1Stats = new BroadcastResponseStats(APP_1, BUCKET_ID_1);
+    BroadcastResponseStats bucket2Stats = new BroadcastResponseStats(APP_1, BUCKET_ID_2);
+
+    shadowOf(usageStatsManager).addBroadcastResponseStats(bucket1Stats);
+    shadowOf(usageStatsManager).addBroadcastResponseStats(bucket2Stats);
+
+    assertThat(usageStatsManager.queryBroadcastResponseStats(APP_1, 0))
+        .containsExactly(bucket1Stats, bucket2Stats);
+  }
+
+  @Config(minSdk = TIRAMISU)
+  @Test
+  public void addBroadcastResponseStats_nullApp_returnsAllApps() {
+    BroadcastResponseStats app1Stats = new BroadcastResponseStats(APP_1, BUCKET_ID_1);
+    BroadcastResponseStats app2Stats = new BroadcastResponseStats(APP_2, BUCKET_ID_1);
+
+    shadowOf(usageStatsManager).addBroadcastResponseStats(app1Stats);
+    shadowOf(usageStatsManager).addBroadcastResponseStats(app2Stats);
+
+    assertThat(usageStatsManager.queryBroadcastResponseStats(null, BUCKET_ID_1))
+        .containsExactly(app1Stats, app2Stats);
+  }
+
+  @Test
+  @Config(minSdk = 28)
+  public void usageStatsManager_activityContextEnabled_differentInstancesRetrieveBuckets() {
+    String originalProperty = System.getProperty("robolectric.createActivityContexts", "");
+    System.setProperty("robolectric.createActivityContexts", "true");
+    try (ActivityController<Activity> controller =
+        Robolectric.buildActivity(Activity.class).setup()) {
+      UsageStatsManager applicationUsageStatsManager =
+          (UsageStatsManager)
+              ApplicationProvider.getApplicationContext()
+                  .getSystemService(Context.USAGE_STATS_SERVICE);
+
+      Activity activity = controller.get();
+      UsageStatsManager activityUsageStatsManager =
+          (UsageStatsManager) activity.getSystemService(Context.USAGE_STATS_SERVICE);
+
+      assertThat(applicationUsageStatsManager).isNotSameInstanceAs(activityUsageStatsManager);
+
+      int applicationBucket = applicationUsageStatsManager.getAppStandbyBucket();
+      int activityBucket = activityUsageStatsManager.getAppStandbyBucket();
+
+      assertThat(applicationBucket).isEqualTo(activityBucket);
+    } finally {
+      System.setProperty("robolectric.createActivityContexts", originalProperty);
+    }
+  }
+
+  @Test
+  @Config(minSdk = V.SDK_INT)
+  public void testQueryEvents_newApiV_shouldReturn() {
+    // These events should be returned.
+    shadowOf(usageStatsManager)
+        .addEvent(
+            ShadowUsageStatsManager.EventBuilder.buildEvent()
+                .setTimeStamp(1000L)
+                .setPackage(TEST_PACKAGE_NAME1)
+                .setEventType(Event.MOVE_TO_BACKGROUND)
+                .build());
+    shadowOf(usageStatsManager)
+        .addEvent(
+            ShadowUsageStatsManager.EventBuilder.buildEvent()
+                .setTimeStamp(1001L)
+                .setPackage(TEST_PACKAGE_NAME1)
+                .setEventType(Event.MOVE_TO_FOREGROUND)
+                .build());
+    PersistableBundle extras = new PersistableBundle();
+    extras.putString("fakekey", "fakevalue");
+    shadowOf(usageStatsManager)
+        .addEvent(
+            ShadowUsageStatsManager.EventBuilder.buildEvent()
+                .setTimeStamp(1500L)
+                .setPackage(TEST_PACKAGE_NAME2)
+                .setEventType(Event.USER_INTERACTION)
+                .setExtras(extras)
+                .build());
+
+    // These events should be filtered out.
+    // Timestamp too late.
+    shadowOf(usageStatsManager)
+        .addEvent(
+            ShadowUsageStatsManager.EventBuilder.buildEvent()
+                .setTimeStamp(3000L)
+                .setPackage(TEST_PACKAGE_NAME1)
+                .setEventType(Event.USER_INTERACTION)
+                .build());
+    // Wrong type.
+    shadowOf(usageStatsManager)
+        .addEvent(
+            ShadowUsageStatsManager.EventBuilder.buildEvent()
+                .setTimeStamp(1000L)
+                .setEventType(Event.SYSTEM_INTERACTION)
+                .build());
+
+    Object queryBuilder =
+        reflector(UsageEventsQueryBuilderReflector.class).newBuilder(1000L, 2000L);
+    UsageEventsQueryBuilderReflector queryBuilderReflector =
+        reflector(UsageEventsQueryBuilderReflector.class, queryBuilder);
+    queryBuilderReflector.setEventTypes(
+        Event.MOVE_TO_BACKGROUND, Event.MOVE_TO_FOREGROUND, Event.USER_INTERACTION);
+    UsageEvents events =
+        reflector(UsageStatsManagerReflector.class, usageStatsManager)
+            .queryEvents(queryBuilderReflector.build());
+
+    Event event = new Event();
+
+    assertThat(events.hasNextEvent()).isTrue();
+    assertThat(events.getNextEvent(event)).isTrue();
+    assertThat(event.getPackageName()).isEqualTo(TEST_PACKAGE_NAME1);
+    assertThat(event.getTimeStamp()).isEqualTo(1000L);
+    assertThat(event.getEventType()).isEqualTo(Event.MOVE_TO_BACKGROUND);
+
+    assertThat(events.hasNextEvent()).isTrue();
+    assertThat(events.getNextEvent(event)).isTrue();
+    assertThat(event.getPackageName()).isEqualTo(TEST_PACKAGE_NAME1);
+    assertThat(event.getTimeStamp()).isEqualTo(1001L);
+    assertThat(event.getEventType()).isEqualTo(Event.MOVE_TO_FOREGROUND);
+
+    assertThat(events.hasNextEvent()).isTrue();
+    assertThat(events.getNextEvent(event)).isTrue();
+    assertThat(event.getPackageName()).isEqualTo(TEST_PACKAGE_NAME2);
+    assertThat(event.getTimeStamp()).isEqualTo(1500L);
+    assertThat(event.getEventType()).isEqualTo(Event.USER_INTERACTION);
+    EventReflector eventReflector = reflector(EventReflector.class, event);
+    extras = eventReflector.getExtras();
+    assertThat(extras.getString("fakekey")).isEqualTo("fakevalue");
+
+    assertThat(events.hasNextEvent()).isFalse();
+  }
+
+  // TODO: remove reflection calls once Android V is fully supported.
+  @ForType(UsageStatsManager.class)
+  interface UsageStatsManagerReflector {
+    UsageEvents queryEvents(@WithType("android.app.usage.UsageEventsQuery") Object query);
+  }
+
+  @ForType(className = "android.app.usage.UsageEventsQuery$Builder")
+  interface UsageEventsQueryBuilderReflector {
+    @Constructor
+    Object newBuilder(long beginTimeMillis, long endTimeMillis);
+
+    Object setEventTypes(int... eventTypes);
+
+    Object build();
   }
 }

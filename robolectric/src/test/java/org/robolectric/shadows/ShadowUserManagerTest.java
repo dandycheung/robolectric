@@ -1,20 +1,19 @@
 package org.robolectric.shadows;
 
-import static android.os.Build.VERSION_CODES.JELLY_BEAN_MR1;
-import static android.os.Build.VERSION_CODES.JELLY_BEAN_MR2;
-import static android.os.Build.VERSION_CODES.KITKAT_WATCH;
-import static android.os.Build.VERSION_CODES.LOLLIPOP;
 import static android.os.Build.VERSION_CODES.M;
 import static android.os.Build.VERSION_CODES.N;
 import static android.os.Build.VERSION_CODES.N_MR1;
 import static android.os.Build.VERSION_CODES.O;
 import static android.os.Build.VERSION_CODES.Q;
 import static android.os.Build.VERSION_CODES.R;
+import static android.os.Build.VERSION_CODES.S;
+import static android.os.Build.VERSION_CODES.TIRAMISU;
 import static com.google.common.truth.Truth.assertThat;
 import static org.junit.Assert.fail;
 import static org.robolectric.Shadows.shadowOf;
 
 import android.Manifest.permission;
+import android.app.Activity;
 import android.app.Application;
 import android.content.BroadcastReceiver;
 import android.content.Context;
@@ -31,12 +30,16 @@ import android.os.PersistableBundle;
 import android.os.Process;
 import android.os.UserHandle;
 import android.os.UserManager;
+import android.os.UserManager.EnforcingUser;
 import androidx.test.core.app.ApplicationProvider;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.robolectric.Robolectric;
+import org.robolectric.android.controller.ActivityController;
 import org.robolectric.annotation.Config;
 import org.robolectric.shadow.api.Shadow;
 import org.robolectric.shadows.ShadowUserManager.UserState;
@@ -61,19 +64,35 @@ public class ShadowUserManagerTest {
     userManager = (UserManager) context.getSystemService(Context.USER_SERVICE);
   }
 
+  /**
+   * {@link ShadowUserManager} should support methods getting invoked when UserManager objects are
+   * returned from package contexts.
+   *
+   * <p>The root cause of this issue is that calling {@link Context#getApplicationContext()} returns
+   * null on a package context.
+   */
+  @Config(minSdk = R)
   @Test
-  @Config(minSdk = LOLLIPOP)
+  public void packageContextImpl_isUserOfType() throws Exception {
+    Context packageContext =
+        context.createPackageContextAsUser(
+            context.getPackageName(), 0, UserHandle.of(/* userId= */ 0));
+    UserManager packageUserManager = packageContext.getSystemService(UserManager.class);
+    assertThat(packageUserManager.isUserOfType("sdfasdfsadf")).isFalse();
+  }
+
+  @Test
   public void shouldGetUserProfiles() {
     assertThat(userManager.getUserProfiles()).contains(Process.myUserHandle());
 
     UserHandle anotherProfile = newUserHandle(2);
     shadowOf(userManager).addUserProfile(anotherProfile);
 
-    assertThat(userManager.getUserProfiles()).containsExactly(Process.myUserHandle(), anotherProfile);
+    assertThat(userManager.getUserProfiles())
+        .containsExactly(Process.myUserHandle(), anotherProfile);
   }
 
   @Test
-  @Config(minSdk = LOLLIPOP)
   public void getUserProfiles_calledFromProfile_shouldReturnList() {
     ShadowProcess.setUid(2 * 100000);
     assertThat(userManager.getUserProfiles()).contains(new UserHandle(2));
@@ -84,13 +103,11 @@ public class ShadowUserManagerTest {
   }
 
   @Test
-  @Config(minSdk = LOLLIPOP)
   public void getUserProfiles_noProfiles_shouldReturnListOfSelf() {
     assertThat(userManager.getUserProfiles()).containsExactly(new UserHandle(0));
   }
 
   @Test
-  @Config(minSdk = JELLY_BEAN_MR2)
   public void testGetApplicationRestrictions() {
     String packageName = context.getPackageName();
     assertThat(userManager.getApplicationRestrictions(packageName).size()).isEqualTo(0);
@@ -116,7 +133,6 @@ public class ShadowUserManagerTest {
   }
 
   @Test
-  @Config(minSdk = LOLLIPOP)
   public void hasUserRestriction() {
     assertThat(userManager.hasUserRestriction(UserManager.ENSURE_VERIFY_APPS)).isFalse();
 
@@ -127,8 +143,7 @@ public class ShadowUserManagerTest {
   }
 
   @Test
-  @Config(minSdk = JELLY_BEAN_MR2)
-  public void setUserRestriction() {
+  public void setUserRestriction_forGivenUserHandle_setsTheRestriction() {
     assertThat(userManager.hasUserRestriction(UserManager.ENSURE_VERIFY_APPS)).isFalse();
 
     UserHandle userHandle = Process.myUserHandle();
@@ -138,7 +153,15 @@ public class ShadowUserManagerTest {
   }
 
   @Test
-  @Config(minSdk = JELLY_BEAN_MR2)
+  public void setUserRestriction_forCurrentUser_setsTheRestriction() {
+    assertThat(userManager.hasUserRestriction(UserManager.ENSURE_VERIFY_APPS)).isFalse();
+
+    userManager.setUserRestriction(UserManager.ENSURE_VERIFY_APPS, true);
+
+    assertThat(userManager.hasUserRestriction(UserManager.ENSURE_VERIFY_APPS)).isTrue();
+  }
+
+  @Test
   public void getUserRestrictions() {
     assertThat(userManager.getUserRestrictions().size()).isEqualTo(0);
 
@@ -160,7 +183,6 @@ public class ShadowUserManagerTest {
   }
 
   @Test
-  @Config(minSdk = JELLY_BEAN_MR2)
   public void clearUserRestrictions() {
     assertThat(userManager.getUserRestrictions().size()).isEqualTo(0);
     shadowOf(userManager)
@@ -172,7 +194,6 @@ public class ShadowUserManagerTest {
   }
 
   @Test
-  @Config(minSdk = LOLLIPOP)
   public void isManagedProfile() {
     assertThat(userManager.isManagedProfile()).isFalse();
     shadowOf(userManager).setManagedProfile(true);
@@ -185,13 +206,9 @@ public class ShadowUserManagerTest {
     shadowOf(userManager)
         .addProfile(
             0, PROFILE_USER_HANDLE, PROFILE_USER_NAME, ShadowUserManager.FLAG_MANAGED_PROFILE);
-
     assertThat(userManager.isManagedProfile()).isFalse();
 
-    Application application = ApplicationProvider.getApplicationContext();
-    ShadowContextImpl shadowContext = Shadow.extract(application.getBaseContext());
-    shadowContext.setUserId(PROFILE_USER_HANDLE);
-
+    setUserIdInContext(PROFILE_USER_HANDLE);
     assertThat(userManager.isManagedProfile()).isTrue();
   }
 
@@ -202,6 +219,35 @@ public class ShadowUserManagerTest {
     shadowOf(userManager)
         .addProfile(12, 13, "another managed profile", ShadowUserManager.FLAG_MANAGED_PROFILE);
     assertThat(userManager.isManagedProfile(13)).isTrue();
+  }
+
+  @Test
+  @Config(minSdk = S)
+  public void isCloneProfile_withSetter() {
+    shadowOf(userManager).setCloneProfile(false);
+    assertThat(userManager.isCloneProfile()).isFalse();
+
+    shadowOf(userManager).setCloneProfile(true);
+    assertThat(userManager.isCloneProfile()).isTrue();
+  }
+
+  @Test
+  @Config(minSdk = S)
+  public void isCloneProfile_usesContextUser() {
+    assertThat(userManager.isCloneProfile()).isFalse();
+
+    UserInfo profileUserInfo =
+        new UserInfo(
+            PROFILE_USER_HANDLE,
+            PROFILE_USER_NAME,
+            /* iconPath= */ null,
+            /* profileFlags= */ 0,
+            UserManager.USER_TYPE_PROFILE_CLONE);
+    shadowOf(userManager).addProfile(0, PROFILE_USER_HANDLE, profileUserInfo);
+    assertThat(userManager.isCloneProfile()).isFalse();
+
+    setUserIdInContext(PROFILE_USER_HANDLE);
+    assertThat(userManager.isCloneProfile()).isTrue();
   }
 
   @Test
@@ -219,22 +265,19 @@ public class ShadowUserManagerTest {
         userManager.createProfile(PROFILE_USER_NAME, UserManager.USER_TYPE_PROFILE_MANAGED, null);
     assertThat(userManager.isProfile()).isFalse();
 
-    Application application = ApplicationProvider.getApplicationContext();
-    ShadowContextImpl shadowContext = Shadow.extract(application.getBaseContext());
-    shadowContext.setUserId(profileHandle.getIdentifier());
-
+    setUserIdInContext(profileHandle.getIdentifier());
     assertThat(userManager.isProfile()).isTrue();
   }
 
   @Test
-  @Config(minSdk = LOLLIPOP)
   public void enforcePermissionChecks() {
     shadowOf(userManager).enforcePermissionChecks(true);
 
     try {
       userManager.isManagedProfile();
       fail("Expected exception");
-    } catch (SecurityException expected) {}
+    } catch (SecurityException expected) {
+    }
 
     setPermissions(permission.MANAGE_USERS);
 
@@ -244,7 +287,6 @@ public class ShadowUserManagerTest {
   }
 
   @Test
-  @Config(minSdk = JELLY_BEAN_MR1)
   public void shouldGetSerialNumberForUser() {
     long serialNumberInvalid = -1L;
 
@@ -261,7 +303,6 @@ public class ShadowUserManagerTest {
   }
 
   @Test
-  @Config(minSdk = JELLY_BEAN_MR1)
   public void getUserForNonExistSerialNumber() {
     long nonExistSerialNumber = 121;
     assertThat(userManager.getUserForSerialNumber(nonExistSerialNumber)).isNull();
@@ -269,7 +310,6 @@ public class ShadowUserManagerTest {
   }
 
   @Test
-  @Config(minSdk = JELLY_BEAN_MR1)
   public void shouldGetSerialNumberForProfile() {
     long serialNumberInvalid = -1L;
 
@@ -279,7 +319,6 @@ public class ShadowUserManagerTest {
   }
 
   @Test
-  @Config(minSdk = JELLY_BEAN_MR1)
   public void shouldGetUserHandleFromSerialNumberForProfile() {
     long serialNumberInvalid = -1L;
 
@@ -290,7 +329,6 @@ public class ShadowUserManagerTest {
   }
 
   @Test
-  @Config(minSdk = JELLY_BEAN_MR1)
   public void getSerialNumberForUser_returnsSetSerialNumberForUser() {
     UserHandle userHandle = newUserHandle(0);
     shadowOf(userManager).setSerialNumberForUser(userHandle, 123L);
@@ -298,13 +336,25 @@ public class ShadowUserManagerTest {
   }
 
   @Test
-  @Config(minSdk = JELLY_BEAN_MR1)
   public void getUserHandle() {
     UserHandle expectedUserHandle = shadowOf(userManager).addUser(10, "secondary_user", 0);
 
     long serialNumber = userManager.getUserSerialNumber(10);
     int actualUserHandle = shadowOf(userManager).getUserHandle((int) serialNumber);
     assertThat(actualUserHandle).isEqualTo(expectedUserHandle.getIdentifier());
+  }
+
+  @Test
+  @Config(minSdk = R)
+  public void getUserHandles() {
+    assertThat(shadowOf(userManager).getUserHandles(/* excludeDying= */ true)).hasSize(1);
+    shadowOf(userManager).getUserHandles(/* excludeDying= */ true).get(0);
+    assertThat(UserHandle.myUserId()).isEqualTo(UserHandle.USER_SYSTEM);
+
+    UserHandle expectedUserHandle = shadowOf(userManager).addUser(10, "secondary_user", 0);
+    assertThat(shadowOf(userManager).getUserHandles(/* excludeDying= */ true)).hasSize(2);
+    assertThat(shadowOf(userManager).getUserHandles(/* excludeDying= */ true).get(1))
+        .isEqualTo(expectedUserHandle);
   }
 
   @Test
@@ -345,7 +395,6 @@ public class ShadowUserManagerTest {
   }
 
   @Test
-  @Config(minSdk = JELLY_BEAN_MR2)
   public void isLinkedUser() {
     assertThat(userManager.isLinkedUser()).isFalse();
 
@@ -415,7 +464,6 @@ public class ShadowUserManagerTest {
   }
 
   @Test
-  @Config(minSdk = KITKAT_WATCH)
   public void isGuestUser() {
     assertThat(userManager.isGuestUser()).isFalse();
 
@@ -427,7 +475,6 @@ public class ShadowUserManagerTest {
   }
 
   @Test
-  @Config(minSdk = JELLY_BEAN_MR1)
   public void isUserRunning() {
     UserHandle userHandle = newUserHandle(0);
 
@@ -453,7 +500,6 @@ public class ShadowUserManagerTest {
   }
 
   @Test
-  @Config(minSdk = JELLY_BEAN_MR1)
   public void isUserRunningOrStopping() {
     UserHandle userHandle = newUserHandle(0);
 
@@ -531,7 +577,6 @@ public class ShadowUserManagerTest {
   }
 
   @Test
-  @Config(minSdk = JELLY_BEAN_MR1)
   public void addSecondaryUser() {
     assertThat(userManager.getUserCount()).isEqualTo(1);
     UserHandle userHandle = shadowOf(userManager).addUser(10, "secondary_user", 0);
@@ -540,7 +585,6 @@ public class ShadowUserManagerTest {
   }
 
   @Test
-  @Config(minSdk = JELLY_BEAN_MR1)
   public void removeSecondaryUser() {
     shadowOf(userManager).addUser(10, "secondary_user", 0);
     assertThat(shadowOf(userManager).removeUser(10)).isTrue();
@@ -556,11 +600,48 @@ public class ShadowUserManagerTest {
   }
 
   @Test
-  @Config(minSdk = JELLY_BEAN_MR1)
+  @Config(minSdk = Q)
+  public void removeSecondaryUser_noExistingUser_doesNotRemove() {
+    assertThat(shadowOf(userManager).removeUser(UserHandle.of(10))).isFalse();
+    assertThat(userManager.getUserCount()).isEqualTo(1);
+  }
+
+  @Test
+  @Config(minSdk = TIRAMISU)
+  public void removeUserWhenPossible_twoUsersRemoveOne_hasOneUserLeft() {
+    shadowOf(userManager).addUser(10, "secondary_user", 0);
+    assertThat(
+            userManager.removeUserWhenPossible(
+                UserHandle.of(10), /* overrideDevicePolicy= */ false))
+        .isEqualTo(UserManager.REMOVE_RESULT_REMOVED);
+    assertThat(userManager.getUserCount()).isEqualTo(1);
+  }
+
+  @Test
+  @Config(minSdk = TIRAMISU)
+  public void removeUserWhenPossible_nonExistingUser_fails() {
+    assertThat(
+            userManager.removeUserWhenPossible(
+                UserHandle.of(10), /* overrideDevicePolicy= */ false))
+        .isEqualTo(UserManager.REMOVE_RESULT_ERROR_UNKNOWN);
+    assertThat(userManager.getUserCount()).isEqualTo(1);
+  }
+
+  @Test
   public void switchToSecondaryUser() {
     shadowOf(userManager).addUser(10, "secondary_user", 0);
     shadowOf(userManager).switchUser(10);
     assertThat(UserHandle.myUserId()).isEqualTo(10);
+  }
+
+  @Test
+  @Config(minSdk = M)
+  public void switchToSecondaryUser_system() {
+    assertThat(userManager.isSystemUser()).isTrue();
+    shadowOf(userManager).addUser(10, "secondary_user", 0);
+    shadowOf(userManager).switchUser(10);
+
+    assertThat(userManager.isSystemUser()).isFalse();
   }
 
   @Test
@@ -588,7 +669,6 @@ public class ShadowUserManagerTest {
   }
 
   @Test
-  @Config(minSdk = JELLY_BEAN_MR1)
   public void getUsers() {
     assertThat(userManager.getUsers()).hasSize(1);
     shadowOf(userManager).addUser(10, "secondary_user", 0);
@@ -598,7 +678,6 @@ public class ShadowUserManagerTest {
   }
 
   @Test
-  @Config(minSdk = JELLY_BEAN_MR1)
   public void getUserInfo() {
     shadowOf(userManager).addUser(10, "secondary_user", 0);
     assertThat(userManager.getUserInfo(10)).isNotNull();
@@ -606,7 +685,6 @@ public class ShadowUserManagerTest {
   }
 
   @Test
-  @Config(minSdk = JELLY_BEAN_MR1)
   public void getUserInfoOfProfile() {
     shadowOf(userManager).addProfile(10, 11, "profile_user", 0);
     shadowOf(userManager).addProfile(10, 12, "profile_user_2", 0);
@@ -631,13 +709,12 @@ public class ShadowUserManagerTest {
   }
 
   @Test
-  @Config(minSdk = LOLLIPOP)
   public void getProfiles_addedProfile_containsProfile() {
     shadowOf(userManager).addUser(TEST_USER_HANDLE, "", 0);
-    shadowOf(userManager).addProfile(
-        TEST_USER_HANDLE, PROFILE_USER_HANDLE, PROFILE_USER_NAME, PROFILE_USER_FLAGS);
+    shadowOf(userManager)
+        .addProfile(TEST_USER_HANDLE, PROFILE_USER_HANDLE, PROFILE_USER_NAME, PROFILE_USER_FLAGS);
 
-    // getProfiles(userId) include user itself and asssociated profiles.
+    // getProfiles(userId) include user itself and associated profiles.
     assertThat(userManager.getProfiles(TEST_USER_HANDLE).get(0).id).isEqualTo(TEST_USER_HANDLE);
     assertThat(userManager.getProfiles(TEST_USER_HANDLE).get(1).id).isEqualTo(PROFILE_USER_HANDLE);
   }
@@ -687,9 +764,7 @@ public class ShadowUserManagerTest {
     shadowOf(userManager).setMaxSupportedUsers(2);
     userManager.createProfile(PROFILE_USER_NAME, UserManager.USER_TYPE_PROFILE_MANAGED, null);
 
-    Application application = ApplicationProvider.getApplicationContext();
-    ShadowContextImpl shadowContext = Shadow.extract(application.getBaseContext());
-    shadowContext.setUserId(ShadowUserManager.DEFAULT_SECONDARY_USER_ID);
+    setUserIdInContext(ShadowUserManager.DEFAULT_SECONDARY_USER_ID);
     assertThat(userManager.getUserName()).isEqualTo(PROFILE_USER_NAME);
   }
 
@@ -788,13 +863,11 @@ public class ShadowUserManagerTest {
 
     userManager.setUserName("new user name");
 
-    Application application = ApplicationProvider.getApplicationContext();
-    ShadowContextImpl shadowContext = Shadow.extract(application.getBaseContext());
-    shadowContext.setUserId(PROFILE_USER_HANDLE);
+    setUserIdInContext(PROFILE_USER_HANDLE);
     userManager.setUserName("new profile name");
     assertThat(userManager.getUserName()).isEqualTo("new profile name");
 
-    shadowContext.setUserId(TEST_USER_HANDLE);
+    setUserIdInContext(TEST_USER_HANDLE);
     assertThat(userManager.getUserName()).isEqualTo("new user name");
   }
 
@@ -807,15 +880,11 @@ public class ShadowUserManagerTest {
         userManager.createProfile(PROFILE_USER_NAME, UserManager.USER_TYPE_PROFILE_MANAGED, null);
     assertThat(userManager.isUserOfType(UserManager.USER_TYPE_PROFILE_MANAGED)).isFalse();
 
-    Application application = ApplicationProvider.getApplicationContext();
-    ShadowContextImpl shadowContext = Shadow.extract(application.getBaseContext());
-    shadowContext.setUserId(newUser.getIdentifier());
-
+    setUserIdInContext(newUser.getIdentifier());
     assertThat(userManager.isUserOfType(UserManager.USER_TYPE_PROFILE_MANAGED)).isTrue();
   }
 
   @Test
-  @Config(minSdk = JELLY_BEAN_MR1)
   public void getMaxSupportedUsers() {
     assertThat(UserManager.getMaxSupportedUsers()).isEqualTo(1);
     shadowOf(userManager).setMaxSupportedUsers(5);
@@ -831,7 +900,6 @@ public class ShadowUserManagerTest {
     assertThat(UserManager.supportsMultipleUsers()).isTrue();
   }
 
-
   @Test
   @Config(minSdk = Q)
   public void getUserSwitchability_shouldReturnLastSetSwitchability() {
@@ -840,8 +908,7 @@ public class ShadowUserManagerTest {
         .setUserSwitchability(UserManager.SWITCHABILITY_STATUS_USER_SWITCH_DISALLOWED);
     assertThat(userManager.getUserSwitchability())
         .isEqualTo(UserManager.SWITCHABILITY_STATUS_USER_SWITCH_DISALLOWED);
-    shadowOf(userManager)
-        .setUserSwitchability(UserManager.SWITCHABILITY_STATUS_OK);
+    shadowOf(userManager).setUserSwitchability(UserManager.SWITCHABILITY_STATUS_OK);
     assertThat(userManager.getUserSwitchability()).isEqualTo(UserManager.SWITCHABILITY_STATUS_OK);
   }
 
@@ -861,8 +928,7 @@ public class ShadowUserManagerTest {
     shadowOf(userManager)
         .setUserSwitchability(UserManager.SWITCHABILITY_STATUS_USER_SWITCH_DISALLOWED);
     assertThat(userManager.canSwitchUsers()).isFalse();
-    shadowOf(userManager)
-        .setUserSwitchability(UserManager.SWITCHABILITY_STATUS_OK);
+    shadowOf(userManager).setUserSwitchability(UserManager.SWITCHABILITY_STATUS_OK);
     assertThat(userManager.canSwitchUsers()).isTrue();
   }
 
@@ -870,7 +936,7 @@ public class ShadowUserManagerTest {
   @Config(minSdk = Q)
   public void getUserName_shouldReturnSetUserName() {
     shadowOf(userManager).setUserSwitchability(UserManager.SWITCHABILITY_STATUS_OK);
-    shadowOf(userManager).addUser(10, PROFILE_USER_NAME, /* flags = */ 0);
+    shadowOf(userManager).addUser(10, PROFILE_USER_NAME, /* flags= */ 0);
     shadowOf(userManager).switchUser(10);
     assertThat(userManager.getUserName()).isEqualTo(PROFILE_USER_NAME);
   }
@@ -881,23 +947,33 @@ public class ShadowUserManagerTest {
     userManager.setUserIcon(TEST_USER_ICON);
     assertThat(userManager.getUserIcon()).isEqualTo(TEST_USER_ICON);
 
-    shadowOf(userManager).addUser(10, PROFILE_USER_NAME, /* flags = */ 0);
+    shadowOf(userManager).addUser(10, PROFILE_USER_NAME, /* flags= */ 0);
     shadowOf(userManager).switchUser(10);
     assertThat(userManager.getUserIcon()).isNull();
   }
 
   @Test
-  @Config(minSdk = O)
+  @Config(minSdk = N)
   public void isQuietModeEnabled_shouldReturnFalse() {
     assertThat(userManager.isQuietModeEnabled(Process.myUserHandle())).isFalse();
   }
 
   @Test
-  @Config(minSdk = Q)
+  @Config(minSdk = N)
   public void isQuietModeEnabled_withProfile_shouldReturnFalse() {
     shadowOf(userManager).addProfile(0, 10, "Work profile", UserInfo.FLAG_MANAGED_PROFILE);
 
     assertThat(userManager.isQuietModeEnabled(new UserHandle(10))).isFalse();
+  }
+
+  @Test
+  @Config(minSdk = N)
+  public void isQuietModeEnabled_withProfileQuietMode_shouldReturnTrue() {
+    shadowOf(userManager)
+        .addProfile(
+            0, 10, "Work profile", UserInfo.FLAG_MANAGED_PROFILE | UserInfo.FLAG_QUIET_MODE);
+
+    assertThat(userManager.isQuietModeEnabled(new UserHandle(10))).isTrue();
   }
 
   @Test
@@ -1028,6 +1104,63 @@ public class ShadowUserManagerTest {
     assertThat(receivedHandle.get()).isNull();
   }
 
+  @Test
+  @Config(minSdk = TIRAMISU)
+  public void someUserHasAccount() {
+    assertThat(userManager.someUserHasAccount(SEED_ACCOUNT_NAME, SEED_ACCOUNT_TYPE)).isFalse();
+
+    shadowOf(userManager).setSomeUserHasAccount(SEED_ACCOUNT_NAME, SEED_ACCOUNT_TYPE);
+    assertThat(userManager.someUserHasAccount(SEED_ACCOUNT_NAME, SEED_ACCOUNT_TYPE)).isTrue();
+
+    shadowOf(userManager).removeSomeUserHasAccount(SEED_ACCOUNT_NAME, SEED_ACCOUNT_TYPE);
+    assertThat(userManager.someUserHasAccount(SEED_ACCOUNT_NAME, SEED_ACCOUNT_TYPE)).isFalse();
+  }
+
+  @Test
+  @Config(minSdk = S)
+  public void isUserForeground_defaultValue_returnsTrue() {
+    assertThat(userManager.isUserForeground()).isTrue();
+  }
+
+  @Test
+  @Config(minSdk = S)
+  public void isUserForeground_overridden_returnsNewValue() {
+    shadowOf(userManager).setUserForeground(false);
+
+    assertThat(userManager.isUserForeground()).isFalse();
+  }
+
+  @Test
+  @Config(minSdk = S)
+  public void isUserForeground_valueToggled_returnsLatestValue() {
+    shadowOf(userManager).setUserForeground(false);
+    shadowOf(userManager).setUserForeground(true);
+
+    assertThat(userManager.isUserForeground()).isTrue();
+  }
+
+  @Test
+  @Config(minSdk = O)
+  public void getEnforcingUsers() {
+    UserHandle userHandle = Process.myUserHandle();
+
+    assertThat(userManager.hasUserRestriction(UserManager.ENSURE_VERIFY_APPS)).isFalse();
+    assertThat(userManager.getUserRestrictionSources(UserManager.ENSURE_VERIFY_APPS, userHandle))
+        .isEmpty();
+
+    shadowOf(userManager).setUserRestriction(userHandle, UserManager.ENSURE_VERIFY_APPS, true);
+    assertThat(userManager.hasUserRestriction(UserManager.ENSURE_VERIFY_APPS)).isTrue();
+
+    List<EnforcingUser> sources =
+        userManager.getUserRestrictionSources(UserManager.ENSURE_VERIFY_APPS, userHandle);
+    assertThat(sources.get(0).getUserRestrictionSource())
+        .isEqualTo(UserManager.RESTRICTION_SOURCE_SYSTEM);
+
+    shadowOf(userManager).setUserRestriction(userHandle, UserManager.ENSURE_VERIFY_APPS, false);
+    assertThat(userManager.getUserRestrictionSources(UserManager.ENSURE_VERIFY_APPS, userHandle))
+        .isEmpty();
+  }
+
   // Create user handle from parcel since UserHandle.of() was only added in later APIs.
   private static UserHandle newUserHandle(int uid) {
     Parcel userParcel = Parcel.obtain();
@@ -1036,11 +1169,42 @@ public class ShadowUserManagerTest {
     return new UserHandle(userParcel);
   }
 
+  private static void setUserIdInContext(int userId) {
+    Application application = ApplicationProvider.getApplicationContext();
+    ShadowContextImpl shadowContext = Shadow.extract(application.getBaseContext());
+    shadowContext.setUserId(userId);
+  }
+
   private static void setPermissions(String... permissions) {
     Application context = ApplicationProvider.getApplicationContext();
     PackageInfo packageInfo =
         shadowOf(context.getPackageManager())
             .getInternalMutablePackageInfo(context.getPackageName());
     packageInfo.requestedPermissions = permissions;
+  }
+
+  @Test
+  @Config(minSdk = O)
+  public void userManager_activityContextEnabled_consistentAcrossContexts() {
+    String originalProperty = System.getProperty("robolectric.createActivityContexts", "");
+    System.setProperty("robolectric.createActivityContexts", "true");
+    try (ActivityController<Activity> controller =
+        Robolectric.buildActivity(Activity.class).setup()) {
+      UserManager applicationUserManager =
+          (UserManager)
+              ApplicationProvider.getApplicationContext().getSystemService(Context.USER_SERVICE);
+      Activity activity = controller.get();
+      UserManager activityUserManager =
+          (UserManager) activity.getSystemService(Context.USER_SERVICE);
+
+      assertThat(applicationUserManager).isNotSameInstanceAs(activityUserManager);
+
+      boolean isAdminApplication = applicationUserManager.isAdminUser();
+      boolean isAdminActivity = activityUserManager.isAdminUser();
+
+      assertThat(isAdminActivity).isEqualTo(isAdminApplication);
+    } finally {
+      System.setProperty("robolectric.createActivityContexts", originalProperty);
+    }
   }
 }

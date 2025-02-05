@@ -1,15 +1,22 @@
 package org.robolectric.preinstrumented;
 
+import static java.nio.charset.StandardCharsets.UTF_8;
+import static java.nio.file.Files.newOutputStream;
+
+import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Preconditions;
+import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.Iterables;
 import com.google.common.io.ByteStreams;
+import com.google.common.io.Files;
 import java.io.BufferedOutputStream;
 import java.io.File;
-import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.file.Path;
 import java.util.Enumeration;
+import java.util.List;
 import java.util.Locale;
-import java.util.Set;
-import java.util.TreeSet;
 import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
 import java.util.jar.JarOutputStream;
@@ -22,17 +29,29 @@ import org.robolectric.internal.bytecode.ClassNodeProvider;
 import org.robolectric.internal.bytecode.InstrumentationConfiguration;
 import org.robolectric.internal.bytecode.Interceptors;
 import org.robolectric.util.inject.Injector;
+import org.robolectric.versioning.AndroidVersionInitTools;
+import org.robolectric.versioning.AndroidVersions.AndroidRelease;
 
 /** Runs Robolectric invokedynamic instrumentation on an android-all jar. */
 public class JarInstrumentor {
 
   private static final int ONE_MB = 1024 * 1024;
-  private static final boolean PRINT_FAILED_CLASSES = false;
 
   private static final Injector INJECTOR = new Injector.Builder().build();
 
   private final ClassInstrumentor classInstrumentor;
   private final InstrumentationConfiguration instrumentationConfiguration;
+
+  private boolean hasPackagesToKeepFile;
+  private ImmutableSet<String> packagesToKeep = ImmutableSet.of();
+
+  private boolean hasResourcesToKeepFile;
+  private ImmutableSet<String> resourceFilesToKeep = ImmutableSet.of();
+  private ImmutableSet<String> resourceDirsToKeep = ImmutableSet.of();
+
+  public static void main(String[] args) throws IOException, ClassNotFoundException {
+    new JarInstrumentor().processCommandLine(args);
+  }
 
   public JarInstrumentor() {
     AndroidConfigurer androidConfigurer = INJECTOR.getInstance(AndroidConfigurer.class);
@@ -44,17 +63,76 @@ public class JarInstrumentor {
     instrumentationConfiguration = builder.build();
   }
 
-  public static void main(String[] args) throws IOException {
-    if (args.length != 2) {
-      System.err.println("Usage: JarInstrumentor <source jar> <dest jar>");
-      System.exit(1);
+  @VisibleForTesting
+  void processCommandLine(String[] args) throws IOException, ClassNotFoundException {
+    if (args.length < 2) {
+      System.err.println(
+          "Usage: JarInstrumentor"
+              + " [--packages_to_keep=file path containing package list]"
+              + " [--resources_to_keep=file path containing resource list]"
+              + " <source jar> <dest jar> ");
+      exit(1);
     }
-    new JarInstrumentor().instrumentJar(new File(args[0]), new File(args[1]));
+    File sourceFile = null;
+    File destFile = null;
+
+    for (String arg : args) {
+      if (arg.startsWith("--packages_to_keep=")) {
+        File packagesToKeepFile = new File(arg.substring(arg.indexOf('=') + 1));
+        if (!packagesToKeepFile.exists()) {
+          System.err.println("Packages file does not exist: " + packagesToKeepFile);
+          exit(1);
+          return;
+        }
+        hasPackagesToKeepFile = true;
+        packagesToKeep = ImmutableSet.copyOf(Files.readLines(packagesToKeepFile, UTF_8));
+        Preconditions.checkState(!packagesToKeep.isEmpty(), "Package files must be non-empty.");
+      } else if (arg.startsWith("--resources_to_keep=")) {
+        File resourcesToKeepFile = new File(arg.substring(arg.indexOf('=') + 1));
+        if (!resourcesToKeepFile.exists()) {
+          System.err.println("Resources file does not exist: " + resourcesToKeepFile);
+          exit(1);
+          return;
+        }
+        List<String> resourceFiles = Files.readLines(resourcesToKeepFile, UTF_8);
+        resourceFilesToKeep =
+            ImmutableSet.copyOf(Iterables.filter(resourceFiles, s -> !s.endsWith("/")));
+        resourceDirsToKeep =
+            ImmutableSet.copyOf(Iterables.filter(resourceFiles, s -> s.endsWith("/")));
+        Preconditions.checkState(
+            !resourceFilesToKeep.isEmpty() && !resourceDirsToKeep.isEmpty(),
+            "Resource files and directories must be specified.");
+        hasResourcesToKeepFile = true;
+      } else if (arg.startsWith("--")) {
+        System.err.println("Unknown flag: " + arg);
+        exit(1);
+        return;
+      } else if (sourceFile == null) {
+        sourceFile = new File(arg);
+      } else if (destFile == null) {
+        destFile = new File(arg);
+      }
+    }
+    instrumentJar(sourceFile, destFile);
   }
 
-  private void instrumentJar(File sourceFile, File destFile) throws IOException {
+  /** Calls {@link System#exit(int)}. Overridden during tests to avoid exiting during tests. */
+  @VisibleForTesting
+  protected void exit(int status) {
+    System.exit(status);
+  }
+
+  /**
+   * Performs the JAR instrumentation.
+   *
+   * @param sourceJarFile The source JAR to process.
+   * @param destJarFile The destination JAR with the instrumented method calls.
+   */
+  @VisibleForTesting
+  protected void instrumentJar(File sourceJarFile, File destJarFile)
+      throws IOException, ClassNotFoundException {
     long startNs = System.nanoTime();
-    JarFile jarFile = new JarFile(sourceFile);
+    JarFile jarFile = new JarFile(sourceJarFile);
     ClassNodeProvider classNodeProvider =
         new ClassNodeProvider() {
           @Override
@@ -65,23 +143,38 @@ public class JarInstrumentor {
 
     int nonClassCount = 0;
     int classCount = 0;
-    Set<String> failedClasses = new TreeSet<>();
+
+    // get the jar's SDK version
+    try {
+      classInstrumentor.setAndroidJarSDKVersion(getJarAndroidSDKVersion(jarFile));
+    } catch (Exception e) {
+      throw new AssertionError("Unable to get Android SDK version from Jar file", e);
+    }
 
     try (JarOutputStream jarOut =
-        new JarOutputStream(new BufferedOutputStream(new FileOutputStream(destFile), ONE_MB))) {
+        new JarOutputStream(
+            new BufferedOutputStream(newOutputStream(destJarFile.toPath()), ONE_MB))) {
       Enumeration<JarEntry> entries = jarFile.entries();
       while (entries.hasMoreElements()) {
         JarEntry jarEntry = entries.nextElement();
 
         String name = jarEntry.getName();
+        Path normalizedPath = new File(destJarFile.getParentFile(), name).toPath().normalize();
+        if (!normalizedPath.startsWith(destJarFile.getParentFile().toPath())) {
+          throw new IOException("Bad zip entry: " + name);
+        }
         if (name.endsWith("/")) {
+          // Copy directories
           jarOut.putNextEntry(createJarEntry(jarEntry));
         } else if (name.endsWith(".class")) {
           String className = name.substring(0, name.length() - ".class".length()).replace('/', '.');
 
-          boolean classIsRenamed = isClassRenamed(className);
-          if (classIsRenamed) {
-            continue;
+          int lastDotIndex = className.lastIndexOf('.');
+          if (lastDotIndex != -1) {
+            String packageName = className.substring(0, lastDotIndex);
+            if (hasPackagesToKeepFile && !packagesToKeep.contains(packageName)) {
+              continue;
+            }
           }
 
           try {
@@ -96,37 +189,37 @@ public class JarInstrumentor {
             jarOut.putNextEntry(createJarEntry(jarEntry));
             jarOut.write(outBytes);
             classCount++;
-          } catch (Exception e) {
-            failedClasses.add(className);
-            if (PRINT_FAILED_CLASSES) {
-              System.err.print("Failed to instrument " + className + ": ");
-              e.printStackTrace();
-            }
+          } catch (NegativeArraySizeException e) {
+            System.err.println(
+                "Skipping instrumenting due to NegativeArraySizeException for class: " + className);
           }
         } else {
-          // resources & stuff
-          jarOut.putNextEntry(createJarEntry(jarEntry));
-          ByteStreams.copy(jarFile.getInputStream(jarEntry), jarOut);
-          nonClassCount++;
+          boolean shouldKeep = true;
+          if (hasResourcesToKeepFile) {
+            shouldKeep = resourceFilesToKeep.contains(name);
+            for (String dir : resourceDirsToKeep) {
+              if (name.startsWith(dir)) {
+                shouldKeep = true;
+                break;
+              }
+            }
+          }
+          if (shouldKeep) {
+            jarOut.putNextEntry(createJarEntry(jarEntry));
+            ByteStreams.copy(jarFile.getInputStream(jarEntry), jarOut);
+            nonClassCount++;
+          }
         }
       }
     }
+
     long elapsedNs = System.nanoTime() - startNs;
-    System.out.println(
-        String.format(
-            Locale.getDefault(),
-            "Wrote %d classes and %d resources in %1.2f seconds",
-            classCount,
-            nonClassCount,
-            elapsedNs / 1000000000.0));
-    if (PRINT_FAILED_CLASSES) {
-      if (!failedClasses.isEmpty()) {
-        System.out.println("Failed to instrument:");
-      }
-      for (String failedClass : failedClasses) {
-        System.out.println("- " + failedClass);
-      }
-    }
+    System.out.printf(
+        Locale.getDefault(),
+        "Wrote %d classes and %d resources in %1.2f seconds%n",
+        classCount,
+        nonClassCount,
+        elapsedNs / 1000000000.0);
   }
 
   private static byte[] getClassBytes(String className, JarFile jarFile)
@@ -156,9 +249,8 @@ public class JarInstrumentor {
     return entry;
   }
 
-  private boolean isClassRenamed(String className) {
-    String internalName = className.replace('.', '/');
-    String remappedName = instrumentationConfiguration.mappedTypeName(internalName);
-    return !remappedName.equals(internalName);
+  private int getJarAndroidSDKVersion(JarFile jarFile) throws IOException {
+    AndroidRelease release = AndroidVersionInitTools.computeReleaseVersion(jarFile);
+    return release.getSdkInt();
   }
 }

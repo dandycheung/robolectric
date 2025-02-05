@@ -15,8 +15,11 @@ import androidx.test.ext.junit.runners.AndroidJUnit4;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.robolectric.R;
+import org.robolectric.annotation.GraphicsMode;
+import org.robolectric.annotation.GraphicsMode.Mode;
 
 @RunWith(AndroidJUnit4.class)
+@GraphicsMode(Mode.LEGACY)
 public class ShadowImageViewTest {
 
   @Test
@@ -27,7 +30,8 @@ public class ShadowImageViewTest {
     imageView.setImageBitmap(bitmap);
 
     imageView.setImageResource(R.drawable.an_image);
-    assertThat(shadowOf(imageView.getDrawable()).getCreatedFromResId()).isEqualTo(R.drawable.an_image);
+    assertThat(shadowOf(imageView.getDrawable()).getCreatedFromResId())
+        .isEqualTo(R.drawable.an_image);
   }
 
   @Test

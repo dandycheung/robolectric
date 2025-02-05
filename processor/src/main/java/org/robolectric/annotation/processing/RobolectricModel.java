@@ -1,13 +1,18 @@
 package org.robolectric.annotation.processing;
 
+import static com.google.common.base.Preconditions.checkState;
 import static com.google.common.collect.Maps.newHashMap;
 import static com.google.common.collect.Maps.newTreeMap;
 import static com.google.common.collect.Sets.newTreeSet;
 
+import com.google.auto.common.MoreTypes;
 import com.google.common.collect.HashMultimap;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Multimaps;
+import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -24,25 +29,23 @@ import javax.lang.model.element.TypeParameterElement;
 import javax.lang.model.type.DeclaredType;
 import javax.lang.model.type.TypeMirror;
 import javax.lang.model.type.TypeVisitor;
-import javax.lang.model.util.SimpleElementVisitor6;
-import javax.lang.model.util.SimpleTypeVisitor6;
+import javax.lang.model.util.SimpleElementVisitor8;
+import javax.lang.model.util.SimpleTypeVisitor8;
 import org.robolectric.annotation.Implements;
 import org.robolectric.shadow.api.ShadowPicker;
 
-/**
- * Model describing the Robolectric source file.
- */
+/** Model describing the Robolectric source file. */
 public class RobolectricModel {
 
   private final TreeSet<String> imports;
-  /**
-   * Key: name of shadow class
-   */
+
+  /** Key: name of shadow class */
   private final TreeMap<String, ShadowInfo> shadowTypes;
+
   private final TreeMap<String, String> extraShadowTypes;
-  /**
-   * Key: name of shadow class
-   */
+  private final TreeMap<String, String> extraShadowPickers;
+
+  /** Key: name of shadow class */
   private final TreeMap<String, ResetterInfo> resetterMap;
 
   private final TreeMap<String, DocumentedPackage> documentedPackages;
@@ -51,20 +54,23 @@ public class RobolectricModel {
     return documentedPackages.values();
   }
 
-  public RobolectricModel(TreeSet<String> imports,
+  public RobolectricModel(
+      TreeSet<String> imports,
       TreeMap<String, ShadowInfo> shadowTypes,
       TreeMap<String, String> extraShadowTypes,
+      TreeMap<String, String> extraShadowPickers,
       TreeMap<String, ResetterInfo> resetterMap,
       Map<String, DocumentedPackage> documentedPackages) {
     this.imports = new TreeSet<>(imports);
     this.shadowTypes = new TreeMap<>(shadowTypes);
     this.extraShadowTypes = new TreeMap<>(extraShadowTypes);
+    this.extraShadowPickers = new TreeMap<>(extraShadowPickers);
     this.resetterMap = new TreeMap<>(resetterMap);
     this.documentedPackages = new TreeMap<>(documentedPackages);
   }
 
-  private final static ElementVisitor<TypeElement, Void> TYPE_ELEMENT_VISITOR =
-      new SimpleElementVisitor6<TypeElement, Void>() {
+  private static final ElementVisitor<TypeElement, Void> TYPE_ELEMENT_VISITOR =
+      new SimpleElementVisitor8<TypeElement, Void>() {
         @Override
         public TypeElement visitType(TypeElement e, Void p) {
           return e;
@@ -78,6 +84,7 @@ public class RobolectricModel {
     private final TreeSet<String> imports = newTreeSet();
     private final TreeMap<String, ShadowInfo> shadowTypes = newTreeMap();
     private final TreeMap<String, String> extraShadowTypes = newTreeMap();
+    private final TreeMap<String, String> extraShadowPickers = newTreeMap();
     private final TreeMap<String, ResetterInfo> resetterMap = newTreeMap();
     private final Map<String, DocumentedPackage> documentedPackages = new TreeMap<>();
 
@@ -89,15 +96,14 @@ public class RobolectricModel {
       this.helpers = new Helpers(environment);
     }
 
-    public void addShadowType(TypeElement shadowType, TypeElement actualType,
-        TypeElement shadowPickerType) {
+    public void addShadowType(
+        TypeElement shadowType, TypeElement actualType, TypeElement shadowPickerType) {
       TypeElement shadowBaseType = null;
       if (shadowPickerType != null) {
         TypeMirror iface = helpers.findInterface(shadowPickerType, ShadowPicker.class);
-        if (iface != null) {
-          com.sun.tools.javac.code.Type type = ((com.sun.tools.javac.code.Type.ClassType) iface)
-              .allparams().get(0);
-          String baseClassName = type.asElement().getQualifiedName().toString();
+        if (iface instanceof DeclaredType) {
+          TypeMirror first = MoreTypes.asDeclared(iface).getTypeArguments().get(0);
+          String baseClassName = first.toString();
           shadowBaseType = helpers.getTypeElement(baseClassName);
         }
       }
@@ -117,10 +123,19 @@ public class RobolectricModel {
       extraShadowTypes.put(shadowClassName, sdkClassName);
     }
 
+    public void addExtraShadowPicker(String sdkClassName, TypeElement pickerTypeElement) {
+      extraShadowPickers.put(sdkClassName, helpers.getBinaryName(pickerTypeElement));
+    }
+
     public void addResetter(TypeElement shadowTypeElement, ExecutableElement elem) {
+      checkState(
+          !resetterMap.containsKey(shadowTypeElement.getQualifiedName().toString()),
+          "Trying to register a duplicate resetter on %s",
+          shadowTypeElement.getQualifiedName());
       registerType(shadowTypeElement);
 
-      resetterMap.put(shadowTypeElement.getQualifiedName().toString(),
+      resetterMap.put(
+          shadowTypeElement.getQualifiedName().toString(),
           new ResetterInfo(shadowTypeElement, elem));
     }
 
@@ -161,7 +176,12 @@ public class RobolectricModel {
     RobolectricModel build() {
       prepare();
 
-      return new RobolectricModel(imports, shadowTypes, extraShadowTypes, resetterMap,
+      return new RobolectricModel(
+          imports,
+          shadowTypes,
+          extraShadowTypes,
+          extraShadowPickers,
+          resetterMap,
           documentedPackages);
     }
 
@@ -181,21 +201,22 @@ public class RobolectricModel {
             referentMap.put(type, referents.getKey());
           } else {
             for (TypeElement type : c) {
-              SimpleElementVisitor6<Void, TypeElement> visitor = new SimpleElementVisitor6<Void, TypeElement>() {
-                @Override
-                public Void visitType(TypeElement parent, TypeElement type) {
-                  nextRound.put(parent.getSimpleName() + "." + type.getSimpleName(), type);
-                  importMap.put(type, parent);
-                  return null;
-                }
+              ElementVisitor<Void, TypeElement> visitor =
+                  new SimpleElementVisitor8<Void, TypeElement>() {
+                    @Override
+                    public Void visitType(TypeElement parent, TypeElement type) {
+                      nextRound.put(parent.getSimpleName() + "." + type.getSimpleName(), type);
+                      importMap.put(type, parent);
+                      return null;
+                    }
 
-                @Override
-                public Void visitPackage(PackageElement parent, TypeElement type) {
-                  referentMap.put(type, type.getQualifiedName().toString());
-                  importMap.remove(type);
-                  return null;
-                }
-              };
+                    @Override
+                    public Void visitPackage(PackageElement parent, TypeElement type) {
+                      referentMap.put(type, type.getQualifiedName().toString());
+                      importMap.remove(type);
+                      return null;
+                    }
+                  };
               visitor.visit(importMap.get(type).getEnclosingElement(), type);
             }
           }
@@ -214,23 +235,28 @@ public class RobolectricModel {
       }
 
       // Other imports that the generated class needs
-      imports.add("java.util.Map");
+      imports.add("java.util.AbstractMap");
+      imports.add("java.util.ArrayList");
+      imports.add("java.util.Collection");
       imports.add("java.util.HashMap");
+      imports.add("java.util.List");
+      imports.add("java.util.Map");
       imports.add("javax.annotation.Generated");
       imports.add("org.robolectric.internal.ShadowProvider");
       imports.add("org.robolectric.shadow.api.Shadow");
 
-      ReferentResolver referentResolver = new ReferentResolver() {
-        @Override
-        public String getReferentFor(TypeMirror typeMirror) {
-          return findReferent.visit(typeMirror);
-        }
+      ReferentResolver referentResolver =
+          new ReferentResolver() {
+            @Override
+            public String getReferentFor(TypeMirror typeMirror) {
+              return findReferent.visit(typeMirror);
+            }
 
-        @Override
-        public String getReferentFor(TypeElement type) {
-          return referentMap.get(type);
-        }
-      };
+            @Override
+            public String getReferentFor(TypeElement type) {
+              return referentMap.get(type);
+            }
+          };
       shadowTypes.values().forEach(shadowInfo -> shadowInfo.prepare(referentResolver, helpers));
       resetterMap.values().forEach(resetterInfo -> resetterInfo.prepare(referentResolver));
     }
@@ -249,12 +275,13 @@ public class RobolectricModel {
       }
     }
 
-    private final TypeVisitor<String, Void> findReferent = new SimpleTypeVisitor6<String, Void>() {
-      @Override
-      public String visitDeclared(DeclaredType t, Void p) {
-        return referentMap.get(t.asElement());
-      }
-    };
+    private final TypeVisitor<String, Void> findReferent =
+        new SimpleTypeVisitor8<String, Void>() {
+          @Override
+          public String visitDeclared(DeclaredType t, Void p) {
+            return referentMap.get(t.asElement());
+          }
+        };
   }
 
   public Collection<ResetterInfo> getResetters() {
@@ -273,33 +300,40 @@ public class RobolectricModel {
     return extraShadowTypes;
   }
 
+  public Map<String, String> getExtraShadowPickers() {
+    return extraShadowPickers;
+  }
+
   public Iterable<ShadowInfo> getVisibleShadowTypes() {
-    return Iterables.filter(shadowTypes.values(),
-        ShadowInfo::isInAndroidSdk);
+    return Iterables.filter(shadowTypes.values(), ShadowInfo::isInAndroidSdk);
   }
 
   public TreeMap<String, ShadowInfo> getShadowPickers() {
     TreeMap<String, ShadowInfo> map = new TreeMap<>();
     Iterables.filter(shadowTypes.values(), ShadowInfo::hasShadowPicker)
-        .forEach(shadowInfo -> {
-          String actualName = shadowInfo.getActualName();
-          String shadowPickerClassName = shadowInfo.getShadowPickerBinaryName();
-          ShadowInfo otherShadowInfo = map.get(actualName);
-          String otherPicker =
-              otherShadowInfo == null ? null : otherShadowInfo.getShadowPickerBinaryName();
-          if (otherPicker != null && !otherPicker.equals(shadowPickerClassName)) {
-            throw new IllegalArgumentException(
-                actualName + " has conflicting pickers: " + shadowPickerClassName + " != "
-                    + otherPicker);
-          } else {
-            map.put(actualName, shadowInfo);
-          }
-        });
+        .forEach(
+            shadowInfo -> {
+              String actualName = shadowInfo.getActualName();
+              String shadowPickerClassName = shadowInfo.getShadowPickerBinaryName();
+              ShadowInfo otherShadowInfo = map.get(actualName);
+              String otherPicker =
+                  otherShadowInfo == null ? null : otherShadowInfo.getShadowPickerBinaryName();
+              if (otherPicker != null && !otherPicker.equals(shadowPickerClassName)) {
+                throw new IllegalArgumentException(
+                    actualName
+                        + " has conflicting pickers: "
+                        + shadowPickerClassName
+                        + " != "
+                        + otherPicker);
+              } else {
+                map.put(actualName, shadowInfo);
+              }
+            });
     return map;
   }
 
   public Collection<String> getShadowedPackages() {
-    Set<String> packages = new TreeSet<>();
+    List<String> packages = new ArrayList<>();
     for (ShadowInfo shadowInfo : shadowTypes.values()) {
       String packageName = shadowInfo.getActualPackage();
 
@@ -308,7 +342,22 @@ public class RobolectricModel {
         continue;
       }
 
-      packages.add("\"" + packageName + "\"");
+      packages.add(packageName);
+    }
+    if (packages.isEmpty()) {
+      return packages;
+    }
+    // Remove redundant packages, e.g. remove 'android.os.storage' if 'android.os' is present.
+    Collections.sort(packages);
+    Iterator<String> iterator = packages.iterator();
+    String cur = iterator.next();
+    while (iterator.hasNext()) {
+      String element = iterator.next();
+      if (element.startsWith(cur)) {
+        iterator.remove();
+      } else {
+        cur = element;
+      }
     }
     return packages;
   }
@@ -342,7 +391,10 @@ public class RobolectricModel {
     private String shadowPickerBinaryName;
     private String shadowBaseName;
 
-    ShadowInfo(TypeElement shadowType, TypeElement actualType, TypeElement shadowPickerType,
+    ShadowInfo(
+        TypeElement shadowType,
+        TypeElement actualType,
+        TypeElement shadowPickerType,
         TypeElement shadowBaseClass) {
       this.shadowType = shadowType;
       this.actualType = actualType;
@@ -478,5 +530,4 @@ public class RobolectricModel {
       return getImplementsAnnotation().maxSdk();
     }
   }
-
 }

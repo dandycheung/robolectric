@@ -1,5 +1,6 @@
 package org.robolectric.android.util.concurrent;
 
+import com.google.common.util.concurrent.MoreExecutors;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashSet;
@@ -11,16 +12,17 @@ import java.util.concurrent.Future;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import javax.annotation.Nonnull;
+import org.robolectric.annotation.LooperMode;
 import org.robolectric.shadows.ShadowApplication;
 import org.robolectric.util.Scheduler;
 
 /**
  * Executor service that runs all operations on the background scheduler.
  *
- * @deprecated only works when used in conjunction with the deprecated {@link LooperMode.LEGACY}
- *     mode. Consider using guava's {@link MoreExecutors#directExecutor()} or {@link
- *     org.robolectric.android.util.concurrent.PausedExecutorService} or {@link
- *     org.robolectric.android.util.concurrent.InlineExecutorService}.
+ * @deprecated only works when used in conjunction with the deprecated {@link
+ *     LooperMode.Mode#LEGACY} mode. Consider using guava's {@link MoreExecutors#directExecutor()}
+ *     or {@link PausedExecutorService} or {@link InlineExecutorService}.
  */
 @Deprecated
 public class RoboExecutorService implements ExecutorService {
@@ -59,6 +61,7 @@ public class RoboExecutorService implements ExecutorService {
     shutdownNow();
   }
 
+  @Nonnull
   @Override
   public List<Runnable> shutdownNow() {
     isShutdown = true;
@@ -82,62 +85,75 @@ public class RoboExecutorService implements ExecutorService {
   }
 
   @Override
-  public boolean awaitTermination(long l, TimeUnit timeUnit) throws InterruptedException {
+  public boolean awaitTermination(long l, @Nonnull TimeUnit timeUnit) throws InterruptedException {
     // If not shut down first, timeout would occur with normal behavior.
     return isShutdown();
   }
 
+  @Nonnull
   @Override
-  public <T> Future<T> submit(Callable<T> tCallable) {
-    return schedule(new AdvancingFutureTask<T>(scheduler, tCallable));
+  public <T> Future<T> submit(@Nonnull Callable<T> tCallable) {
+    return schedule(new AdvancingFutureTask<>(scheduler, tCallable));
   }
 
+  @Nonnull
   @Override
-  public <T> Future<T> submit(Runnable runnable, T t) {
-    return schedule(new AdvancingFutureTask<T>(scheduler, runnable, t));
+  public <T> Future<T> submit(@Nonnull Runnable runnable, T t) {
+    return schedule(new AdvancingFutureTask<>(scheduler, runnable, t));
   }
 
+  @Nonnull
   @Override
-  public Future<?> submit(Runnable runnable) {
+  public Future<?> submit(@Nonnull Runnable runnable) {
     return submit(runnable, null);
   }
 
   private <T> Future<T> schedule(final FutureTask<T> futureTask) {
-    Runnable runnable = new Runnable() {
-      @Override
-      public void run() {
-        futureTask.run();
-        runnables.remove(this);
-      }
-    };
+    Runnable runnable =
+        new Runnable() {
+          @Override
+          public void run() {
+            futureTask.run();
+            runnables.remove(this);
+          }
+        };
     runnables.add(runnable);
     scheduler.post(runnable);
 
     return futureTask;
   }
 
+  @Nonnull
   @Override
-  public <T> List<Future<T>> invokeAll(Collection<? extends Callable<T>> callables) throws InterruptedException {
+  public <T> List<Future<T>> invokeAll(@Nonnull Collection<? extends Callable<T>> callables)
+      throws InterruptedException {
+    throw new UnsupportedOperationException();
+  }
+
+  @Nonnull
+  @Override
+  public <T> List<Future<T>> invokeAll(
+      @Nonnull Collection<? extends Callable<T>> callables, long l, @Nonnull TimeUnit timeUnit)
+      throws InterruptedException {
+    throw new UnsupportedOperationException();
+  }
+
+  @Nonnull
+  @Override
+  public <T> T invokeAny(@Nonnull Collection<? extends Callable<T>> callables)
+      throws InterruptedException, ExecutionException {
     throw new UnsupportedOperationException();
   }
 
   @Override
-  public <T> List<Future<T>> invokeAll(Collection<? extends Callable<T>> callables, long l, TimeUnit timeUnit) throws InterruptedException {
+  public <T> T invokeAny(
+      @Nonnull Collection<? extends Callable<T>> callables, long l, @Nonnull TimeUnit timeUnit)
+      throws InterruptedException, ExecutionException, TimeoutException {
     throw new UnsupportedOperationException();
   }
 
   @Override
-  public <T> T invokeAny(Collection<? extends Callable<T>> callables) throws InterruptedException, ExecutionException {
-    throw new UnsupportedOperationException();
-  }
-
-  @Override
-  public <T> T invokeAny(Collection<? extends Callable<T>> callables, long l, TimeUnit timeUnit) throws InterruptedException, ExecutionException, TimeoutException {
-    throw new UnsupportedOperationException();
-  }
-
-  @Override
-  public void execute(Runnable runnable) {
+  public void execute(@Nonnull Runnable runnable) {
     @SuppressWarnings({"unused", "nullness"})
     Future<?> possiblyIgnoredError = submit(runnable);
   }

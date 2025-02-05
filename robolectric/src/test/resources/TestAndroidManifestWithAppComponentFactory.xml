@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="org.robolectric">
+  <uses-sdk android:targetSdkVersion="19"/>
+
+  <application
+      android:appComponentFactory="org.robolectric.CustomAppComponentFactory">
+    <receiver
+        android:name=".CustomConstructorReceiverWrapper$CustomConstructorWithOneActionReceiver">
+      <intent-filter>
+        <action android:name="org.robolectric.ACTION_CUSTOM_CONSTRUCTOR"/>
+      </intent-filter>
+    </receiver>
+    <receiver
+      android:name=".CustomConstructorReceiverWrapper$CustomConstructorWithEmptyActionReceiver" />
+
+    <service
+      android:name=".CustomConstructorServices$CustomConstructorService" />
+    <service
+      android:name=".CustomConstructorServices$CustomConstructorIntentService" />
+    <service
+      android:name=".CustomConstructorServices$CustomConstructorJobService"
+      android:permission="android.permission.BIND_JOB_SERVICE"/>
+    <provider
+      android:name=".CustomConstructorContentProvider"
+      android:authorities="org.robolectric.authority" />
+    <activity
+      android:name=".CustomConstructorContentProvider"
+      android:authorities="org.robolectric.authority" />
+  </application>
+</manifest>

@@ -1,50 +1,48 @@
 package org.robolectric.shadows;
 
 import static com.google.common.truth.Truth.assertThat;
+import static org.junit.Assert.assertThrows;
 import static org.mockito.ArgumentMatchers.same;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.robolectric.Shadows.shadowOf;
+import static org.robolectric.util.reflector.Reflector.reflector;
 
 import android.app.Activity;
 import android.app.Application;
-import android.content.pm.ActivityInfo;
 import android.content.pm.PackageManager;
 import android.nfc.NdefMessage;
 import android.nfc.NdefRecord;
 import android.nfc.NfcAdapter;
+import android.nfc.NfcAntennaInfo;
 import android.nfc.Tag;
 import android.os.Build;
-import android.os.Bundle;
-import androidx.test.core.app.ActivityScenario;
-import androidx.test.core.app.ApplicationProvider;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
+import java.util.Collections;
 import org.junit.Before;
-import org.junit.Rule;
 import org.junit.Test;
-import org.junit.rules.ExpectedException;
 import org.junit.runner.RunWith;
 import org.robolectric.Robolectric;
+import org.robolectric.RuntimeEnvironment;
 import org.robolectric.annotation.Config;
-import org.robolectric.util.ReflectionHelpers;
-import org.robolectric.util.ReflectionHelpers.ClassParameter;
+import org.robolectric.util.reflector.ForType;
+import org.robolectric.versioning.AndroidVersions.V;
 
 @RunWith(AndroidJUnit4.class)
 public class ShadowNfcAdapterTest {
 
-  @Rule public ExpectedException expectedException = ExpectedException.none();
-  private Application context;
+  private final Application context = RuntimeEnvironment.getApplication();
 
   @Before
   public void setUp() throws Exception {
-    context = ApplicationProvider.getApplicationContext();
     shadowOf(context.getPackageManager())
         .setSystemFeature(PackageManager.FEATURE_NFC, /* supported= */ true);
   }
 
   @Test
-  public void setNdefPushMesageCallback_shouldUseCallback() {
-    final NfcAdapter.CreateNdefMessageCallback callback = mock(NfcAdapter.CreateNdefMessageCallback.class);
+  public void setNdefPushMessageCallback_shouldUseCallback() {
+    final NfcAdapter.CreateNdefMessageCallback callback =
+        mock(NfcAdapter.CreateNdefMessageCallback.class);
     final Activity activity = Robolectric.setupActivity(Activity.class);
     final NfcAdapter adapter = NfcAdapter.getDefaultAdapter(activity);
 
@@ -71,9 +69,11 @@ public class ShadowNfcAdapterTest {
     final Activity nullActivity = null;
     final NfcAdapter adapter = NfcAdapter.getDefaultAdapter(activity);
 
-    expectedException.expect(NullPointerException.class);
-    expectedException.expectMessage("activity cannot be null");
-    adapter.setOnNdefPushCompleteCallback(callback, nullActivity);
+    NullPointerException exception =
+        assertThrows(
+            NullPointerException.class,
+            () -> adapter.setOnNdefPushCompleteCallback(callback, nullActivity));
+    assertThat(exception).hasMessageThat().contains("activity cannot be null");
   }
 
   @Test
@@ -84,10 +84,11 @@ public class ShadowNfcAdapterTest {
     final Activity nullActivity = null;
     final NfcAdapter adapter = NfcAdapter.getDefaultAdapter(activity);
 
-    expectedException.expect(NullPointerException.class);
-    expectedException.expectMessage("activities cannot contain null");
-
-    adapter.setOnNdefPushCompleteCallback(callback, activity, nullActivity);
+    NullPointerException exception =
+        assertThrows(
+            NullPointerException.class,
+            () -> adapter.setOnNdefPushCompleteCallback(callback, activity, nullActivity));
+    assertThat(exception).hasMessageThat().contains("activities cannot contain null");
   }
 
   @Test
@@ -103,22 +104,59 @@ public class ShadowNfcAdapterTest {
   }
 
   @Test
+  @Config(minSdk = Build.VERSION_CODES.Q)
+  public void isSecureNfcSupported_shouldReturnSupportedState() {
+    NfcAdapter adapter = NfcAdapter.getDefaultAdapter(context);
+    assertThat(adapter.isSecureNfcSupported()).isFalse();
+
+    shadowOf(adapter).setSecureNfcSupported(true);
+    assertThat(adapter.isSecureNfcSupported()).isTrue();
+
+    shadowOf(adapter).setSecureNfcSupported(false);
+    assertThat(adapter.isSecureNfcSupported()).isFalse();
+  }
+
+  @Test
+  @Config(minSdk = Build.VERSION_CODES.Q)
+  public void isSecureNfcEnabled_shouldReturnEnabledState() {
+    NfcAdapter adapter = NfcAdapter.getDefaultAdapter(context);
+    assertThat(adapter.isSecureNfcEnabled()).isFalse();
+
+    adapter.enableSecureNfc(true);
+    assertThat(adapter.isSecureNfcEnabled()).isTrue();
+
+    adapter.enableSecureNfc(false);
+    assertThat(adapter.isSecureNfcEnabled()).isFalse();
+  }
+
+  @Test
   public void getNfcAdapter_returnsNonNull() {
     NfcAdapter adapter = NfcAdapter.getDefaultAdapter(context);
+
     assertThat(adapter).isNotNull();
+
+    // This is checked twice to prevent a regression where attempting to acquire the
+    // `getDefaultAdapter` twice in a test would cause a `null` value to be returned on UDC+.
+    NfcAdapter adapterAgain = NfcAdapter.getDefaultAdapter(context);
+
+    assertThat(adapterAgain).isNotNull();
   }
 
   @Test
   public void getNfcAdapter_hardwareExists_returnsNonNull() {
     ShadowNfcAdapter.setNfcHardwareExists(true);
+
     NfcAdapter adapter = NfcAdapter.getDefaultAdapter(context);
+
     assertThat(adapter).isNotNull();
   }
 
   @Test
   public void getNfcAdapter_hardwareDoesNotExist_returnsNull() {
     ShadowNfcAdapter.setNfcHardwareExists(false);
+
     NfcAdapter adapter = NfcAdapter.getDefaultAdapter(context);
+
     assertThat(adapter).isNull();
   }
 
@@ -149,91 +187,128 @@ public class ShadowNfcAdapterTest {
     final Activity activity = Robolectric.setupActivity(Activity.class);
     final NfcAdapter adapter = NfcAdapter.getDefaultAdapter(activity);
 
-    expectedException.expect(IllegalStateException.class);
-
-    shadowOf(adapter).getNdefPushMessage();
+    assertThrows(IllegalStateException.class, () -> shadowOf(adapter).getNdefPushMessage());
   }
 
   @Test
-  @Config(minSdk = Build.VERSION_CODES.KITKAT)
   public void isInReaderMode_beforeEnableReaderMode_shouldReturnFalse() {
-    createActivity(
-        activity -> {
-          NfcAdapter adapter = NfcAdapter.getDefaultAdapter(activity);
-          assertThat(shadowOf(adapter).isInReaderMode()).isFalse();
-        });
+    final Activity activity = Robolectric.setupActivity(Activity.class);
+
+    NfcAdapter adapter = NfcAdapter.getDefaultAdapter(activity);
+    assertThat(shadowOf(adapter).isInReaderMode()).isFalse();
   }
 
   @Test
-  @Config(minSdk = Build.VERSION_CODES.KITKAT)
   public void isInReaderMode_afterEnableReaderMode_shouldReturnTrue() {
-    createActivity(
-        activity -> {
-          NfcAdapter adapter = NfcAdapter.getDefaultAdapter(activity);
-          NfcAdapter.ReaderCallback callback = mock(NfcAdapter.ReaderCallback.class);
-          adapter.enableReaderMode(
-              activity,
-              callback,
-              NfcAdapter.FLAG_READER_NFC_A | NfcAdapter.FLAG_READER_SKIP_NDEF_CHECK,
-              /* extras= */ null);
+    final Activity activity = Robolectric.setupActivity(Activity.class);
+    NfcAdapter adapter = NfcAdapter.getDefaultAdapter(activity);
+    NfcAdapter.ReaderCallback callback = mock(NfcAdapter.ReaderCallback.class);
+    adapter.enableReaderMode(
+        activity,
+        callback,
+        NfcAdapter.FLAG_READER_NFC_A | NfcAdapter.FLAG_READER_SKIP_NDEF_CHECK,
+        /* extras= */ null);
 
-          assertThat(shadowOf(adapter).isInReaderMode()).isTrue();
-        });
+    assertThat(shadowOf(adapter).isInReaderMode()).isTrue();
   }
 
   @Test
-  @Config(minSdk = Build.VERSION_CODES.KITKAT)
   public void isInReaderMode_afterDisableReaderMode_shouldReturnFalse() {
-    createActivity(
-        activity -> {
-          NfcAdapter adapter = NfcAdapter.getDefaultAdapter(activity);
-          NfcAdapter.ReaderCallback callback = mock(NfcAdapter.ReaderCallback.class);
-          adapter.enableReaderMode(
-              activity,
-              callback,
-              NfcAdapter.FLAG_READER_NFC_A | NfcAdapter.FLAG_READER_SKIP_NDEF_CHECK,
-              /* extras= */ null);
-          adapter.disableReaderMode(activity);
+    final Activity activity = Robolectric.setupActivity(Activity.class);
+    NfcAdapter adapter = NfcAdapter.getDefaultAdapter(activity);
+    NfcAdapter.ReaderCallback callback = mock(NfcAdapter.ReaderCallback.class);
+    adapter.enableReaderMode(
+        activity,
+        callback,
+        NfcAdapter.FLAG_READER_NFC_A | NfcAdapter.FLAG_READER_SKIP_NDEF_CHECK,
+        /* extras= */ null);
+    adapter.disableReaderMode(activity);
 
-          assertThat(shadowOf(adapter).isInReaderMode()).isFalse();
-        });
+    assertThat(shadowOf(adapter).isInReaderMode()).isFalse();
   }
 
   @Test
-  @Config(minSdk = Build.VERSION_CODES.KITKAT)
   public void dispatchTagDiscovered_shouldDispatchTagToCallback() {
-    createActivity(
-        activity -> {
-          NfcAdapter adapter = NfcAdapter.getDefaultAdapter(activity);
-          NfcAdapter.ReaderCallback callback = mock(NfcAdapter.ReaderCallback.class);
-          adapter.enableReaderMode(
-              activity,
-              callback,
-              NfcAdapter.FLAG_READER_NFC_A | NfcAdapter.FLAG_READER_SKIP_NDEF_CHECK,
-              /* extras= */ null);
-          Tag tag = createMockTag();
-          shadowOf(adapter).dispatchTagDiscovered(tag);
+    final Activity activity = Robolectric.setupActivity(Activity.class);
+    NfcAdapter adapter = NfcAdapter.getDefaultAdapter(activity);
+    NfcAdapter.ReaderCallback callback = mock(NfcAdapter.ReaderCallback.class);
+    adapter.enableReaderMode(
+        activity,
+        callback,
+        NfcAdapter.FLAG_READER_NFC_A | NfcAdapter.FLAG_READER_SKIP_NDEF_CHECK,
+        /* extras= */ null);
+    Tag tag = ShadowNfcAdapter.createMockTag();
+    shadowOf(adapter).dispatchTagDiscovered(tag);
 
-          verify(callback).onTagDiscovered(same(tag));
-        });
+    verify(callback).onTagDiscovered(same(tag));
   }
 
-  private static Tag createMockTag() {
-    return ReflectionHelpers.callStaticMethod(
-        Tag.class,
-        "createMockTag",
-        ClassParameter.from(byte[].class, new byte[0]),
-        ClassParameter.from(int[].class, new int[0]),
-        ClassParameter.from(Bundle[].class, new Bundle[0]));
+  @Test
+  @Config(minSdk = Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
+  public void getNfcAntennaInfo_noneSet_returnsNull() {
+    NfcAdapter adapter = NfcAdapter.getDefaultAdapter(context);
+
+    assertThat(adapter.getNfcAntennaInfo()).isNull();
   }
 
-  private void createActivity(ActivityScenario.ActivityAction<Activity> activityAction) {
-    ActivityInfo activityInfo = new ActivityInfo();
-    activityInfo.packageName = context.getPackageName();
-    activityInfo.name = "android.app.Activity";
-    shadowOf(context.getPackageManager()).addOrUpdateActivity(activityInfo);
-    try (ActivityScenario<Activity> scenario = ActivityScenario.launch(Activity.class)) {
-      scenario.onActivity(activityAction);
-    }
+  @Test
+  @Config(minSdk = Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
+  public void getNfcAntennaInfo_returnsSetInfo() {
+    NfcAdapter adapter = NfcAdapter.getDefaultAdapter(context);
+    NfcAntennaInfo info = new NfcAntennaInfo(0, 0, false, Collections.emptyList());
+    shadowOf(adapter).setNfcAntennaInfo(info);
+
+    assertThat(adapter.getNfcAntennaInfo()).isEqualTo(info);
+  }
+
+  @Test
+  @Config(minSdk = V.SDK_INT)
+  public void isObserveModeSupported_shouldReturnSupportedState() {
+    final NfcAdapter adapter = NfcAdapter.getDefaultAdapter(context);
+    final NfcAdapterVReflector adapterReflector = reflector(NfcAdapterVReflector.class, adapter);
+    assertThat(adapterReflector.isObserveModeSupported()).isFalse();
+
+    shadowOf(adapter).setObserveModeSupported(true);
+    assertThat(adapterReflector.isObserveModeSupported()).isTrue();
+
+    shadowOf(adapter).setObserveModeSupported(false);
+    assertThat(adapterReflector.isObserveModeSupported()).isFalse();
+  }
+
+  @Test
+  @Config(minSdk = V.SDK_INT)
+  public void isObserveModeEnabled_shouldReturnEnabledState() {
+    final NfcAdapter adapter = NfcAdapter.getDefaultAdapter(context);
+    final NfcAdapterVReflector adapterReflector = reflector(NfcAdapterVReflector.class, adapter);
+    shadowOf(adapter).setObserveModeSupported(true);
+    assertThat(adapterReflector.isObserveModeEnabled()).isFalse();
+
+    adapterReflector.setObserveModeEnabled(true);
+    assertThat(adapterReflector.isObserveModeEnabled()).isTrue();
+
+    adapterReflector.setObserveModeEnabled(false);
+    assertThat(adapterReflector.isObserveModeEnabled()).isFalse();
+  }
+
+  @Test
+  @Config(minSdk = V.SDK_INT)
+  public void setObserveModeEnabled_notSupported_doesNothing() {
+    final NfcAdapter adapter = NfcAdapter.getDefaultAdapter(context);
+    final NfcAdapterVReflector adapterReflector = reflector(NfcAdapterVReflector.class, adapter);
+    shadowOf(adapter).setObserveModeSupported(false);
+    assertThat(adapterReflector.isObserveModeEnabled()).isFalse();
+
+    adapterReflector.setObserveModeEnabled(true);
+    assertThat(adapterReflector.isObserveModeEnabled()).isFalse();
+  }
+
+  // TODO: delete when this test compiles against V sdk
+  @ForType(NfcAdapter.class)
+  interface NfcAdapterVReflector {
+    boolean isObserveModeSupported();
+
+    boolean isObserveModeEnabled();
+
+    void setObserveModeEnabled(boolean enabled);
   }
 }

@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Objects;
 import org.robolectric.pluginapi.perf.Metadata;
 import org.robolectric.pluginapi.perf.Metric;
 import org.robolectric.pluginapi.perf.PerfStatsReporter;
@@ -34,9 +35,7 @@ public class PerfStatsCollector {
     return INSTANCE;
   }
 
-  /**
-   * If not enabled, don't bother retaining perf stats, saving some memory and CPU cycles.
-   */
+  /** If not enabled, don't bother retaining perf stats, saving some memory and CPU cycles. */
   public void setEnabled(boolean isEnabled) {
     this.enabled = isEnabled;
   }
@@ -70,9 +69,7 @@ public class PerfStatsCollector {
     }
   }
 
-  /**
-   * Supplier that throws an exception.
-   */
+  /** Supplier that throws an exception. */
   // @FunctionalInterface -- not available on Android yet...
   public interface ThrowingSupplier<T, F extends Exception> {
     T get() throws F;
@@ -92,9 +89,7 @@ public class PerfStatsCollector {
     }
   }
 
-  /**
-   * Runnable that throws an exception.
-   */
+  /** Runnable that throws an exception. */
   // @FunctionalInterface -- not available on Android yet...
   public interface ThrowingRunnable<F extends Exception> {
     void run() throws F;
@@ -121,9 +116,7 @@ public class PerfStatsCollector {
     metricMap.clear();
   }
 
-  /**
-   * Event for perf stats collection.
-   */
+  /** Event for perf stats collection. */
   public class Event {
     private final String name;
     private final long startTimeNs;
@@ -153,9 +146,7 @@ public class PerfStatsCollector {
     }
   }
 
-  /**
-   * Metric key for perf stats collection.
-   */
+  /** Metric key for perf stats collection. */
   private static class MetricKey {
     private final String name;
     private final boolean success;
@@ -170,7 +161,7 @@ public class PerfStatsCollector {
       if (this == o) {
         return true;
       }
-      if (o == null || getClass() != o.getClass()) {
+      if (!(o instanceof MetricKey)) {
         return false;
       }
 
@@ -179,7 +170,7 @@ public class PerfStatsCollector {
       if (success != metricKey.success) {
         return false;
       }
-      return name != null ? name.equals(metricKey.name) : metricKey.name == null;
+      return Objects.equals(name, metricKey.name);
     }
 
     @Override

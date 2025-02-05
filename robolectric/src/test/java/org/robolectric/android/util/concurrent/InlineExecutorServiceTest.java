@@ -13,9 +13,7 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
 
-/**
- * Unit tests for {@link InlineExecutorService}
- */
+/** Unit tests for {@link InlineExecutorService} */
 @RunWith(JUnit4.class)
 public class InlineExecutorServiceTest {
   private List<String> executedTasksRecord;
@@ -31,12 +29,9 @@ public class InlineExecutorServiceTest {
   public void executionRunsInBackgroundThread() {
     final Thread testThread = Thread.currentThread();
     executorService.execute(
-        new Runnable() {
-          @Override
-          public void run() {
-            assertThat(Thread.currentThread()).isNotSameInstanceAs(testThread);
-            executedTasksRecord.add("task ran");
-          }
+        () -> {
+          assertThat(Thread.currentThread()).isNotSameInstanceAs(testThread);
+          executedTasksRecord.add("task ran");
         });
     assertThat(executedTasksRecord).containsExactly("task ran");
   }
@@ -54,10 +49,12 @@ public class InlineExecutorServiceTest {
   @Test
   public void submitCallable() throws Exception {
     Runnable runnable = () -> executedTasksRecord.add("background event ran");
-    Future<String> future = executorService.submit(() -> {
-      runnable.run();
-      return "foo";
-    });
+    Future<String> future =
+        executorService.submit(
+            () -> {
+              runnable.run();
+              return "foo";
+            });
 
     assertThat(executedTasksRecord).containsExactly("background event ran");
     assertThat(future.isDone()).isTrue();
@@ -83,13 +80,10 @@ public class InlineExecutorServiceTest {
 
   @Test
   public void exceptionsPropagated() {
-    Callable<Void> throwingCallable = new Callable<Void>() {
-
-      @Override
-      public Void call() throws Exception {
-        throw new IllegalStateException("I failed");
-      }
-    };
+    Callable<Void> throwingCallable =
+        () -> {
+          throw new IllegalStateException("I failed");
+        };
     try {
       executorService.submit(throwingCallable);
       fail("did not propagate exception");
@@ -99,15 +93,13 @@ public class InlineExecutorServiceTest {
   }
 
   @Test
-  public void postingTasks() throws Exception {
-    Runnable postingRunnable = new Runnable() {
-      @Override
-      public void run() {
-        executedTasksRecord.add("first");
-        executorService.execute(() -> executedTasksRecord.add("third"));
-        executedTasksRecord.add("second");
-      }
-    };
+  public void postingTasks() {
+    Runnable postingRunnable =
+        () -> {
+          executedTasksRecord.add("first");
+          executorService.execute(() -> executedTasksRecord.add("third"));
+          executedTasksRecord.add("second");
+        };
     executorService.execute(postingRunnable);
 
     assertThat(executedTasksRecord).containsExactly("first", "second", "third").inOrder();

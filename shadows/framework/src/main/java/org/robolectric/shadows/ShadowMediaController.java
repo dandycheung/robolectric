@@ -1,9 +1,8 @@
 package org.robolectric.shadows;
 
-import static android.os.Build.VERSION_CODES.LOLLIPOP;
 import static org.robolectric.util.reflector.Reflector.reflector;
 
-import android.annotation.NonNull;
+import android.app.PendingIntent;
 import android.media.MediaMetadata;
 import android.media.Rating;
 import android.media.session.MediaController;
@@ -11,8 +10,11 @@ import android.media.session.MediaController.Callback;
 import android.media.session.MediaController.PlaybackInfo;
 import android.media.session.PlaybackState;
 import android.os.Bundle;
+import android.os.Handler;
 import java.util.ArrayList;
 import java.util.List;
+import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
 import org.robolectric.annotation.Implementation;
 import org.robolectric.annotation.Implements;
 import org.robolectric.annotation.RealObject;
@@ -21,15 +23,16 @@ import org.robolectric.util.ReflectionHelpers.ClassParameter;
 import org.robolectric.util.reflector.Direct;
 import org.robolectric.util.reflector.ForType;
 
-/**
- * Implementation of {@link android.media.session.MediaController}.
- */
-@Implements(value = MediaController.class, minSdk = LOLLIPOP)
+/** Implementation of {@link android.media.session.MediaController}. */
+@Implements(value = MediaController.class)
 public class ShadowMediaController {
   @RealObject private MediaController realMediaController;
   private PlaybackState playbackState;
   private PlaybackInfo playbackInfo;
   private MediaMetadata mediaMetadata;
+  private PendingIntent sessionActivity;
+  private Bundle extras;
+
   /**
    * A value of RATING_NONE for ratingType indicates that rating media is not supported by the media
    * session associated with the media controller
@@ -108,13 +111,39 @@ public class ShadowMediaController {
   }
 
   /**
+   * Saves the sessionActivity to control the return value of {@link
+   * MediaController#getSessionActivity()}.
+   */
+  public void setSessionActivity(PendingIntent sessionActivity) {
+    this.sessionActivity = sessionActivity;
+  }
+
+  /** Gets the playbackState set via {@link #setSessionActivity}. */
+  @Implementation
+  protected PendingIntent getSessionActivity() {
+    return sessionActivity;
+  }
+
+  /** Saves the extras to control the return value of {@link MediaController#getExtras()}. */
+  public void setExtras(Bundle extras) {
+    this.extras = extras;
+  }
+
+  /** Gets the extras set via {@link #extras}. */
+  @Implementation
+  protected Bundle getExtras() {
+    return extras;
+  }
+
+  /**
    * Register callback and store it in the shadow to make it easier to check the state of the
-   * registered callbacks.
+   * registered callbacks. Handler is just passed on to the real class.
    */
   @Implementation
-  protected void registerCallback(@NonNull Callback callback) {
+  protected void registerCallback(@Nonnull Callback callback, @Nullable Handler handler) {
     callbacks.add(callback);
-    reflector(MediaControllerReflector.class, realMediaController).registerCallback(callback);
+    reflector(MediaControllerReflector.class, realMediaController)
+        .registerCallback(callback, handler);
   }
 
   /**
@@ -122,7 +151,7 @@ public class ShadowMediaController {
    * registered callbacks.
    */
   @Implementation
-  protected void unregisterCallback(@NonNull Callback callback) {
+  protected void unregisterCallback(@Nonnull Callback callback) {
     callbacks.remove(callback);
     reflector(MediaControllerReflector.class, realMediaController).unregisterCallback(callback);
   }
@@ -147,6 +176,18 @@ public class ShadowMediaController {
         ClassParameter.from(Bundle.class, new Bundle()));
   }
 
+  /** Executes all registered onSessionDestroyed callbacks. */
+  public void executeOnSessionDestroyed() {
+    int messageId = ReflectionHelpers.getStaticField(MediaController.class, "MSG_DESTROYED");
+    ReflectionHelpers.callInstanceMethod(
+        MediaController.class,
+        realMediaController,
+        "postMessage",
+        ClassParameter.from(int.class, messageId),
+        ClassParameter.from(Object.class, null),
+        ClassParameter.from(Bundle.class, null));
+  }
+
   /** Executes all registered onMetadataChanged callbacks. */
   public void executeOnMetadataChanged(MediaMetadata metadata) {
     setMetadata(metadata);
@@ -165,9 +206,9 @@ public class ShadowMediaController {
   interface MediaControllerReflector {
 
     @Direct
-    void registerCallback(@NonNull Callback callback);
+    void registerCallback(@Nonnull Callback callback, @Nullable Handler handler);
 
     @Direct
-    void unregisterCallback(@NonNull Callback callback);
+    void unregisterCallback(@Nonnull Callback callback);
   }
 }

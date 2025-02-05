@@ -2,7 +2,7 @@ package android.app;
 
 import static androidx.test.platform.app.InstrumentationRegistry.getInstrumentation;
 import static com.google.common.truth.Truth.assertThat;
-import static org.robolectric.annotation.LooperMode.Mode.PAUSED;
+import static org.junit.Assert.assertThrows;
 
 import android.os.Handler;
 import android.os.Looper;
@@ -11,16 +11,12 @@ import java.util.ArrayList;
 import java.util.List;
 import org.junit.Test;
 import org.junit.runner.RunWith;
-import org.robolectric.annotation.LooperMode;
-import org.robolectric.annotation.internal.DoNotInstrument;
 
 /**
  * Tests to verify android.app.Instrumentation APIs behave consistently between Robolectric and
  * device.
  */
-@DoNotInstrument
 @RunWith(AndroidJUnit4.class)
-@LooperMode(PAUSED)
 public final class InstrumentationTest {
 
   /**
@@ -47,5 +43,17 @@ public final class InstrumentationTest {
             });
 
     assertThat(events).containsExactly("before runOnMainSync", "in runOnMainSync").inOrder();
+  }
+
+  @Test
+  public void runOnMainSync_propagatesException() {
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            getInstrumentation()
+                .runOnMainSync(
+                    () -> {
+                      throw new IllegalStateException("test");
+                    }));
   }
 }

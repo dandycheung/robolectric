@@ -21,6 +21,12 @@ release.properties
 .gradle/
 build
 
+# Kotlin
+.kotlin
+
+# Android Profiling
+*.hprof
+
 # IntelliJ
 .idea
 *.iml
@@ -39,7 +45,6 @@ classes
 
 tmp
 local.properties
-
 
 # CTS stuff
 cts/

@@ -5,19 +5,15 @@ import static org.junit.Assert.fail;
 import static org.robolectric.Shadows.shadowOf;
 
 import android.hardware.camera2.CaptureResult;
-import android.hardware.camera2.CaptureResult.Key;
-import android.os.Build.VERSION_CODES;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import org.junit.Test;
 import org.junit.runner.RunWith;
-import org.robolectric.annotation.Config;
 
 /** Tests for {@link ShadowCaptureResult}. */
-@Config(minSdk = VERSION_CODES.LOLLIPOP)
 @RunWith(AndroidJUnit4.class)
 public class ShadowCaptureResultTest {
 
-  private final Key<Long> timestampKey = CaptureResult.SENSOR_TIMESTAMP;
+  private final CaptureResult.Key<Long> timestampKey = CaptureResult.SENSOR_TIMESTAMP;
   private final CaptureResult captureResult = ShadowCaptureResult.newCaptureResult();
 
   @Test
@@ -32,7 +28,7 @@ public class ShadowCaptureResultTest {
   }
 
   @Test
-  public void testGetUnrecongizedKey() {
+  public void testGetUnrecognizedKey() {
     assertThat(captureResult.get(timestampKey)).isNull();
   }
 

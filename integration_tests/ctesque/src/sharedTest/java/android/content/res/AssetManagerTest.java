@@ -5,29 +5,22 @@ import static com.google.common.truth.Truth.assertThat;
 
 import android.content.Context;
 import android.os.ParcelFileDescriptor;
-import androidx.test.runner.AndroidJUnit4;
+import androidx.test.ext.junit.runners.AndroidJUnit4;
 import com.google.common.io.CharStreams;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.charset.Charset;
 import org.junit.Before;
-import org.junit.Rule;
 import org.junit.Test;
-import org.junit.rules.ExpectedException;
 import org.junit.runner.RunWith;
-import org.robolectric.annotation.internal.DoNotInstrument;
 
-/**
- * Compatibility test for {@link AssetManager}
- */
-@DoNotInstrument
+/** Compatibility test for {@link AssetManager} */
 @RunWith(AndroidJUnit4.class)
 public class AssetManagerTest {
-
-  @Rule
-  public ExpectedException expectedException = ExpectedException.none();
 
   private AssetManager assetManager;
 
@@ -45,8 +38,7 @@ public class AssetManagerTest {
         .asList()
         .containsAtLeast("assetsHome.txt", "robolectric.png", "myFont.ttf");
 
-    assertThat(assetManager.list("testing")).asList()
-        .contains("hello.txt");
+    assertThat(assetManager.list("testing")).asList().contains("hello.txt");
 
     assertThat(assetManager.list("bogus-dir")).isEmpty();
   }
@@ -70,9 +62,27 @@ public class AssetManagerTest {
   @Test
   public void openFd_shouldProvideFileDescriptorForAsset() throws Exception {
     AssetFileDescriptor assetFileDescriptor = assetManager.openFd("assetsHome.txt");
-    assertThat(CharStreams.toString(new InputStreamReader(assetFileDescriptor.createInputStream(), UTF_8)))
-        .isEqualTo("assetsHome!");
+    FileInputStream fis = assetFileDescriptor.createInputStream();
+    InputStreamReader isr = new InputStreamReader(fis, UTF_8);
+    String actual = CharStreams.toString(isr);
+    assertThat(actual).isEqualTo("assetsHome!");
     assertThat(assetFileDescriptor.getLength()).isEqualTo(11);
+  }
+
+  @Test
+  public void openFd_readLargeAsset() throws Exception {
+    try (AssetFileDescriptor assetFileDescriptor = assetManager.openFd("robolectric.png")) {
+      FileInputStream fis = assetFileDescriptor.createInputStream();
+      ByteArrayOutputStream bos = new ByteArrayOutputStream();
+      int read = 0;
+      // choose a buffer size < file length
+      byte[] buf = new byte[8192];
+      while ((read = fis.read(buf)) > 0) {
+        bos.write(buf, 0, read);
+      }
+      byte[] output = bos.toByteArray();
+      assertThat(output).hasLength(23447);
+    }
   }
 
   @Test
@@ -84,6 +94,7 @@ public class AssetManagerTest {
                 + "open_shouldProvideFileDescriptor.txt");
     FileOutputStream output = new FileOutputStream(file);
     output.write("hi".getBytes());
+    output.close();
 
     ParcelFileDescriptor parcelFileDescriptor =
         ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY);

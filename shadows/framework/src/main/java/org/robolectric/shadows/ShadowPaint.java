@@ -1,10 +1,6 @@
 package org.robolectric.shadows;
 
-import static android.os.Build.VERSION_CODES.JELLY_BEAN_MR1;
-import static android.os.Build.VERSION_CODES.JELLY_BEAN_MR2;
-import static android.os.Build.VERSION_CODES.KITKAT;
-import static android.os.Build.VERSION_CODES.KITKAT_WATCH;
-import static android.os.Build.VERSION_CODES.LOLLIPOP;
+import static android.os.Build.VERSION_CODES.L;
 import static android.os.Build.VERSION_CODES.LOLLIPOP_MR1;
 import static android.os.Build.VERSION_CODES.M;
 import static android.os.Build.VERSION_CODES.N;
@@ -12,24 +8,30 @@ import static android.os.Build.VERSION_CODES.N_MR1;
 import static android.os.Build.VERSION_CODES.O;
 import static android.os.Build.VERSION_CODES.O_MR1;
 import static android.os.Build.VERSION_CODES.P;
+import static android.os.Build.VERSION_CODES.Q;
 import static org.robolectric.annotation.TextLayoutMode.Mode.REALISTIC;
 
 import android.graphics.ColorFilter;
 import android.graphics.Paint;
 import android.graphics.Paint.FontMetricsInt;
 import android.graphics.PathEffect;
+import android.graphics.RectF;
 import android.graphics.Shader;
 import android.graphics.Typeface;
+import org.robolectric.annotation.ClassName;
 import org.robolectric.annotation.Implementation;
 import org.robolectric.annotation.Implements;
+import org.robolectric.annotation.InDevelopment;
 import org.robolectric.annotation.RealObject;
 import org.robolectric.annotation.TextLayoutMode;
 import org.robolectric.config.ConfigurationRegistry;
 import org.robolectric.shadow.api.Shadow;
 import org.robolectric.util.ReflectionHelpers.ClassParameter;
+import org.robolectric.versioning.AndroidVersions.U;
+import org.robolectric.versioning.AndroidVersions.V;
 
 @SuppressWarnings({"UnusedDeclaration"})
-@Implements(value = Paint.class, looseSignatures = true)
+@Implements(value = Paint.class)
 public class ShadowPaint {
 
   private int color;
@@ -48,6 +50,10 @@ public class ShadowPaint {
   private boolean dither;
   private int flags;
   private PathEffect pathEffect;
+  private float letterSpacing;
+  private float textScaleX = 1f;
+  private float textSkewX;
+  private float wordSpacing;
 
   @RealObject Paint paint;
   private Typeface typeface;
@@ -73,6 +79,10 @@ public class ShadowPaint {
     this.dither = otherShadowPaint.dither;
     this.flags = otherShadowPaint.flags;
     this.pathEffect = otherShadowPaint.pathEffect;
+    this.letterSpacing = otherShadowPaint.letterSpacing;
+    this.textScaleX = otherShadowPaint.textScaleX;
+    this.textSkewX = otherShadowPaint.textSkewX;
+    this.wordSpacing = otherShadowPaint.wordSpacing;
 
     Shadow.invokeConstructor(Paint.class, paint, ClassParameter.from(Paint.class, otherPaint));
   }
@@ -98,6 +108,15 @@ public class ShadowPaint {
       setFlags(flags | Paint.UNDERLINE_TEXT_FLAG);
     } else {
       setFlags(flags & ~Paint.UNDERLINE_TEXT_FLAG);
+    }
+  }
+
+  @Implementation
+  protected void setStrikeThruText(boolean strikeThruText) {
+    if (strikeThruText) {
+      setFlags(flags | Paint.STRIKE_THRU_TEXT_FLAG);
+    } else {
+      setFlags(flags & ~Paint.STRIKE_THRU_TEXT_FLAG);
     }
   }
 
@@ -202,6 +221,46 @@ public class ShadowPaint {
   }
 
   @Implementation
+  protected float getTextScaleX() {
+    return textScaleX;
+  }
+
+  @Implementation
+  protected void setTextScaleX(float scaleX) {
+    this.textScaleX = scaleX;
+  }
+
+  @Implementation
+  protected float getTextSkewX() {
+    return textSkewX;
+  }
+
+  @Implementation
+  protected void setTextSkewX(float skewX) {
+    this.textSkewX = skewX;
+  }
+
+  @Implementation(minSdk = L)
+  protected float getLetterSpacing() {
+    return letterSpacing;
+  }
+
+  @Implementation(minSdk = L)
+  protected void setLetterSpacing(float letterSpacing) {
+    this.letterSpacing = letterSpacing;
+  }
+
+  @Implementation(minSdk = Q)
+  protected float getWordSpacing() {
+    return wordSpacing;
+  }
+
+  @Implementation(minSdk = Q)
+  protected void setWordSpacing(float wordSpacing) {
+    this.wordSpacing = wordSpacing;
+  }
+
+  @Implementation
   protected void setTextAlign(Paint.Align align) {
     textAlign = align;
   }
@@ -273,13 +332,24 @@ public class ShadowPaint {
   }
 
   @Implementation
-  protected final boolean isDither() {
+  protected boolean isDither() {
     return dither;
   }
 
   @Implementation
-  protected final boolean isAntiAlias() {
+  protected boolean isAntiAlias() {
     return (flags & Paint.ANTI_ALIAS_FLAG) == Paint.ANTI_ALIAS_FLAG;
+  }
+
+  @Implementation
+  protected boolean isFilterBitmap() {
+    return (flags & Paint.FILTER_BITMAP_FLAG) == Paint.FILTER_BITMAP_FLAG;
+  }
+
+  @Implementation
+  protected void setFilterBitmap(boolean filterBitmap) {
+    this.flags =
+        (flags & ~Paint.FILTER_BITMAP_FLAG) | (filterBitmap ? Paint.FILTER_BITMAP_FLAG : 0);
   }
 
   @Implementation
@@ -295,37 +365,29 @@ public class ShadowPaint {
 
   @Implementation
   protected float measureText(String text) {
-    return text.length();
+    return applyTextScaleX(text.length());
   }
 
   @Implementation
   protected float measureText(CharSequence text, int start, int end) {
-    return end - start;
+    return applyTextScaleX(end - start);
   }
 
   @Implementation
   protected float measureText(String text, int start, int end) {
-    return end - start;
+    return applyTextScaleX(end - start);
   }
 
   @Implementation
   protected float measureText(char[] text, int index, int count) {
-    return count;
+    return applyTextScaleX(count);
   }
 
-  @Implementation(maxSdk = JELLY_BEAN_MR1)
-  protected int native_breakText(
-      char[] text, int index, int count, float maxWidth, float[] measuredWidth) {
-    return breakText(text, maxWidth, measuredWidth);
+  private float applyTextScaleX(float textWidth) {
+    return Math.max(0f, textScaleX) * textWidth;
   }
 
-  @Implementation(minSdk = JELLY_BEAN_MR2, maxSdk = KITKAT_WATCH)
-  protected int native_breakText(
-      char[] text, int index, int count, float maxWidth, int bidiFlags, float[] measuredWidth) {
-    return breakText(text, maxWidth, measuredWidth);
-  }
-
-  @Implementation(minSdk = LOLLIPOP, maxSdk = M)
+  @Implementation(maxSdk = M)
   protected static int native_breakText(
       long native_object,
       long native_typeface,
@@ -370,19 +432,7 @@ public class ShadowPaint {
     return text.length;
   }
 
-  @Implementation(maxSdk = JELLY_BEAN_MR1)
-  protected int native_breakText(
-      String text, boolean measureForwards, float maxWidth, float[] measuredWidth) {
-    return breakText(text, maxWidth, measuredWidth);
-  }
-
-  @Implementation(minSdk = JELLY_BEAN_MR2, maxSdk = KITKAT_WATCH)
-  protected int native_breakText(
-      String text, boolean measureForwards, float maxWidth, int bidiFlags, float[] measuredWidth) {
-    return breakText(text, maxWidth, measuredWidth);
-  }
-
-  @Implementation(minSdk = LOLLIPOP, maxSdk = M)
+  @Implementation(maxSdk = M)
   protected static int native_breakText(
       long native_object,
       long native_typeface,
@@ -424,7 +474,13 @@ public class ShadowPaint {
     return text.length();
   }
 
-  @Implementation(minSdk = P)
+  @Implementation(minSdk = V.SDK_INT)
+  protected static int nGetFontMetricsInt(
+      long paintPtr, FontMetricsInt fmi, /* Ignored */ boolean useLocale) {
+    return nGetFontMetricsInt(paintPtr, fmi);
+  }
+
+  @Implementation(minSdk = P, maxSdk = U.SDK_INT)
   protected static int nGetFontMetricsInt(long paintPtr, FontMetricsInt fmi) {
     if (ConfigurationRegistry.get(TextLayoutMode.Mode.class) == REALISTIC) {
       // TODO: hack, just set values to those we see on emulator
@@ -451,8 +507,11 @@ public class ShadowPaint {
   }
 
   @Implementation(minSdk = N, maxSdk = N_MR1)
-  protected int nGetFontMetricsInt(Object nativePaint, Object nativeTypeface, Object fmi) {
-    return nGetFontMetricsInt((long) nativePaint, (FontMetricsInt) fmi);
+  protected int nGetFontMetricsInt(
+      long nativePaint,
+      long nativeTypeface,
+      @ClassName("android.graphics.Paint$FontMetricsInt") Object fmi) {
+    return nGetFontMetricsInt(nativePaint, (FontMetricsInt) fmi);
   }
 
   @Implementation(maxSdk = M)
@@ -475,6 +534,49 @@ public class ShadowPaint {
       return end - start;
     }
     return 0f;
+  }
+
+  @Implementation(minSdk = U.SDK_INT, maxSdk = U.SDK_INT)
+  protected static float nGetRunCharacterAdvance(
+      long paintPtr,
+      char[] text,
+      int start,
+      int end,
+      int contextStart,
+      int contextEnd,
+      boolean isRtl,
+      int offset,
+      float[] advances,
+      int advancesIndex) {
+    return nGetRunAdvance(paintPtr, text, start, end, contextStart, contextEnd, isRtl, offset);
+  }
+
+  @Implementation(minSdk = V.SDK_INT)
+  @InDevelopment
+  protected static float nGetRunCharacterAdvance(
+      long paintPtr,
+      char[] text,
+      int start,
+      int end,
+      int contextStart,
+      int contextEnd,
+      boolean isRtl,
+      int offset,
+      float[] advances,
+      int advancesIndex,
+      RectF drawingBounds,
+      @ClassName("android.graphics.Paint$RunInfo") Object runInfo) {
+    return nGetRunCharacterAdvance(
+        paintPtr,
+        text,
+        start,
+        end,
+        contextStart,
+        contextEnd,
+        isRtl,
+        offset,
+        advances,
+        advancesIndex);
   }
 
   @Implementation(minSdk = N, maxSdk = O_MR1)
@@ -505,7 +607,7 @@ public class ShadowPaint {
     return nGetRunAdvance(0, text, start, end, contextStart, contextEnd, isRtl, offset);
   }
 
-  @Implementation(minSdk = KITKAT_WATCH, maxSdk = LOLLIPOP_MR1)
+  @Implementation(maxSdk = LOLLIPOP_MR1)
   protected static float native_getTextRunAdvances(
       long nativeObject,
       long nativeTypeface,
@@ -521,7 +623,7 @@ public class ShadowPaint {
         0, text, index, index + count, contextIndex, contextIndex + contextCount, isRtl, index);
   }
 
-  @Implementation(minSdk = KITKAT_WATCH, maxSdk = LOLLIPOP_MR1)
+  @Implementation(maxSdk = LOLLIPOP_MR1)
   protected static float native_getTextRunAdvances(
       long nativeObject,
       long nativeTypeface,
@@ -534,65 +636,5 @@ public class ShadowPaint {
       float[] advances,
       int advancesIndex) {
     return nGetRunAdvance(0, text.toCharArray(), start, end, contextStart, contextEnd, isRtl, 0);
-  }
-
-  @Implementation(minSdk = JELLY_BEAN_MR2, maxSdk = KITKAT)
-  protected static float native_getTextRunAdvances(
-      int nativeObject,
-      char[] text,
-      int index,
-      int count,
-      int contextIndex,
-      int contextCount,
-      int flags,
-      float[] advances,
-      int advancesIndex) {
-    return nGetRunAdvance(
-        0, text, index, index + count, contextIndex, contextIndex + contextCount, false, index);
-  }
-
-  @Implementation(minSdk = JELLY_BEAN_MR2, maxSdk = KITKAT)
-  protected static float native_getTextRunAdvances(
-      int nativeObject,
-      String text,
-      int start,
-      int end,
-      int contextStart,
-      int contextEnd,
-      int flags,
-      float[] advances,
-      int advancesIndex) {
-    return nGetRunAdvance(0, text.toCharArray(), start, end, contextStart, contextEnd, false, 0);
-  }
-
-  @Implementation(maxSdk = JELLY_BEAN_MR1)
-  protected static float native_getTextRunAdvances(
-      int nativeObject,
-      char[] text,
-      int index,
-      int count,
-      int contextIndex,
-      int contextCount,
-      int flags,
-      float[] advances,
-      int advancesIndex,
-      int reserved) {
-    return nGetRunAdvance(
-        0, text, index, index + count, contextIndex, contextIndex + contextCount, false, index);
-  }
-
-  @Implementation(maxSdk = JELLY_BEAN_MR1)
-  protected static float native_getTextRunAdvances(
-      int nativeObject,
-      String text,
-      int start,
-      int end,
-      int contextStart,
-      int contextEnd,
-      int flags,
-      float[] advances,
-      int advancesIndex,
-      int reserved) {
-    return nGetRunAdvance(0, text.toCharArray(), start, end, contextStart, contextEnd, false, 0);
   }
 }

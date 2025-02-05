@@ -1,7 +1,8 @@
 package org.robolectric.android.internal;
 
+import static android.os.Build.VERSION_CODES.O;
+import static org.robolectric.Shadows.shadowOf;
 import static org.robolectric.shadow.api.Shadow.extract;
-import static org.robolectric.shadows.ShadowLooper.shadowMainLooper;
 
 import android.app.Activity;
 import android.app.Application;
@@ -9,11 +10,14 @@ import android.app.Instrumentation;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ActivityInfo;
+import android.content.res.Configuration;
+import android.content.res.Resources;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
 import android.os.UserHandle;
+import android.util.DisplayMetrics;
 import android.util.Log;
 import androidx.test.internal.runner.intent.IntentMonitorImpl;
 import androidx.test.internal.runner.lifecycle.ActivityLifecycleMonitorImpl;
@@ -25,13 +29,24 @@ import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry;
 import androidx.test.runner.lifecycle.ApplicationLifecycleMonitorRegistry;
 import androidx.test.runner.lifecycle.ApplicationStage;
 import androidx.test.runner.lifecycle.Stage;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.FutureTask;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import javax.annotation.Nullable;
 import org.robolectric.Robolectric;
 import org.robolectric.RuntimeEnvironment;
 import org.robolectric.android.controller.ActivityController;
+import org.robolectric.annotation.LooperMode;
+import org.robolectric.shadow.api.Shadow;
 import org.robolectric.shadows.ShadowActivity;
+import org.robolectric.shadows.ShadowInstrumentation;
+import org.robolectric.shadows.ShadowLooper;
+import org.robolectric.shadows.ShadowPausedLooper;
 
 /**
  * A Robolectric instrumentation that acts like a slimmed down {@link
@@ -42,11 +57,13 @@ public class RoboMonitoringInstrumentation extends Instrumentation {
 
   private static final String TAG = "RoboInstrumentation";
 
-  private final Handler mainThreadHandler = new Handler(Looper.getMainLooper());
   private final ActivityLifecycleMonitorImpl lifecycleMonitor = new ActivityLifecycleMonitorImpl();
   private final ApplicationLifecycleMonitorImpl applicationMonitor =
       new ApplicationLifecycleMonitorImpl();
   private final IntentMonitorImpl intentMonitor = new IntentMonitorImpl();
+  private final List<ActivityController<?>> createdActivities = new ArrayList<>();
+
+  private final AtomicBoolean attachedConfigListener = new AtomicBoolean();
 
   /**
    * Sets up lifecycle monitoring, and argument registry.
@@ -60,18 +77,12 @@ public class RoboMonitoringInstrumentation extends Instrumentation {
     ActivityLifecycleMonitorRegistry.registerInstance(lifecycleMonitor);
     ApplicationLifecycleMonitorRegistry.registerInstance(applicationMonitor);
     IntentMonitorRegistry.registerInstance(intentMonitor);
-
     super.onCreate(arguments);
   }
 
   @Override
-  public void setInTouchMode(boolean inTouch) {
-    // ignore
-  }
-
-  @Override
   public void waitForIdleSync() {
-    shadowMainLooper().idle();
+    shadowOf(Looper.getMainLooper()).idle();
   }
 
   @Override
@@ -87,8 +98,10 @@ public class RoboMonitoringInstrumentation extends Instrumentation {
       Intent intent, @Nullable Bundle activityOptions) {
     ActivityInfo ai = intent.resolveActivityInfo(getTargetContext().getPackageManager(), 0);
     if (ai == null) {
-      throw new RuntimeException("Unable to resolve activity for " + intent
-          + " -- see https://github.com/robolectric/robolectric/pull/4736 for details");
+      throw new RuntimeException(
+          "Unable to resolve activity for "
+              + intent
+              + " -- see https://github.com/robolectric/robolectric/pull/4736 for details");
     }
 
     Class<? extends Activity> activityClass;
@@ -99,31 +112,85 @@ public class RoboMonitoringInstrumentation extends Instrumentation {
       throw new RuntimeException("Could not load activity " + ai.name, e);
     }
 
-    ActivityController<? extends Activity> controller =
-        Robolectric.buildActivity(activityClass, intent, activityOptions).create();
-    if (controller.get().isFinishing()) {
-      controller.destroy();
-    } else {
-      controller.start()
-          .postCreate(null)
-          .resume()
-          .visible()
-          .windowFocusChanged(true);
+    if (attachedConfigListener.compareAndSet(false, true) && !willCreateActivityContexts()) {
+      // To avoid infinite recursion listen to the system resources, this will be updated before
+      // the application resources but because activities use the application resources they will
+      // get updated by the first activity (via updateConfiguration).
+      shadowOf(Resources.getSystem()).addConfigurationChangeListener(this::updateConfiguration);
     }
-    return controller;
+
+    AtomicReference<ActivityController<? extends Activity>> activityControllerReference =
+        new AtomicReference<>();
+    ShadowInstrumentation.runOnMainSyncNoIdle(
+        () -> {
+          ActivityController<? extends Activity> controller =
+              Robolectric.buildActivity(activityClass, intent, activityOptions);
+          activityControllerReference.set(controller);
+          controller.create();
+          if (controller.get().isFinishing()) {
+            controller.destroy();
+          } else {
+            createdActivities.add(controller);
+            controller
+                .start()
+                .postCreate(null)
+                .resume()
+                .visible()
+                .windowFocusChanged(true)
+                .topActivityResumed(true);
+          }
+        });
+    return activityControllerReference.get();
   }
 
   @Override
   public void callApplicationOnCreate(Application app) {
+    if (willCreateActivityContexts()) {
+      shadowOf(app.getResources()).addConfigurationChangeListener(this::updateConfiguration);
+    }
     applicationMonitor.signalLifecycleChange(app, ApplicationStage.PRE_ON_CREATE);
     super.callApplicationOnCreate(app);
     applicationMonitor.signalLifecycleChange(app, ApplicationStage.CREATED);
   }
 
+  /**
+   * Executes a runnable on the main thread, blocking until it is complete.
+   *
+   * <p>When in INSTRUMENTATION_TEST Looper mode, the runnable is posted to the main handler and the
+   * caller's thread blocks until that runnable has finished. When a Throwable is thrown in the
+   * runnable, the exception is propagated back to the caller's thread. If it is an unchecked
+   * throwable, it will be rethrown as is. If it is a checked exception, it will be rethrown as a
+   * {@link RuntimeException}.
+   *
+   * <p>For other Looper modes, the main looper is idled and then the runnable is executed in the
+   * caller's thread.
+   *
+   * @param runnable a runnable to be executed on the main thread
+   */
   @Override
-  public void runOnMainSync(Runnable runner) {
-    shadowMainLooper().idle();
-    runner.run();
+  public void runOnMainSync(Runnable runnable) {
+    if (ShadowLooper.looperMode() == LooperMode.Mode.INSTRUMENTATION_TEST) {
+      FutureTask<Void> wrapped = new FutureTask<>(runnable, null);
+      Shadow.<ShadowPausedLooper>extract(Looper.getMainLooper()).postSync(wrapped);
+      try {
+        wrapped.get();
+      } catch (InterruptedException e) {
+        throw new RuntimeException(e);
+      } catch (ExecutionException e) {
+        Throwable cause = e.getCause();
+        if (cause instanceof RuntimeException) {
+          throw (RuntimeException) cause;
+        } else if (cause instanceof Error) {
+          throw (Error) cause;
+        }
+        throw new RuntimeException(cause);
+      }
+    } else {
+      // TODO: Use ShadowPausedLooper#postSync for PAUSED looper mode which provides more realistic
+      //  behavior (i.e. it only runs to the runnable, it doesn't completely idle).
+      waitForIdleSync();
+      runnable.run();
+    }
   }
 
   /** {@inheritDoc} */
@@ -147,7 +214,7 @@ public class RoboMonitoringInstrumentation extends Instrumentation {
       ShadowActivity shadowActivity = extract(target);
       postDispatchActivityResult(shadowActivity, null, requestCode, ar);
     }
-    return ar;
+    return null;
   }
 
   /** This API was added in Android API 23 (M) */
@@ -171,7 +238,7 @@ public class RoboMonitoringInstrumentation extends Instrumentation {
       ShadowActivity shadowActivity = extract(who);
       postDispatchActivityResult(shadowActivity, target, requestCode, ar);
     }
-    return ar;
+    return null;
   }
 
   /** This API was added in Android API 17 (JELLY_BEAN_MR1) */
@@ -197,26 +264,44 @@ public class RoboMonitoringInstrumentation extends Instrumentation {
       ShadowActivity shadowActivity = extract(target);
       postDispatchActivityResult(shadowActivity, null, requestCode, ar);
     }
-    return ar;
+    return null;
   }
 
   private void postDispatchActivityResult(
       ShadowActivity shadowActivity, String target, int requestCode, ActivityResult ar) {
-    mainThreadHandler.post(
-        new Runnable() {
-          @Override
-          public void run() {
-            shadowActivity.internalCallDispatchActivityResult(
-                target, requestCode, ar.getResultCode(), ar.getResultData());
-          }
-        });
+    new Handler(Looper.getMainLooper())
+        .post(
+            () ->
+                shadowActivity.internalCallDispatchActivityResult(
+                    target, requestCode, ar.getResultCode(), ar.getResultData()));
   }
 
   private ActivityResult stubResultFor(Intent intent) {
-    if (IntentStubberRegistry.isLoaded()) {
-      return IntentStubberRegistry.getInstance().getActivityResultForIntent(intent);
+    if (!IntentStubberRegistry.isLoaded()) {
+      return null;
     }
-    return null;
+
+    FutureTask<ActivityResult> task =
+        new FutureTask<>(
+            () -> IntentStubberRegistry.getInstance().getActivityResultForIntent(intent));
+    ShadowInstrumentation.runOnMainSyncNoIdle(task);
+
+    try {
+      return task.get();
+    } catch (ExecutionException e) {
+      String msg = String.format("Could not retrieve stub result for intent %s", intent);
+      // Preserve original exception
+      if (e.getCause() instanceof RuntimeException) {
+        Log.w(TAG, msg, e);
+        throw (RuntimeException) e.getCause();
+      } else if (e.getCause() != null) {
+        throw new RuntimeException(msg, e.getCause());
+      } else {
+        throw new RuntimeException(msg, e);
+      }
+    } catch (InterruptedException e) {
+      throw new RuntimeException(e);
+    }
   }
 
   /** {@inheritDoc} */
@@ -268,6 +353,9 @@ public class RoboMonitoringInstrumentation extends Instrumentation {
 
   @Override
   public void callActivityOnDestroy(Activity activity) {
+    if (activity.isFinishing()) {
+      createdActivities.removeIf(controller -> controller.get() == activity);
+    }
     super.callActivityOnDestroy(activity);
     lifecycleMonitor.signalLifecycleChange(Stage.DESTROYED, activity);
   }
@@ -310,7 +398,7 @@ public class RoboMonitoringInstrumentation extends Instrumentation {
   }
 
   @Override
-  public void finish(int resultCode, Bundle bundle) { }
+  public void finish(int resultCode, Bundle bundle) {}
 
   @Override
   public Context getTargetContext() {
@@ -320,5 +408,32 @@ public class RoboMonitoringInstrumentation extends Instrumentation {
   @Override
   public Context getContext() {
     return RuntimeEnvironment.getApplication();
+  }
+
+  private void updateConfiguration(
+      Configuration oldConfig, Configuration newConfig, DisplayMetrics newMetrics) {
+    int changedConfig = oldConfig.diff(newConfig);
+    List<ActivityController<?>> controllers = new ArrayList<>(createdActivities);
+    for (ActivityController<?> controller : controllers) {
+      if (createdActivities.contains(controller)) {
+        Activity activity = controller.get();
+        if (System.getProperty("robolectric.configurationChangeFix", "true").equals("true")) {
+          controller.configurationChange(newConfig, newMetrics);
+        } else {
+          controller.configurationChange(newConfig, newMetrics, changedConfig);
+        }
+        // If the activity is recreated then make the new activity visible, this should be done by
+        // configurationChange but there's a pre-existing TODO to address this and it will require
+        // more work to make it function correctly.
+        if (controller.get() != activity) {
+          controller.visible();
+        }
+      }
+    }
+  }
+
+  private static boolean willCreateActivityContexts() {
+    return RuntimeEnvironment.getApiLevel() >= O
+        && Boolean.getBoolean("robolectric.createActivityContexts");
   }
 }

@@ -1,87 +1,81 @@
 package org.robolectric.shadows;
 
-import static android.os.Build.VERSION_CODES.JELLY_BEAN_MR1;
-import static android.os.Build.VERSION_CODES.JELLY_BEAN_MR2;
-import static android.os.Build.VERSION_CODES.KITKAT;
-import static android.os.Build.VERSION_CODES.KITKAT_WATCH;
 import static android.os.Build.VERSION_CODES.LOLLIPOP_MR1;
 import static android.os.Build.VERSION_CODES.M;
-import static org.robolectric.shadow.api.Shadow.invokeConstructor;
-import static org.robolectric.util.ReflectionHelpers.ClassParameter.from;
+import static com.google.common.base.Preconditions.checkState;
+import static org.robolectric.RuntimeEnvironment.getApiLevel;
 import static org.robolectric.util.reflector.Reflector.reflector;
 
+import android.os.Looper;
 import android.os.Message;
 import android.os.MessageQueue;
 import android.os.MessageQueue.IdleHandler;
 import android.os.SystemClock;
+import android.util.Log;
+import com.android.internal.annotations.VisibleForTesting;
+import com.google.common.base.Predicate;
 import java.time.Duration;
 import java.util.ArrayList;
-import org.robolectric.RuntimeEnvironment;
 import org.robolectric.annotation.Implementation;
 import org.robolectric.annotation.Implements;
 import org.robolectric.annotation.LooperMode;
 import org.robolectric.annotation.RealObject;
 import org.robolectric.res.android.NativeObjRegistry;
 import org.robolectric.shadow.api.Shadow;
+import org.robolectric.shadows.ShadowMessage.MessageReflector;
 import org.robolectric.util.Scheduler;
 import org.robolectric.util.reflector.Accessor;
+import org.robolectric.util.reflector.Direct;
 import org.robolectric.util.reflector.ForType;
+import org.robolectric.versioning.AndroidVersions.V;
 
 /**
- * The shadow {@link} MessageQueue} for {@link LooperMode.Mode.PAUSED}
+ * The shadow {@link} MessageQueue} for {@link LooperMode.Mode#PAUSED}
  *
  * <p>This class should not be referenced directly. Use {@link ShadowMessageQueue} instead.
  */
-@Implements(value = MessageQueue.class, isInAndroidSdk = false, looseSignatures = true)
+@SuppressWarnings("SynchronizeOnNonFinalField")
+@Implements(value = MessageQueue.class, isInAndroidSdk = false)
 public class ShadowPausedMessageQueue extends ShadowMessageQueue {
 
   @RealObject private MessageQueue realQueue;
 
   // just use this class as the native object
-  private static NativeObjRegistry<ShadowPausedMessageQueue> nativeQueueRegistry =
-      new NativeObjRegistry<ShadowPausedMessageQueue>(ShadowPausedMessageQueue.class);
+  private static final NativeObjRegistry<ShadowPausedMessageQueue> nativeQueueRegistry =
+      new NativeObjRegistry<>(ShadowPausedMessageQueue.class);
   private boolean isPolling = false;
   private ShadowPausedSystemClock.Listener clockListener;
+  private Exception uncaughtException = null;
 
   // shadow constructor instead of nativeInit because nativeInit signature has changed across SDK
   // versions
   @Implementation
   protected void __constructor__(boolean quitAllowed) {
-    invokeConstructor(MessageQueue.class, realQueue, from(boolean.class, quitAllowed));
-    int ptr = (int) nativeQueueRegistry.register(this);
+    reflector(MessageQueueReflector.class, realQueue).__constructor__(quitAllowed);
+    long ptr = nativeQueueRegistry.register(this);
     reflector(MessageQueueReflector.class, realQueue).setPtr(ptr);
     clockListener =
-        newCurrentTimeMillis -> nativeWake(ptr);
-    ShadowPausedSystemClock.addListener(clockListener);
+        () -> {
+          synchronized (realQueue) {
+            // only wake up the Looper thread if queue is non empty to reduce contention if many
+            // Looper threads are active
+            if (getMessages() != null) {
+              nativeWake(ptr);
+            }
+          }
+        };
+    ShadowPausedSystemClock.addStaticListener(clockListener);
   }
 
-  @Implementation(maxSdk = JELLY_BEAN_MR1)
-  protected void nativeDestroy() {
-    nativeDestroy(reflector(MessageQueueReflector.class, realQueue).getPtr());
-  }
-
-  @Implementation(minSdk = JELLY_BEAN_MR2, maxSdk = KITKAT)
-  protected static void nativeDestroy(int ptr) {
-    nativeDestroy((long) ptr);
-  }
-
-  @Implementation(minSdk = KITKAT_WATCH)
+  @Implementation
   protected static void nativeDestroy(long ptr) {
     ShadowPausedMessageQueue q = nativeQueueRegistry.unregister(ptr);
     ShadowPausedSystemClock.removeListener(q.clockListener);
   }
 
-  @Implementation(maxSdk = JELLY_BEAN_MR1)
-  protected void nativePollOnce(int ptr, int timeoutMillis) {
-    nativePollOnce((long) ptr, timeoutMillis);
-  }
-
-  // use the generic Object parameter types here, to avoid conflicts with the non-static
-  // nativePollOnce
-  @Implementation(minSdk = JELLY_BEAN_MR2, maxSdk = LOLLIPOP_MR1)
-  protected static void nativePollOnce(Object ptr, Object timeoutMillis) {
-    long ptrLong = getLong(ptr);
-    nativeQueueRegistry.getNativeObject(ptrLong).nativePollOnce(ptrLong, (int) timeoutMillis);
+  @Implementation(maxSdk = LOLLIPOP_MR1, methodName = "nativePollOnce")
+  protected static void nativePollOncePreM(long ptr, int timeoutMillis) {
+    nativeQueueRegistry.getNativeObject(ptr).nativePollOnce(ptr, timeoutMillis);
   }
 
   @Implementation(minSdk = M)
@@ -104,30 +98,46 @@ public class ShadowPausedMessageQueue extends ShadowMessageQueue {
     }
   }
 
-  @Implementation(maxSdk = JELLY_BEAN_MR1)
-  protected void nativeWake(int ptr) {
+  /**
+   * Polls the message queue waiting until a message is posted to the head of the queue. This will
+   * suspend the thread until a new message becomes available. Returns immediately if the queue is
+   * not idle. There's no guarantee that the message queue will not still be idle when returning,
+   * but if the message queue becomes not idle it will return immediately.
+   *
+   * <p>See {@link ShadowPausedLooper#poll(long)} for more information.
+   *
+   * @param timeout Timeout in milliseconds, the maximum time to wait before returning, or 0 to wait
+   *     indefinitely,
+   */
+  void poll(long timeout) {
+    checkState(Looper.myLooper() == Looper.getMainLooper() && Looper.myQueue() == realQueue);
+    // Message queue typically expects the looper to loop calling next() which returns current
+    // messages from the head of the queue. If no messages are current it will mark itself blocked
+    // and call nativePollOnce (see above) which suspends the thread until the next message's time.
+    // When messages are posted to the queue, if a new message is posted to the head and the queue
+    // is marked as blocked, then the enqueue function will notify and resume next(), allowing it
+    // return the next message. To simulate this behavior check if the queue is idle and if it is
+    // mark the queue as blocked and wait on a new message.
+    synchronized (realQueue) {
+      if (isIdle()) {
+        reflector(MessageQueueReflector.class, realQueue).setBlocked(true);
+        try {
+          realQueue.wait(timeout);
+        } catch (InterruptedException ignored) {
+          // Fall through and unblock with no messages.
+        } finally {
+          reflector(MessageQueueReflector.class, realQueue).setBlocked(false);
+        }
+      }
+    }
+  }
+
+  @Implementation
+  protected static void nativeWake(long ptr) {
+    MessageQueue realQueue = nativeQueueRegistry.getNativeObject(ptr).realQueue;
     synchronized (realQueue) {
       realQueue.notifyAll();
     }
-  }
-
-  // use the generic Object parameter types here, to avoid conflicts with the non-static
-  // nativeWake
-  @Implementation(minSdk = JELLY_BEAN_MR2, maxSdk = KITKAT)
-  protected static void nativeWake(Object ptr) {
-    // JELLY_BEAN_MR2 has a bug where nativeWake can get called when pointer has already been
-    // destroyed. See here where nativeWake is called outside the synchronized block
-    // https://android.googlesource.com/platform/frameworks/base/+/refs/heads/jb-mr2-release/core/java/android/os/MessageQueue.java#239
-    // So check to see if native object exists first
-    ShadowPausedMessageQueue q = nativeQueueRegistry.peekNativeObject(getLong(ptr));
-    if (q != null) {
-      q.nativeWake(getInt(ptr));
-    }
-  }
-
-  @Implementation(minSdk = KITKAT_WATCH)
-  protected static void nativeWake(long ptr) {
-    nativeQueueRegistry.getNativeObject(ptr).nativeWake((int) ptr);
   }
 
   @Implementation(minSdk = M)
@@ -141,7 +151,7 @@ public class ShadowPausedMessageQueue extends ShadowMessageQueue {
     synchronized (realQueue) {
       Message msg = peekNextExecutableMessage();
       if (msg == null) {
-          return true;
+        return true;
       }
 
       long now = SystemClock.uptimeMillis();
@@ -172,52 +182,53 @@ public class ShadowPausedMessageQueue extends ShadowMessageQueue {
     return reflector(MessageQueueReflector.class, realQueue).getQuitAllowed();
   }
 
+  @VisibleForTesting
   void doEnqueueMessage(Message msg, long when) {
-    reflector(MessageQueueReflector.class, realQueue).enqueueMessage(msg, when);
+    enqueueMessage(msg, when);
+  }
+
+  @Implementation
+  protected boolean enqueueMessage(Message msg, long when) {
+    synchronized (realQueue) {
+      if (uncaughtException != null) {
+        // looper thread has died
+        IllegalStateException e =
+            new IllegalStateException(
+                msg.getTarget()
+                    + " sending message to a Looper thread that has died due to an uncaught"
+                    + " exception",
+                uncaughtException);
+        Log.w("ShadowPausedMessageQueue", e);
+        msg.recycle();
+        throw e;
+      }
+      return reflector(MessageQueueReflector.class, realQueue).enqueueMessage(msg, when);
+    }
   }
 
   Message getMessages() {
     return reflector(MessageQueueReflector.class, realQueue).getMessages();
   }
 
-  boolean isPolling() {
+  @Implementation(minSdk = M)
+  protected boolean isPolling() {
     synchronized (realQueue) {
       return isPolling;
     }
   }
 
   void quit() {
-    if (RuntimeEnvironment.getApiLevel() >= JELLY_BEAN_MR2) {
-      reflector(MessageQueueReflector.class, realQueue).quit(false);
-    } else {
-      reflector(MessageQueueReflector.class, realQueue).quit();
-    }
+    quit(true);
   }
 
-  private boolean isQuitting() {
-    if (RuntimeEnvironment.getApiLevel() >= KITKAT) {
-      return reflector(MessageQueueReflector.class, realQueue).getQuitting();
-    } else {
-      return reflector(MessageQueueReflector.class, realQueue).getQuiting();
-    }
+  @Implementation
+  protected void quit(boolean allowed) {
+    reflector(MessageQueueReflector.class, realQueue).quit(allowed);
+    ShadowPausedSystemClock.removeListener(clockListener);
   }
 
-  private static long getLong(Object intOrLongObj) {
-    if (intOrLongObj instanceof Long) {
-      return (long) intOrLongObj;
-    } else {
-      Integer intObj = (Integer) intOrLongObj;
-      return intObj.longValue();
-    }
-  }
-
-  private static int getInt(Object intOrLongObj) {
-    if (intOrLongObj instanceof Integer) {
-      return (int) intOrLongObj;
-    } else {
-      Long longObj = (Long) intOrLongObj;
-      return longObj.intValue();
-    }
+  boolean isQuitting() {
+    return reflector(MessageQueueReflector.class, realQueue).getQuitting();
   }
 
   Duration getNextScheduledTaskTime() {
@@ -237,7 +248,9 @@ public class ShadowPausedMessageQueue extends ShadowMessageQueue {
         return Duration.ZERO;
       }
       while (next != null) {
-        when = shadowOfMsg(next).getWhen();
+        if (next.getTarget() != null) {
+          when = shadowOfMsg(next).getWhen();
+        }
         next = shadowOfMsg(next).internalGetNext();
       }
     }
@@ -263,21 +276,54 @@ public class ShadowPausedMessageQueue extends ShadowMessageQueue {
     synchronized (realQueue) {
       Message next = getMessages();
       while (next != null) {
-        count++;
+        if (next.getTarget() != null) {
+          count++;
+        }
         next = shadowOfMsg(next).internalGetNext();
       }
     }
     return count;
   }
 
-  Message poll() {
+  /**
+   * Returns the message at the head of the queue immediately, regardless of its scheduled time.
+   * Compare to {@link #getNext()} which will only return the next message if the system clock is
+   * advanced to its scheduled time.
+   *
+   * <p>This is a copy of the real MessageQueue.next implementation with the 'when' handling logic
+   * omitted.
+   */
+  Message getNextIgnoringWhen() {
+    MessageQueueReflector queueReflector = reflector(MessageQueueReflector.class, realQueue);
     synchronized (realQueue) {
-      Message head = getMessages();
-      if (head != null) {
-        Message next = shadowOfMsg(head).internalGetNext();
-        reflector(MessageQueueReflector.class, realQueue).setMessages(next);
+      Message prevMsg = null;
+      Message msg = getMessages();
+      // Head is blocked on synchronization barrier, find next asynchronous message.
+      if (msg != null && msg.getTarget() == null) {
+        do {
+          prevMsg = msg;
+          msg = shadowOfMsg(msg).internalGetNext();
+        } while (msg != null && !msg.isAsynchronous());
       }
-      return head;
+      if (msg != null) {
+        Message nextMsg = reflector(MessageReflector.class, msg).getNext();
+        if (prevMsg != null) {
+          reflector(MessageReflector.class, prevMsg).setNext(nextMsg);
+          if (reflector(MessageReflector.class, prevMsg).getNext() == null
+              && getApiLevel() >= V.SDK_INT) {
+            queueReflector.setLast(prevMsg);
+          }
+        } else {
+          queueReflector.setMessages(nextMsg);
+          if (nextMsg == null && getApiLevel() >= V.SDK_INT) {
+            queueReflector.setLast(null);
+          }
+        }
+        if (msg.isAsynchronous() && getApiLevel() >= V.SDK_INT) {
+          queueReflector.setAsyncMessageCount(queueReflector.getAsyncMessageCount() - 1);
+        }
+      }
+      return msg;
     }
   }
 
@@ -286,9 +332,16 @@ public class ShadowPausedMessageQueue extends ShadowMessageQueue {
   @Override
   public void reset() {
     MessageQueueReflector msgQueue = reflector(MessageQueueReflector.class, realQueue);
-    msgQueue.setMessages(null);
-    msgQueue.setIdleHandlers(new ArrayList<>());
-    msgQueue.setNextBarrierToken(0);
+    synchronized (realQueue) {
+      msgQueue.setMessages(null);
+      msgQueue.setIdleHandlers(new ArrayList<>());
+      msgQueue.setNextBarrierToken(0);
+      if (getApiLevel() >= V.SDK_INT) {
+        msgQueue.setLast(null);
+        msgQueue.setAsyncMessageCount(0);
+      }
+    }
+    setUncaughtException(null);
   }
 
   private static ShadowPausedMessage shadowOfMsg(Message head) {
@@ -327,11 +380,65 @@ public class ShadowPausedMessageQueue extends ShadowMessageQueue {
     }
   }
 
+  /**
+   * Called when an uncaught exception occurred in this message queue's Looper thread.
+   *
+   * <p>In real android, by default an exception handler is installed which kills the entire process
+   * when an uncaught exception occurs. We don't want to do this in robolectric to isolate tests, so
+   * instead an uncaught exception puts the message queue into an error state, where any future
+   * interaction will rethrow the exception.
+   */
+  void setUncaughtException(Exception e) {
+    synchronized (realQueue) {
+      this.uncaughtException = e;
+    }
+  }
+
+  boolean hasUncaughtException() {
+    synchronized (realQueue) {
+      return uncaughtException != null;
+    }
+  }
+
+  void checkQueueState() {
+    synchronized (realQueue) {
+      if (uncaughtException != null) {
+        throw new IllegalStateException(
+            "Looper thread that has died due to an uncaught exception", uncaughtException);
+      }
+    }
+  }
+
+  /**
+   * Remove all messages from queue
+   *
+   * @param msgProcessor a callback to apply to each mesg
+   */
+  void drainQueue(Predicate<Runnable> msgProcessor) {
+    synchronized (realQueue) {
+      Message msg = getMessages();
+      while (msg != null) {
+        boolean unused = msgProcessor.apply(msg.getCallback());
+        Message next = shadowOfMsg(msg).internalGetNext();
+        shadowOfMsg(msg).recycleUnchecked();
+        msg = next;
+      }
+      reflector(MessageQueueReflector.class, realQueue).setMessages(null);
+      if (getApiLevel() >= V.SDK_INT) {
+        reflector(MessageQueueReflector.class, realQueue).setLast(null);
+        reflector(MessageQueueReflector.class, realQueue).setAsyncMessageCount(0);
+      }
+    }
+  }
+
   /** Accessor interface for {@link MessageQueue}'s internals. */
   @ForType(MessageQueue.class)
   private interface MessageQueueReflector {
+    @Direct
+    void __constructor__(boolean quitAllowed);
 
-    void enqueueMessage(Message msg, long when);
+    @Direct
+    boolean enqueueMessage(Message msg, long when);
 
     Message next();
 
@@ -354,21 +461,24 @@ public class ShadowPausedMessageQueue extends ShadowMessageQueue {
     boolean getQuitAllowed();
 
     @Accessor("mPtr")
-    void setPtr(int ptr);
+    void setPtr(long ptr);
 
-    @Accessor("mPtr")
-    int getPtr();
-
-    // for APIs < JELLYBEAN_MR2
-    void quit();
-
+    @Direct
     void quit(boolean b);
-
-    // for APIs < KITKAT
-    @Accessor("mQuiting")
-    boolean getQuiting();
 
     @Accessor("mQuitting")
     boolean getQuitting();
+
+    @Accessor("mLast")
+    void setLast(Message msg);
+
+    @Accessor("mAsyncMessageCount")
+    int getAsyncMessageCount();
+
+    @Accessor("mAsyncMessageCount")
+    void setAsyncMessageCount(int asyncMessageCount);
+
+    @Accessor("mBlocked")
+    void setBlocked(boolean blocked);
   }
 }

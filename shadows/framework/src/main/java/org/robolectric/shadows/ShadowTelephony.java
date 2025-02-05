@@ -1,17 +1,16 @@
 package org.robolectric.shadows;
 
-import android.annotation.Nullable;
 import android.content.Context;
-import android.os.Build.VERSION_CODES;
 import android.provider.Telephony;
 import android.provider.Telephony.Sms;
+import javax.annotation.Nullable;
 import org.robolectric.annotation.Implementation;
 import org.robolectric.annotation.Implements;
 import org.robolectric.annotation.Resetter;
 
-@Implements(value = Telephony.class, minSdk = VERSION_CODES.KITKAT)
+@Implements(value = Telephony.class)
 public class ShadowTelephony {
-  @Implements(value = Sms.class, minSdk = VERSION_CODES.KITKAT)
+  @Implements(value = Sms.class)
   public static class ShadowSms {
     @Nullable private static String defaultSmsPackage;
 
@@ -25,7 +24,7 @@ public class ShadowTelephony {
      *
      * <p>This will be reset for the next test.
      */
-    public static void setDefaultSmsPackage(String defaultSmsPackage) {
+    public static void setDefaultSmsPackage(@Nullable String defaultSmsPackage) {
       ShadowSms.defaultSmsPackage = defaultSmsPackage;
     }
 

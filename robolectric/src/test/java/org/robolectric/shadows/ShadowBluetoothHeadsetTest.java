@@ -1,11 +1,13 @@
 package org.robolectric.shadows;
 
-import static android.os.Build.VERSION_CODES.KITKAT;
+import static android.os.Build.VERSION_CODES.P;
+import static android.os.Build.VERSION_CODES.S;
 import static android.os.Looper.getMainLooper;
 import static com.google.common.truth.Truth.assertThat;
 import static org.junit.Assert.fail;
 import static org.robolectric.Shadows.shadowOf;
 
+import android.app.Application;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothHeadset;
@@ -19,9 +21,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4;
 import java.util.ArrayList;
 import java.util.List;
 import org.junit.Before;
-import org.junit.Rule;
 import org.junit.Test;
-import org.junit.rules.ExpectedException;
 import org.junit.runner.RunWith;
 import org.robolectric.annotation.Config;
 import org.robolectric.shadow.api.Shadow;
@@ -32,9 +32,7 @@ public class ShadowBluetoothHeadsetTest {
   private BluetoothDevice device1;
   private BluetoothDevice device2;
   private BluetoothHeadset bluetoothHeadset;
-  private Context context;
-
-  @Rule public ExpectedException thrown = ExpectedException.none();
+  private Application context;
 
   @Before
   public void setUp() throws Exception {
@@ -58,6 +56,41 @@ public class ShadowBluetoothHeadsetTest {
   }
 
   @Test
+  public void getConnectedDevices_doesNotReturnDevicesInNonConnectedStates() {
+    shadowOf(bluetoothHeadset).addDevice(device1, BluetoothProfile.STATE_CONNECTING);
+    shadowOf(bluetoothHeadset).addDevice(device2, BluetoothProfile.STATE_DISCONNECTING);
+
+    assertThat(bluetoothHeadset.getConnectedDevices()).isEmpty();
+  }
+
+  @Test
+  public void getConnectionState_returnsStoredConnectionState() {
+    shadowOf(bluetoothHeadset).addDevice(device1, BluetoothProfile.STATE_CONNECTING);
+    shadowOf(bluetoothHeadset).addDevice(device2, BluetoothProfile.STATE_DISCONNECTING);
+
+    assertThat(bluetoothHeadset.getConnectionState(device1))
+        .isEqualTo(BluetoothProfile.STATE_CONNECTING);
+    assertThat(bluetoothHeadset.getConnectionState(device2))
+        .isEqualTo(BluetoothProfile.STATE_DISCONNECTING);
+  }
+
+  @Test
+  public void removeDevice_getConnectionStateReturnsDisconnected() {
+    shadowOf(bluetoothHeadset).addConnectedDevice(device1);
+    shadowOf(bluetoothHeadset).removeDevice(device1);
+
+    assertThat(bluetoothHeadset.getConnectedDevices()).isEmpty();
+  }
+
+  @Test
+  public void removeDevice_getConnectedDevicesReturnsEmpty() {
+    shadowOf(bluetoothHeadset).addConnectedDevice(device1);
+    shadowOf(bluetoothHeadset).removeDevice(device1);
+
+    assertThat(bluetoothHeadset.getConnectedDevices()).isEmpty();
+  }
+
+  @Test
   public void getConnectionState_defaultsToDisconnected() {
     shadowOf(bluetoothHeadset).addConnectedDevice(device1);
     shadowOf(bluetoothHeadset).addConnectedDevice(device2);
@@ -72,6 +105,64 @@ public class ShadowBluetoothHeadsetTest {
   public void getConnectionState_canBeSetUpWithAddConnectedDevice() {
     assertThat(bluetoothHeadset.getConnectionState(device1))
         .isEqualTo(BluetoothProfile.STATE_DISCONNECTED);
+  }
+
+  @Test
+  public void getDevicesMatchingConnectionStates_returnsMatchingDevices() {
+    shadowOf(bluetoothHeadset).addDevice(device1, BluetoothProfile.STATE_CONNECTING);
+    shadowOf(bluetoothHeadset).addDevice(device2, BluetoothProfile.STATE_DISCONNECTED);
+
+    assertThat(
+            bluetoothHeadset.getDevicesMatchingConnectionStates(
+                new int[] {BluetoothProfile.STATE_CONNECTING, BluetoothProfile.STATE_DISCONNECTED}))
+        .containsExactly(device1, device2);
+  }
+
+  @Test
+  public void getDevicesMatchingConnectionStates_subsetOfAvailableStates_returnsMatchingDevices() {
+    shadowOf(bluetoothHeadset).addDevice(device1, BluetoothProfile.STATE_CONNECTING);
+    shadowOf(bluetoothHeadset).addDevice(device2, BluetoothProfile.STATE_DISCONNECTED);
+
+    assertThat(
+            bluetoothHeadset.getDevicesMatchingConnectionStates(
+                new int[] {BluetoothProfile.STATE_CONNECTING}))
+        .containsExactly(device1);
+  }
+
+  @Test
+  public void connect_addsDeviceToConnectedListAndReturnsTrue() {
+    boolean result = bluetoothHeadset.connect(device1);
+
+    assertThat(bluetoothHeadset.getConnectedDevices()).containsExactly(device1);
+    assertThat(result).isTrue();
+  }
+
+  @Test
+  public void connect_alreadyConnectedDevice_returnsFalse() {
+    bluetoothHeadset.connect(device1);
+    boolean result = bluetoothHeadset.connect(device1);
+
+    assertThat(bluetoothHeadset.getConnectedDevices()).containsExactly(device1);
+    assertThat(result).isFalse();
+  }
+
+  @Test
+  public void disconnect_removesDeviceFromConnectedListAndReturnsTrue() {
+    bluetoothHeadset.connect(device1);
+    boolean result = bluetoothHeadset.disconnect(device1);
+
+    assertThat(bluetoothHeadset.getConnectedDevices()).isEmpty();
+    assertThat(result).isTrue();
+  }
+
+  @Test
+  public void disconnect_alreadyDisconnectedDevice_returnsFalse() {
+    bluetoothHeadset.connect(device1);
+    bluetoothHeadset.disconnect(device1);
+    boolean result = bluetoothHeadset.disconnect(device1);
+
+    assertThat(bluetoothHeadset.getConnectedDevices()).isEmpty();
+    assertThat(result).isFalse();
   }
 
   @Test
@@ -97,7 +188,7 @@ public class ShadowBluetoothHeadsetTest {
   }
 
   @Test
-  public void startVoiceRecogntion_shouldEmitBroadcast() {
+  public void startVoiceRecognition_shouldEmitBroadcast() {
     shadowOf(bluetoothHeadset).addConnectedDevice(device1);
     IntentFilter intentFilter = new IntentFilter(BluetoothHeadset.ACTION_AUDIO_STATE_CHANGED);
     List<Integer> extraStateList = new ArrayList<>();
@@ -119,7 +210,7 @@ public class ShadowBluetoothHeadsetTest {
   }
 
   @Test
-  public void startVoiceRecogniton_returnsFalseIfAlreadyStarted() {
+  public void startVoiceRecognition_returnsFalseIfAlreadyStarted() {
     shadowOf(bluetoothHeadset).addConnectedDevice(device1);
     shadowOf(bluetoothHeadset).addConnectedDevice(device2);
 
@@ -129,7 +220,7 @@ public class ShadowBluetoothHeadsetTest {
   }
 
   @Test
-  public void startVoiceRecogntion_stopsAlreadyStartedRecognition() {
+  public void startVoiceRecognition_stopsAlreadyStartedRecognition() {
     shadowOf(bluetoothHeadset).addConnectedDevice(device1);
     shadowOf(bluetoothHeadset).addConnectedDevice(device2);
 
@@ -172,7 +263,20 @@ public class ShadowBluetoothHeadsetTest {
   }
 
   @Test
-  @Config(minSdk = KITKAT)
+  @Config(minSdk = S)
+  public void isVoiceRecognitionSupported_supportedByDefault() {
+    assertThat(bluetoothHeadset.isVoiceRecognitionSupported(device1)).isTrue();
+  }
+
+  @Test
+  @Config(minSdk = S)
+  public void setVoiceRecognitionSupported_false_notSupported() {
+    shadowOf(bluetoothHeadset).setVoiceRecognitionSupported(false);
+
+    assertThat(bluetoothHeadset.isVoiceRecognitionSupported(device1)).isFalse();
+  }
+
+  @Test
   public void sendVendorSpecificResultCode_defaultsToTrueForConnectedDevice() {
     shadowOf(bluetoothHeadset).addConnectedDevice(device1);
 
@@ -180,13 +284,11 @@ public class ShadowBluetoothHeadsetTest {
   }
 
   @Test
-  @Config(minSdk = KITKAT)
   public void sendVendorSpecificResultCode_alwaysFalseForDisconnectedDevice() {
     assertThat(bluetoothHeadset.sendVendorSpecificResultCode(device1, "command", "arg")).isFalse();
   }
 
   @Test
-  @Config(minSdk = KITKAT)
   public void sendVendorSpecificResultCode_canBeForcedToFalseForConnectedDevice() {
     shadowOf(bluetoothHeadset).addConnectedDevice(device1);
     shadowOf(bluetoothHeadset).setAllowsSendVendorSpecificResultCode(false);
@@ -195,12 +297,34 @@ public class ShadowBluetoothHeadsetTest {
   }
 
   @Test
-  @Config(minSdk = KITKAT)
   public void sendVendorSpecificResultCode_throwsOnNullCommand() {
     try {
       bluetoothHeadset.sendVendorSpecificResultCode(device1, null, "arg");
       fail();
     } catch (IllegalArgumentException expected) {
     }
+  }
+
+  @Test
+  @Config(minSdk = P)
+  public void setActiveDevice_setNull_shouldSaveNull() {
+    assertThat(bluetoothHeadset.setActiveDevice(null)).isTrue();
+
+    assertThat(bluetoothHeadset.getActiveDevice()).isNull();
+    Intent intent = shadowOf(context).getBroadcastIntents().get(0);
+    assertThat(intent.getAction()).isEqualTo(BluetoothHeadset.ACTION_ACTIVE_DEVICE_CHANGED);
+    assertThat((BluetoothDevice) intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)).isNull();
+  }
+
+  @Test
+  @Config(minSdk = P)
+  public void getActiveDevice_returnValueFromSetter() {
+    assertThat(bluetoothHeadset.setActiveDevice(device1)).isTrue();
+
+    assertThat(bluetoothHeadset.getActiveDevice()).isEqualTo(device1);
+    Intent intent = shadowOf(context).getBroadcastIntents().get(0);
+    assertThat(intent.getAction()).isEqualTo(BluetoothHeadset.ACTION_ACTIVE_DEVICE_CHANGED);
+    assertThat((BluetoothDevice) intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE))
+        .isEqualTo(device1);
   }
 }

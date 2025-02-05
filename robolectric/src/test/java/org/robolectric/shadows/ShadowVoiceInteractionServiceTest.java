@@ -34,7 +34,6 @@ public class ShadowVoiceInteractionServiceTest {
   public void setUp() {
     service = Robolectric.buildService(TestVoiceInteractionService.class).get();
     shadowService = shadowOf(service);
-    ShadowVoiceInteractionService.reset();
   }
 
   @Test
@@ -75,11 +74,7 @@ public class ShadowVoiceInteractionServiceTest {
   @Test
   @Config(minSdk = M)
   public void showSessionInvokedBeforeServiceReady_throwsException() {
-    assertThrows(
-        NullPointerException.class,
-        () -> {
-          service.showSession(new Bundle(), 0);
-        });
+    assertThrows(IllegalStateException.class, () -> service.showSession(new Bundle(), 0));
   }
 
   @Test
@@ -104,17 +99,5 @@ public class ShadowVoiceInteractionServiceTest {
             VoiceInteractionService.isActiveService(
                 ApplicationProvider.getApplicationContext(), new ComponentName("test", "test")))
         .isTrue();
-  }
-
-  @Test
-  public void resetter_resetsActiveServiceValue() {
-    ShadowVoiceInteractionService.setActiveService(new ComponentName("test", "test"));
-
-    ShadowVoiceInteractionService.reset();
-
-    assertThat(
-            VoiceInteractionService.isActiveService(
-                ApplicationProvider.getApplicationContext(), new ComponentName("test", "test")))
-        .isFalse();
   }
 }

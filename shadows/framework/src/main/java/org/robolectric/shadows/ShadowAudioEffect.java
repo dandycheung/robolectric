@@ -38,7 +38,7 @@ public class ShadowAudioEffect {
   private boolean isEnabled = false;
   private int errorCode = SUCCESS;
 
-  @Implementation(minSdk = VERSION_CODES.JELLY_BEAN, maxSdk = VERSION_CODES.LOLLIPOP_MR1)
+  @Implementation(maxSdk = VERSION_CODES.LOLLIPOP_MR1)
   protected int native_setup(
       Object audioEffectThis,
       String type,
@@ -171,8 +171,8 @@ public class ShadowAudioEffect {
   /**
    * Sets the error code to override setter methods in this class.
    *
-   * <p>When the error code is set to anything other than {@link SUCCESS} setters in the AudioEffect
-   * will early-out and return that error code.
+   * <p>When the error code is set to anything other than {@link AudioEffect#SUCCESS} setters in the
+   * AudioEffect will early-out and return that error code.
    */
   public void setErrorCode(int errorCode) {
     this.errorCode = errorCode;
@@ -195,7 +195,7 @@ public class ShadowAudioEffect {
    */
   @Implementation
   protected static AudioEffect.Descriptor[] queryEffects() {
-    return descriptors.toArray(new AudioEffect.Descriptor[descriptors.size()]);
+    return descriptors.toArray(new AudioEffect.Descriptor[0]);
   }
 
   /** Returns all effects created with an {@code AudioEffect} constructor. */

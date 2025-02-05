@@ -5,6 +5,7 @@ import android.content.pm.PackageInfo;
 import android.graphics.Bitmap;
 import android.os.Build;
 import android.os.Build.VERSION;
+import android.os.Build.VERSION_CODES;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -14,24 +15,27 @@ import android.webkit.ValueCallback;
 import android.webkit.WebBackForwardList;
 import android.webkit.WebChromeClient;
 import android.webkit.WebHistoryItem;
+import android.webkit.WebMessagePort;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebView.HitTestResult;
 import android.webkit.WebViewClient;
 import android.webkit.WebViewFactoryProvider;
+import com.google.common.collect.ImmutableList;
 import java.lang.reflect.Field;
-import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import org.robolectric.annotation.HiddenApi;
 import org.robolectric.annotation.Implementation;
 import org.robolectric.annotation.Implements;
 import org.robolectric.annotation.RealObject;
 import org.robolectric.annotation.Resetter;
+import org.robolectric.fakes.RoboWebMessagePort;
 import org.robolectric.fakes.RoboWebSettings;
 import org.robolectric.util.ReflectionHelpers;
 
@@ -45,10 +49,11 @@ public class ShadowWebView extends ShadowViewGroup {
 
   private static PackageInfo packageInfo = null;
 
+  private final List<RoboWebMessagePort[]> allCreatedPorts = new ArrayList<>();
   private String lastUrl;
   private Map<String, String> lastAdditionalHttpHeaders;
-  private HashMap<String, Object> javascriptInterfaces = new HashMap<>();
-  private WebSettings webSettings = new RoboWebSettings();
+  private final HashMap<String, Object> javascriptInterfaces = new HashMap<>();
+  private final WebSettings webSettings = new RoboWebSettings();
   private WebViewClient webViewClient = null;
   private boolean clearCacheCalled = false;
   private boolean clearCacheIncludeDiskFiles = false;
@@ -70,6 +75,7 @@ public class ShadowWebView extends ShadowViewGroup {
   private int historyIndex = -1;
   private ArrayList<String> history = new ArrayList<>();
   private String lastEvaluatedJavascript;
+  private ValueCallback<String> lastEvaluatedJavascriptCallback;
   // TODO: Delete this when setCanGoBack is deleted. This is only used to determine which "path" we
   // use when canGoBack or goBack is called.
   private boolean canGoBackIsSet;
@@ -102,29 +108,19 @@ public class ShadowWebView extends ShadowViewGroup {
             Proxy.newProxyInstance(
                 classLoader,
                 new Class[] {webViewProviderClass},
-                new InvocationHandler() {
-                  @Override
-                  public Object invoke(Object proxy, Method method, Object[] args)
-                      throws Throwable {
-                    if (method.getName().equals("getViewDelegate")
-                        || method.getName().equals("getScrollDelegate")) {
-                      return Proxy.newProxyInstance(
-                          classLoader,
-                          new Class[] {
-                            getClassNamed("android.webkit.WebViewProvider$ViewDelegate"),
-                            getClassNamed("android.webkit.WebViewProvider$ScrollDelegate")
-                          },
-                          new InvocationHandler() {
-                            @Override
-                            public Object invoke(Object proxy, Method method, Object[] args)
-                                throws Throwable {
-                              return nullish(method);
-                            }
-                          });
-                    }
-
-                    return nullish(method);
+                (proxy, method, args) -> {
+                  if (method.getName().equals("getViewDelegate")
+                      || method.getName().equals("getScrollDelegate")) {
+                    return Proxy.newProxyInstance(
+                        classLoader,
+                        new Class[] {
+                          getClassNamed("android.webkit.WebViewProvider$ViewDelegate"),
+                          getClassNamed("android.webkit.WebViewProvider$ScrollDelegate")
+                        },
+                        (proxy1, method1, args1) -> nullish(method1));
                   }
+
+                  return nullish(method);
                 });
         mProvider.set(realView, provider);
       }
@@ -231,7 +227,7 @@ public class ShadowWebView extends ShadowViewGroup {
 
   /**
    * Performs no callbacks on {@link WebViewClient} and {@link WebChromeClient} when any of {@link
-   * #loadUrl}, {@link loadData} or {@link #loadDataWithBaseURL} is called.
+   * #loadUrl}, {@link #loadData} or {@link #loadDataWithBaseURL} is called.
    */
   public void performNoPageLoadClientCallbacks() {
     this.pageLoadType = PageLoadType.UNDEFINED;
@@ -239,7 +235,7 @@ public class ShadowWebView extends ShadowViewGroup {
 
   /**
    * Performs callbacks on {@link WebViewClient} and {@link WebChromeClient} that simulates a
-   * successful page load when any of {@link #loadUrl}, {@link loadData} or {@link
+   * successful page load when any of {@link #loadUrl}, {@link #loadData} or {@link
    * #loadDataWithBaseURL} is called.
    */
   public void performSuccessfulPageLoadClientCallbacks() {
@@ -283,7 +279,9 @@ public class ShadowWebView extends ShadowViewGroup {
             });
   }
 
-  /** @return the last loaded url */
+  /**
+   * @return the last loaded url
+   */
   public String getLastLoadedUrl() {
     return lastUrl;
   }
@@ -303,7 +301,9 @@ public class ShadowWebView extends ShadowViewGroup {
     return originalUrl;
   }
 
-  /** @return the additional Http headers that in the same request with last loaded url */
+  /**
+   * @return the additional Http headers that in the same request with last loaded url
+   */
   public Map<String, String> getLastAdditionalHttpHeaders() {
     return lastAdditionalHttpHeaders;
   }
@@ -323,6 +323,7 @@ public class ShadowWebView extends ShadowViewGroup {
     webChromeClient = client;
   }
 
+  @Implementation(minSdk = VERSION_CODES.O)
   public WebViewClient getWebViewClient() {
     return webViewClient;
   }
@@ -339,6 +340,17 @@ public class ShadowWebView extends ShadowViewGroup {
   @Implementation
   protected void removeJavascriptInterface(String name) {
     javascriptInterfaces.remove(name);
+  }
+
+  @Implementation(minSdk = Build.VERSION_CODES.M)
+  protected WebMessagePort[] createWebMessageChannel() {
+    RoboWebMessagePort[] ports = RoboWebMessagePort.createPair();
+    allCreatedPorts.add(ports);
+    return ports;
+  }
+
+  public List<RoboWebMessagePort[]> getCreatedPorts() {
+    return ImmutableList.copyOf(allCreatedPorts);
   }
 
   @Implementation
@@ -421,7 +433,10 @@ public class ShadowWebView extends ShadowViewGroup {
     return destroyCalled;
   }
 
-  /** @return webChromeClient */
+  /**
+   * @return webChromeClient
+   */
+  @Implementation(minSdk = VERSION_CODES.O)
   public WebChromeClient getWebChromeClient() {
     return webChromeClient;
   }
@@ -516,13 +531,26 @@ public class ShadowWebView extends ShadowViewGroup {
     currentFavicon = favicon;
   }
 
-  @Implementation(minSdk = Build.VERSION_CODES.KITKAT)
+  @Implementation
   protected void evaluateJavascript(String script, ValueCallback<String> callback) {
     this.lastEvaluatedJavascript = script;
+    this.lastEvaluatedJavascriptCallback = callback;
   }
 
+  /**
+   * Returns the last evaluated Javascript value provided to {@link #evaluateJavascript(String,
+   * ValueCallback)} or null if the method has not been called.
+   */
   public String getLastEvaluatedJavascript() {
     return lastEvaluatedJavascript;
+  }
+
+  /**
+   * Returns the last callback value provided to {@link #evaluateJavascript(String, ValueCallback)}
+   * or null if the method has not been called.
+   */
+  public ValueCallback<String> getLastEvaluatedJavascriptCallback() {
+    return lastEvaluatedJavascriptCallback;
   }
 
   /**
@@ -530,7 +558,7 @@ public class ShadowWebView extends ShadowViewGroup {
    *
    * @param canGoBack Value to return from {@code android.webkit.WebView#canGoBack()}
    * @deprecated Do not depend on this method as it will be removed in a future update. The
-   *     preferered method is to populate a fake web history to use for going back.
+   *     preferred method is to populate a fake web history to use for going back.
    */
   @Deprecated
   public void setCanGoBack(boolean canGoBack) {
@@ -558,7 +586,7 @@ public class ShadowWebView extends ShadowViewGroup {
 
   @Implementation
   protected WebBackForwardList saveState(Bundle outState) {
-    if (history.size() > 0) {
+    if (!history.isEmpty()) {
       outState.putStringArrayList(HISTORY_KEY, history);
       outState.putInt(HISTORY_INDEX_KEY, historyIndex);
     }
@@ -575,7 +603,7 @@ public class ShadowWebView extends ShadowViewGroup {
       historyIndex = inState.getInt(HISTORY_INDEX_KEY);
     }
 
-    if (history.size() > 0) {
+    if (!history.isEmpty()) {
       originalUrl = history.get(historyIndex);
       lastUrl = history.get(historyIndex);
       return new BackForwardList(history, historyIndex);
@@ -606,6 +634,7 @@ public class ShadowWebView extends ShadowViewGroup {
     packageInfo = null;
   }
 
+  @Implementation
   public static void setWebContentsDebuggingEnabled(boolean enabled) {}
 
   /**
@@ -674,8 +703,8 @@ public class ShadowWebView extends ShadowViewGroup {
    * Defines a type of page load which is associated with a certain order of {@link WebViewClient}
    * and {@link WebChromeClient} callbacks.
    *
-   * <p>A page load is triggered either using {@link #loadUrl}, {@link loadData} or {@link
-   * loadDataWithBaseURL}.
+   * <p>A page load is triggered either using {@link #loadUrl}, {@link #loadData} or {@link
+   * #loadDataWithBaseURL}.
    */
   private enum PageLoadType {
     /** Default type, triggers no {@link WebViewClient} or {@link WebChromeClient} callbacks. */

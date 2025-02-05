@@ -1,8 +1,8 @@
 package org.robolectric.pluginapi.perf;
 
-/**
- * Metric for perf stats collection.
- */
+import java.util.Objects;
+
+/** Metric for perf stats collection. */
 public class Metric {
   private final String name;
   private int count;
@@ -69,7 +69,7 @@ public class Metric {
     if (this == o) {
       return true;
     }
-    if (o == null || getClass() != o.getClass()) {
+    if (!(o instanceof Metric)) {
       return false;
     }
 
@@ -78,7 +78,7 @@ public class Metric {
     if (success != metric.success) {
       return false;
     }
-    return name != null ? name.equals(metric.name) : metric.name == null;
+    return Objects.equals(name, metric.name);
   }
 
   @Override
@@ -91,12 +91,19 @@ public class Metric {
   @Override
   public String toString() {
     return "Metric{"
-        + "name='" + name + '\''
-        + ", count=" + count
-        + ", minNs=" + minNs
-        + ", maxNs=" + maxNs
-        + ", elapsedNs=" + elapsedNs
-        + ", success=" + success
+        + "name='"
+        + name
+        + '\''
+        + ", count="
+        + count
+        + ", minNs="
+        + minNs
+        + ", maxNs="
+        + maxNs
+        + ", elapsedNs="
+        + elapsedNs
+        + ", success="
+        + success
         + '}';
   }
 }

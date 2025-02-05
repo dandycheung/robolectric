@@ -6,8 +6,8 @@ import static org.junit.Assert.fail;
 import android.app.Activity;
 import android.content.Intent;
 import android.os.Bundle;
+import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.rule.ActivityTestRule;
-import androidx.test.runner.AndroidJUnit4;
 import java.util.ArrayList;
 import java.util.List;
 import org.junit.Before;
@@ -16,8 +16,10 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
-/** Integration tests for {@link ActivityTestRule} that verify it behaves consistently on device and
- * Robolectric. */
+/**
+ * Integration tests for {@link ActivityTestRule} that verify it behaves consistently on device and
+ * Robolectric.
+ */
 @RunWith(AndroidJUnit4.class)
 public class ActivityTestRuleTest {
 
@@ -45,6 +47,9 @@ public class ActivityTestRuleTest {
         }
       };
 
+  /**
+   * @noinspection NewClassNamingConvention
+   */
   public static class TranscriptActivity extends Activity {
     Bundle receivedBundle;
 
@@ -58,7 +63,7 @@ public class ActivityTestRuleTest {
     @Override
     public void onStart() {
       super.onStart();
-     callbacks.add("onStart");
+      callbacks.add("onStart");
     }
 
     @Override
@@ -90,12 +95,6 @@ public class ActivityTestRuleTest {
       super.onDestroy();
       callbacks.add("onDestroy");
     }
-
-    @Override
-    public void onWindowFocusChanged(boolean hasFocus) {
-      super.onWindowFocusChanged(hasFocus);
-      callbacks.add("onWindowFocusChanged " + hasFocus);
-    }
   }
 
   @Before
@@ -109,8 +108,7 @@ public class ActivityTestRuleTest {
     assertThat(activity).isNotNull();
     assertThat(callbacks)
         .containsExactly(
-            "beforeActivityLaunched", "onCreate", "onStart", "onResume",
-            "onWindowFocusChanged true", "afterActivityLaunched");
+            "beforeActivityLaunched", "onCreate", "onStart", "onResume", "afterActivityLaunched");
   }
 
   /**
@@ -123,7 +121,8 @@ public class ActivityTestRuleTest {
     assertThat(activity.receivedBundle).isNull();
   }
 
-  @Test public void launchActivity_intentExtras() {
+  @Test
+  public void launchActivity_intentExtras() {
     Intent intent = new Intent();
     intent.putExtra("Key", "Value");
 

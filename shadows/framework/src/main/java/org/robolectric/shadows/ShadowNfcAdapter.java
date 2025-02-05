@@ -1,5 +1,7 @@
 package org.robolectric.shadows;
 
+import static android.os.Build.VERSION_CODES.TIRAMISU;
+import static android.os.Build.VERSION_CODES.UPSIDE_DOWN_CAKE;
 import static org.robolectric.util.reflector.Reflector.reflector;
 
 import android.app.Activity;
@@ -9,60 +11,178 @@ import android.content.IntentFilter;
 import android.content.pm.PackageManager;
 import android.nfc.NdefMessage;
 import android.nfc.NfcAdapter;
+import android.nfc.NfcAntennaInfo;
 import android.nfc.Tag;
 import android.os.Build;
 import android.os.Bundle;
 import java.util.Map;
+import javax.annotation.concurrent.GuardedBy;
 import org.robolectric.RuntimeEnvironment;
+import org.robolectric.annotation.ClassName;
 import org.robolectric.annotation.Implementation;
 import org.robolectric.annotation.Implements;
 import org.robolectric.annotation.RealObject;
 import org.robolectric.annotation.Resetter;
+import org.robolectric.util.ReflectionHelpers;
+import org.robolectric.util.ReflectionHelpers.ClassParameter;
 import org.robolectric.util.reflector.Accessor;
 import org.robolectric.util.reflector.Direct;
 import org.robolectric.util.reflector.ForType;
 import org.robolectric.util.reflector.Static;
+import org.robolectric.versioning.AndroidVersions.V;
 
 /** Shadow implementation of {@link NfcAdapter}. */
-@Implements(NfcAdapter.class)
+@Implements(value = NfcAdapter.class)
 public class ShadowNfcAdapter {
   @RealObject NfcAdapter nfcAdapter;
+
+  @GuardedBy("ShadowNfcAdapter.class")
   private static boolean hardwareExists = true;
+
+  @GuardedBy("this")
   private boolean enabled;
+
+  @GuardedBy("this")
+  private boolean secureNfcSupported;
+
+  @GuardedBy("this")
+  private boolean secureNfcEnabled;
+
+  @GuardedBy("this")
   private Activity enabledActivity;
+
+  @GuardedBy("this")
   private PendingIntent intent;
+
+  @GuardedBy("this")
   private IntentFilter[] filters;
+
+  @GuardedBy("this")
   private String[][] techLists;
+
+  @GuardedBy("this")
   private Activity disabledActivity;
+
+  @GuardedBy("this")
   private NdefMessage ndefPushMessage;
+
+  @GuardedBy("this")
   private boolean ndefPushMessageSet;
+
+  @GuardedBy("this")
   private NfcAdapter.CreateNdefMessageCallback ndefPushMessageCallback;
+
+  @GuardedBy("this")
   private NfcAdapter.OnNdefPushCompleteCallback onNdefPushCompleteCallback;
+
+  @GuardedBy("this")
   private NfcAdapter.ReaderCallback readerCallback;
+
+  @GuardedBy("this")
+  private NfcAntennaInfo nfcAntennaInfo;
+
+  @GuardedBy("this")
+  private boolean isObserveModeSupported = false;
+
+  @GuardedBy("this")
+  private boolean isObserverModeEnabled = false;
+
+  @Implementation(minSdk = V.SDK_INT)
+  protected boolean setObserveModeEnabled(boolean enabled) {
+    synchronized (this) {
+      if (isObserveModeSupported) {
+        isObserverModeEnabled = enabled;
+        return true;
+      }
+    }
+    return false;
+  }
+
+  @Implementation(minSdk = V.SDK_INT)
+  protected boolean isObserveModeEnabled() {
+    synchronized (this) {
+      return isObserverModeEnabled;
+    }
+  }
+
+  @Implementation(minSdk = V.SDK_INT)
+  protected boolean isObserveModeSupported() {
+    synchronized (this) {
+      return isObserveModeSupported;
+    }
+  }
+
+  /**
+   * Sets the value returned by {@link #isObserveModeSupported()}.
+   *
+   * @param supported the value to return from {@link #isObserveModeSupported()}
+   */
+  public synchronized void setObserveModeSupported(boolean supported) {
+    isObserveModeSupported = supported;
+  }
+
+  @Implementation
+  protected static NfcAdapter getDefaultAdapter(Context context) {
+    // The result of `getNfcAdapter` is cached, so need to check `hardwareExists` again here in case
+    // its value was set after the value returned by `getNfcAdapter` got cached.
+    synchronized (ShadowNfcAdapter.class) {
+      if (!hardwareExists) {
+        return null;
+      }
+    }
+    return reflector(NfcAdapterReflector.class).getDefaultAdapter(context);
+  }
 
   @Implementation
   protected static NfcAdapter getNfcAdapter(Context context) {
-    if (!hardwareExists) {
-      return null;
+    synchronized (ShadowNfcAdapter.class) {
+      if (!hardwareExists) {
+        return null;
+      }
     }
     return reflector(NfcAdapterReflector.class).getNfcAdapter(context);
+  }
+
+  /** Factory method for creating a mock NfcAdapter.Tag */
+  public static Tag createMockTag() {
+    if (RuntimeEnvironment.getApiLevel() <= TIRAMISU) {
+      return ReflectionHelpers.callStaticMethod(
+          Tag.class,
+          "createMockTag",
+          ClassParameter.from(byte[].class, new byte[0]),
+          ClassParameter.from(int[].class, new int[0]),
+          ClassParameter.from(Bundle[].class, new Bundle[0]));
+
+    } else {
+      return ReflectionHelpers.callStaticMethod(
+          Tag.class,
+          "createMockTag",
+          ClassParameter.from(byte[].class, new byte[0]),
+          ClassParameter.from(int[].class, new int[0]),
+          ClassParameter.from(Bundle[].class, new Bundle[0]),
+          ClassParameter.from(long.class, 0));
+    }
   }
 
   @Implementation
   protected void enableForegroundDispatch(
       Activity activity, PendingIntent intent, IntentFilter[] filters, String[][] techLists) {
-    this.enabledActivity = activity;
-    this.intent = intent;
-    this.filters = filters;
-    this.techLists = techLists;
+    synchronized (this) {
+      this.enabledActivity = activity;
+      this.intent = intent;
+      this.filters = filters;
+      this.techLists = techLists;
+    }
   }
 
   @Implementation
   protected void disableForegroundDispatch(Activity activity) {
-    disabledActivity = activity;
+    synchronized (this) {
+      disabledActivity = activity;
+    }
   }
 
-  @Implementation(minSdk = Build.VERSION_CODES.KITKAT)
+  @Implementation
   protected void enableReaderMode(
       Activity activity, NfcAdapter.ReaderCallback callback, int flags, Bundle extras) {
     if (!RuntimeEnvironment.getApplication()
@@ -73,28 +193,37 @@ public class ShadowNfcAdapter {
     if (callback == null) {
       throw new NullPointerException("ReaderCallback is null");
     }
-    readerCallback = callback;
+
+    synchronized (this) {
+      readerCallback = callback;
+    }
   }
 
-  @Implementation(minSdk = Build.VERSION_CODES.KITKAT)
+  @Implementation
   protected void disableReaderMode(Activity activity) {
     if (!RuntimeEnvironment.getApplication()
         .getPackageManager()
         .hasSystemFeature(PackageManager.FEATURE_NFC)) {
       throw new UnsupportedOperationException();
     }
-    readerCallback = null;
+    synchronized (this) {
+      readerCallback = null;
+    }
   }
 
   /** Returns true if NFC is in reader mode. */
-  public boolean isInReaderMode() {
+  public synchronized boolean isInReaderMode() {
     return readerCallback != null;
   }
 
   /** Dispatches the tag onto any registered readers. */
   public void dispatchTagDiscovered(Tag tag) {
-    if (readerCallback != null) {
-      readerCallback.onTagDiscovered(tag);
+    NfcAdapter.ReaderCallback callback;
+    synchronized (this) {
+      callback = readerCallback;
+    }
+    if (callback != null) {
+      callback.onTagDiscovered(tag);
     }
   }
 
@@ -113,14 +242,18 @@ public class ShadowNfcAdapter {
         throw new NullPointerException("activities cannot contain null");
       }
     }
-    this.ndefPushMessage = message;
-    this.ndefPushMessageSet = true;
+    synchronized (this) {
+      this.ndefPushMessage = message;
+      this.ndefPushMessageSet = true;
+    }
   }
 
   @Implementation
   protected void setNdefPushMessageCallback(
       NfcAdapter.CreateNdefMessageCallback callback, Activity activity, Activity... activities) {
-    this.ndefPushMessageCallback = callback;
+    synchronized (this) {
+      this.ndefPushMessageCallback = callback;
+    }
   }
 
   /**
@@ -140,73 +273,120 @@ public class ShadowNfcAdapter {
         throw new NullPointerException("activities cannot contain null");
       }
     }
-    this.onNdefPushCompleteCallback = callback;
+    synchronized (this) {
+      this.onNdefPushCompleteCallback = callback;
+    }
   }
 
   @Implementation
   protected boolean isEnabled() {
-    return enabled;
+    synchronized (this) {
+      return enabled;
+    }
   }
 
   @Implementation
   protected boolean enable() {
-    enabled = true;
+    synchronized (this) {
+      enabled = true;
+    }
     return true;
   }
 
   @Implementation
   protected boolean disable() {
-    enabled = false;
+    synchronized (this) {
+      enabled = false;
+    }
     return true;
+  }
+
+  @Implementation(minSdk = Build.VERSION_CODES.Q)
+  protected boolean isSecureNfcSupported() {
+    synchronized (this) {
+      return secureNfcSupported;
+    }
+  }
+
+  @Implementation(minSdk = Build.VERSION_CODES.Q)
+  protected boolean isSecureNfcEnabled() {
+    synchronized (this) {
+      return secureNfcEnabled;
+    }
+  }
+
+  @Implementation(minSdk = Build.VERSION_CODES.Q)
+  protected boolean enableSecureNfc(boolean enableSecureNfc) {
+    synchronized (this) {
+      this.secureNfcEnabled = enableSecureNfc;
+    }
+    return true;
+  }
+
+  // TODO: use NfcAntennaInfo when minimum supported compile SDK is >= android U
+  @Implementation(minSdk = UPSIDE_DOWN_CAKE)
+  protected @ClassName("android.nfc.NfcAntennaInfo") Object getNfcAntennaInfo() {
+    synchronized (this) {
+      return nfcAntennaInfo;
+    }
   }
 
   /**
    * Modifies the behavior of {@link #getNfcAdapter(Context)} to return {@code null}, to simulate
    * absence of NFC hardware.
    */
-  public static void setNfcHardwareExists(boolean hardwareExists) {
+  public static synchronized void setNfcHardwareExists(boolean hardwareExists) {
     ShadowNfcAdapter.hardwareExists = hardwareExists;
   }
 
-  public void setEnabled(boolean enabled) {
+  public synchronized void setEnabled(boolean enabled) {
     this.enabled = enabled;
   }
 
-  public Activity getEnabledActivity() {
+  public synchronized void setSecureNfcSupported(boolean secureNfcSupported) {
+    this.secureNfcSupported = secureNfcSupported;
+  }
+
+  public synchronized Activity getEnabledActivity() {
     return enabledActivity;
   }
 
-  public PendingIntent getIntent() {
+  public synchronized PendingIntent getIntent() {
     return intent;
   }
 
-  public IntentFilter[] getFilters() {
+  public synchronized IntentFilter[] getFilters() {
     return filters;
   }
 
-  public String[][] getTechLists() {
+  public synchronized String[][] getTechLists() {
     return techLists;
   }
 
-  public Activity getDisabledActivity() {
+  public synchronized Activity getDisabledActivity() {
     return disabledActivity;
   }
 
   /** Returns last registered callback, or {@code null} if none was set. */
-  public NfcAdapter.CreateNdefMessageCallback getNdefPushMessageCallback() {
+  public synchronized NfcAdapter.CreateNdefMessageCallback getNdefPushMessageCallback() {
     return ndefPushMessageCallback;
   }
 
-  public NfcAdapter.OnNdefPushCompleteCallback getOnNdefPushCompleteCallback() {
+  public synchronized NfcAdapter.OnNdefPushCompleteCallback getOnNdefPushCompleteCallback() {
     return onNdefPushCompleteCallback;
   }
 
   /** Returns last set NDEF message, or throws {@code IllegalStateException} if it was never set. */
-  public NdefMessage getNdefPushMessage() {
+  public synchronized NdefMessage getNdefPushMessage() {
     if (!ndefPushMessageSet) {
       throw new IllegalStateException();
     }
     return ndefPushMessage;
+  }
+
+  // TODO: use NfcAntennaInfo when minimum supported compile SDK is >= android U
+  public synchronized void setNfcAntennaInfo(Object /* NfcAntennaInfo */ nfcAntennaInfo) {
+    this.nfcAntennaInfo = (NfcAntennaInfo) nfcAntennaInfo;
   }
 
   @Resetter
@@ -220,7 +400,9 @@ public class ShadowNfcAdapter {
     }
     if (RuntimeEnvironment.getApiLevel() >= Build.VERSION_CODES.Q) {
       nfcAdapterReflector.setHasNfcFeature(false);
-      nfcAdapterReflector.setHasBeamFeature(false);
+      if (RuntimeEnvironment.getApiLevel() <= TIRAMISU) {
+        nfcAdapterReflector.setHasBeamFeature(false);
+      }
     }
   }
 
@@ -245,5 +427,14 @@ public class ShadowNfcAdapter {
     @Direct
     @Static
     NfcAdapter getNfcAdapter(Context context);
+
+    @Direct
+    @Static
+    NfcAdapter getDefaultAdapter(Context context);
+  }
+
+  @ForType(Tag.class)
+  interface TagReflector {
+    Tag createMockTag(byte[] id, int[] techList, Bundle[] techListExtras, long cookie);
   }
 }

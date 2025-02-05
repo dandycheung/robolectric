@@ -6,18 +6,24 @@ import static android.os.Build.VERSION_CODES.P;
 import android.content.ComponentName;
 import android.service.autofill.FillEventHistory;
 import android.view.autofill.AutofillManager;
-import androidx.annotation.Nullable;
+import javax.annotation.Nullable;
 import org.robolectric.annotation.Implementation;
 import org.robolectric.annotation.Implements;
+import org.robolectric.annotation.Resetter;
 
-/**
- * Robolectric implementation of {@link android.os.AutofillManager}.
- */
+/** Robolectric implementation of {@link AutofillManager}. */
 @Implements(value = AutofillManager.class, minSdk = O)
 public class ShadowAutofillManager {
-  @Nullable private ComponentName autofillServiceComponentName = null;
-  private boolean autofillSupported = false;
-  private boolean enabled = false;
+  @Nullable private static ComponentName autofillServiceComponentName = null;
+  private static boolean autofillSupported = false;
+  private static boolean enabled = false;
+
+  @Resetter
+  public static void reset() {
+    autofillServiceComponentName = null;
+    autofillSupported = false;
+    enabled = false;
+  }
 
   @Implementation
   protected FillEventHistory getFillEventHistory() {
@@ -50,7 +56,7 @@ public class ShadowAutofillManager {
    * AutofillManager#getAutofillServiceComponentName()}.
    */
   public void setAutofillServiceComponentName(@Nullable ComponentName componentName) {
-    this.autofillServiceComponentName = componentName;
+    autofillServiceComponentName = componentName;
   }
 
   /**
@@ -58,7 +64,7 @@ public class ShadowAutofillManager {
    * AutofillManager#isAutofillSupported()}.
    */
   public void setAutofillSupported(boolean supported) {
-    this.autofillSupported = supported;
+    autofillSupported = supported;
   }
 
   /**
@@ -66,6 +72,6 @@ public class ShadowAutofillManager {
    * AutofillManager#isEnabled()}.
    */
   public void setEnabled(boolean enabled) {
-    this.enabled = enabled;
+    ShadowAutofillManager.enabled = enabled;
   }
 }

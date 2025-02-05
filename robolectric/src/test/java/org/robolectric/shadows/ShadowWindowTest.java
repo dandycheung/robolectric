@@ -1,6 +1,5 @@
 package org.robolectric.shadows;
 
-import static android.os.Build.VERSION_CODES.KITKAT;
 import static android.os.Build.VERSION_CODES.LOLLIPOP_MR1;
 import static android.os.Build.VERSION_CODES.M;
 import static android.os.Build.VERSION_CODES.N;
@@ -39,9 +38,12 @@ public class ShadowWindowTest {
     Window window = activity.getWindow();
 
     assertThat(shadowOf(window).getFlag(WindowManager.LayoutParams.FLAG_FULLSCREEN)).isFalse();
-    window.setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN, WindowManager.LayoutParams.FLAG_FULLSCREEN);
+    window.setFlags(
+        WindowManager.LayoutParams.FLAG_FULLSCREEN, WindowManager.LayoutParams.FLAG_FULLSCREEN);
     assertThat(shadowOf(window).getFlag(WindowManager.LayoutParams.FLAG_FULLSCREEN)).isTrue();
-    window.setFlags(WindowManager.LayoutParams.FLAG_ALLOW_LOCK_WHILE_SCREEN_ON, WindowManager.LayoutParams.FLAG_ALLOW_LOCK_WHILE_SCREEN_ON);
+    window.setFlags(
+        WindowManager.LayoutParams.FLAG_ALLOW_LOCK_WHILE_SCREEN_ON,
+        WindowManager.LayoutParams.FLAG_ALLOW_LOCK_WHILE_SCREEN_ON);
     assertThat(shadowOf(window).getFlag(WindowManager.LayoutParams.FLAG_FULLSCREEN)).isTrue();
   }
 
@@ -56,7 +58,7 @@ public class ShadowWindowTest {
 
   @Test
   @Config(minSdk = Q)
-  public void getSystemFlag_shouldReturnFlagsSetViaAddSystemFlags() throws Exception {
+  public void getSystemFlag_shouldReturnFlagsSetViaAddSystemFlags() {
     Activity activity = Robolectric.buildActivity(Activity.class).create().get();
     Window window = activity.getWindow();
     int fakeSystemFlag1 = 0b1;
@@ -68,7 +70,7 @@ public class ShadowWindowTest {
 
   @Test
   @Config(minSdk = Q)
-  public void getSystemFlag_callingAddSystemFlagsShouldNotOverrideExistingFlags() throws Exception {
+  public void getSystemFlag_callingAddSystemFlagsShouldNotOverrideExistingFlags() {
     Activity activity = Robolectric.buildActivity(Activity.class).create().get();
     Window window = activity.getWindow();
     int fakeSystemFlag1 = 0b1;
@@ -81,8 +83,8 @@ public class ShadowWindowTest {
   }
 
   @Test
-  @Config(minSdk = KITKAT, maxSdk = VERSION_CODES.R)
-  public void getSystemFlag_shouldReturnFlagsSetViaAddPrivateFlags() throws Exception {
+  @Config(maxSdk = VERSION_CODES.R)
+  public void getSystemFlag_shouldReturnFlagsSetViaAddPrivateFlags() {
     Activity activity = Robolectric.buildActivity(Activity.class).create().get();
     Window window = activity.getWindow();
     int fakeSystemFlag1 = 0b1;
@@ -93,9 +95,8 @@ public class ShadowWindowTest {
   }
 
   @Test
-  @Config(minSdk = KITKAT, maxSdk = VERSION_CODES.R)
-  public void getSystemFlag_callingAddPrivateFlagsShouldNotOverrideExistingFlags()
-      throws Exception {
+  @Config(maxSdk = VERSION_CODES.R)
+  public void getSystemFlag_callingAddPrivateFlagsShouldNotOverrideExistingFlags() {
     Activity activity = Robolectric.buildActivity(Activity.class).create().get();
     Window window = activity.getWindow();
     int fakeSystemFlag1 = 0b1;
@@ -124,7 +125,8 @@ public class ShadowWindowTest {
     assertThat(shadowWindow.getBackgroundDrawable()).isNull();
 
     window.setBackgroundDrawableResource(R.drawable.btn_star);
-    assertThat(shadowOf(shadowWindow.getBackgroundDrawable()).createdFromResId).isEqualTo(R.drawable.btn_star);
+    assertThat(shadowOf(shadowWindow.getBackgroundDrawable()).createdFromResId)
+        .isEqualTo(R.drawable.btn_star);
   }
 
   @Test
@@ -138,14 +140,16 @@ public class ShadowWindowTest {
     assertThat(shadowWindow.getSoftInputMode()).isEqualTo(7);
   }
 
-  @Test @Config(maxSdk = LOLLIPOP_MR1)
+  @Test
+  @Config(maxSdk = LOLLIPOP_MR1)
   public void forPreM_create_shouldCreateImplPhoneWindow() throws Exception {
     assertThat(
             ShadowWindow.create(ApplicationProvider.getApplicationContext()).getClass().getName())
         .isEqualTo("com.android.internal.policy.impl.PhoneWindow");
   }
 
-  @Test @Config(minSdk = M)
+  @Test
+  @Config(minSdk = M)
   public void forM_create_shouldCreatePhoneWindow() throws Exception {
     assertThat(
             ShadowWindow.create(ApplicationProvider.getApplicationContext()).getClass().getName())

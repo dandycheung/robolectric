@@ -1,12 +1,15 @@
 package org.robolectric.shadows;
 
+import static android.os.Build.VERSION_CODES.TIRAMISU;
 import static com.google.common.truth.Truth.assertThat;
 
+import android.os.Process;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.robolectric.annotation.Config;
 
 /** Test ShadowProcess */
 @RunWith(AndroidJUnit4.class)
@@ -85,16 +88,8 @@ public class ShadowProcessTest {
     AtomicInteger tid1 = new AtomicInteger(0);
     AtomicInteger tid2 = new AtomicInteger(0);
 
-    Thread thread1 =
-        new Thread(
-            () -> {
-              tid1.set(android.os.Process.myTid());
-            });
-    Thread thread2 =
-        new Thread(
-            () -> {
-              tid2.set(android.os.Process.myTid());
-            });
+    Thread thread1 = new Thread(() -> tid1.set(Process.myTid()));
+    Thread thread2 = new Thread(() -> tid2.set(Process.myTid()));
     thread1.start();
     thread2.start();
     thread1.join();
@@ -120,7 +115,7 @@ public class ShadowProcessTest {
   public void getThreadPriority_currentThread_returnsCurrentThreadPriority() {
     android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_AUDIO);
 
-    assertThat(android.os.Process.getThreadPriority(/*tid=*/ 0))
+    assertThat(android.os.Process.getThreadPriority(/* tid= */ 0))
         .isEqualTo(android.os.Process.THREAD_PRIORITY_AUDIO);
   }
 
@@ -147,5 +142,22 @@ public class ShadowProcessTest {
     assertThat(android.os.Process.getThreadPriority(android.os.Process.myTid()))
         .isEqualTo(THREAD_PRIORITY_LOWEST);
   }
-}
 
+  @Test
+  @Config(minSdk = TIRAMISU)
+  public void shouldGetProcessNameAsSet() {
+    ShadowProcess.setProcessName("com.foo.bar:baz");
+
+    assertThat(android.os.Process.myProcessName()).isEqualTo("com.foo.bar:baz");
+  }
+
+  @Test
+  @Config(minSdk = TIRAMISU)
+  public void shouldGetProcessNameAsEmptyAfterReset() {
+    ShadowProcess.setProcessName("com.foo.bar:baz");
+
+    ShadowProcess.reset();
+
+    assertThat(android.os.Process.myProcessName()).isEmpty();
+  }
+}

@@ -3,6 +3,12 @@ package org.robolectric.shadows;
 import android.os.Parcel;
 import android.os.Parcelable;
 
+/**
+ * This class is intentionally package private to verify that Robolectric is able to parcel
+ * non-public classes.
+ *
+ * <p>DO NOT CHANGE TO PUBLIC.
+ */
 class TestParcelablePackage implements Parcelable {
   int contents;
 

@@ -2,7 +2,6 @@ package org.robolectric.res.android;
 
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableMap;
-import com.google.common.collect.ImmutableMap.Builder;
 import com.google.common.primitives.UnsignedBytes;
 import java.util.Map;
 
@@ -24,9 +23,10 @@ public enum DataType {
   FRACTION(0x06),
   /** {@code data} holds a dynamic {@link ResourceTableChunk} entry reference. */
   DYNAMIC_REFERENCE(0x07),
-  /** {@code data} holds an attribute resource identifier, which needs to be resolved
-    * before it can be used like a TYPE_ATTRIBUTE.
-    */
+  /**
+   * {@code data} holds an attribute resource identifier, which needs to be resolved before it can
+   * be used like a TYPE_ATTRIBUTE.
+   */
   DYNAMIC_ATTRIBUTE(0x08),
   /** {@code data} is a raw integer value of the form n..n. */
   INT_DEC(0x10),
@@ -51,7 +51,7 @@ public enum DataType {
   private static final Map<Byte, DataType> FROM_BYTE;
 
   static {
-    Builder<Byte, DataType> builder = ImmutableMap.builder();
+    ImmutableMap.Builder<Byte, DataType> builder = ImmutableMap.builder();
     for (DataType type : values()) {
       builder.put(type.code(), type);
     }
@@ -71,6 +71,8 @@ public enum DataType {
   }
 
   public static DataType fromCode(byte code) {
-    return Preconditions.checkNotNull(FROM_BYTE.get(code), "Unknown resource type: %s", code);
+    DataType type = FROM_BYTE.get(code);
+    Preconditions.checkArgument(type != null, "Unknown resource type: %s", code);
+    return type;
   }
 }

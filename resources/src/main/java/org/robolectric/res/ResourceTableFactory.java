@@ -56,7 +56,7 @@ public class ResourceTableFactory {
   }
 
   private void addRClassValues(PackageResourceTable resourceTable, Class<?> rClass) {
-    for (Class innerClass : rClass.getClasses()) {
+    for (Class<?> innerClass : rClass.getClasses()) {
       String resourceType = innerClass.getSimpleName();
       if (!resourceType.equals("styleable")) {
         for (Field field : innerClass.getDeclaredFields()) {
@@ -83,11 +83,12 @@ public class ResourceTableFactory {
   }
 
   /**
-   * Check the stylable elements. Not for aapt generated R files but for framework R files it is possible to
-   * have attributes in the styleable array for which there is no corresponding R.attr field.
+   * Check the stylable elements. Not for aapt generated R files but for framework R files it is
+   * possible to have attributes in the styleable array for which there is no corresponding R.attr
+   * field.
    */
   private void addMissingStyleableAttributes(PackageResourceTable resourceTable, Class<?> rClass) {
-    for (Class innerClass : rClass.getClasses()) {
+    for (Class<?> innerClass : rClass.getClasses()) {
       if (innerClass.getSimpleName().equals("styleable")) {
         String styleableName = null; // Current styleable name
         int[] styleableArray = null; // Current styleable value array or references
@@ -95,11 +96,12 @@ public class ResourceTableFactory {
           if (field.getType().equals(int[].class) && Modifier.isStatic(field.getModifiers())) {
             styleableName = field.getName();
             try {
-              styleableArray = (int[]) (field.get(null));
+              styleableArray = (int[]) field.get(null);
             } catch (IllegalAccessException e) {
               throw new RuntimeException(e);
             }
-          } else if (field.getType().equals(Integer.TYPE) && Modifier.isStatic(field.getModifiers())) {
+          } else if (field.getType().equals(Integer.TYPE)
+              && Modifier.isStatic(field.getModifiers())) {
             String attributeName = field.getName().substring(styleableName.length() + 1);
             try {
               int styleableIndex = field.getInt(null);

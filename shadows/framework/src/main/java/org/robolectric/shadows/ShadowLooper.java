@@ -41,7 +41,9 @@ public abstract class ShadowLooper {
     return Shadow.extract(looper);
   }
 
-  /** @deprecated Use {@code shadowOf({@link Looper#getMainLooper()})} instead. */
+  /**
+   * @deprecated Use {@code shadowOf({@link Looper#getMainLooper()})} instead.
+   */
   @Deprecated
   public static ShadowLooper getShadowMainLooper() {
     return shadowLooper(getMainLooper());
@@ -100,7 +102,7 @@ public abstract class ShadowLooper {
    * Pauses execution of tasks posted to the ShadowLegacyLooper. This means that during tests, tasks
    * sent to the looper will not execute immediately, but will be queued in a way that is similar to
    * how a real looper works. These queued tasks must be executed explicitly by calling {@link
-   * #runToEndOftasks} or a similar method, otherwise they will not run at all before your test
+   * #runToEndOfTasks()} or a similar method, otherwise they will not run at all before your test
    * ends.
    *
    * @param looper the looper to pause
@@ -147,7 +149,9 @@ public abstract class ShadowLooper {
     getShadowMainLooper().idle();
   }
 
-  /** @deprecated Use {@link #idleMainLooper(long, TimeUnit)}. */
+  /**
+   * @deprecated Use {@link #idleMainLooper(long, TimeUnit)}.
+   */
   @InlineMe(
       replacement = "ShadowLooper.idleMainLooper(interval, MILLISECONDS)",
       imports = "org.robolectric.shadows.ShadowLooper",
@@ -222,7 +226,7 @@ public abstract class ShadowLooper {
   /** Returns true if there are no pending tasks scheduled to be executed before current time. */
   public abstract boolean isIdle();
 
-  /** Not supported for the main Looper in {@link LooperMode.Mode.PAUSED}. */
+  /** Not supported for the main Looper in {@link LooperMode.Mode#PAUSED}. */
   public abstract void unPause();
 
   public abstract boolean isPaused();
@@ -230,11 +234,11 @@ public abstract class ShadowLooper {
   /**
    * Control the paused state of the Looper.
    *
-   * <p>Not supported for the main Looper in {@link LooperMode.Mode.PAUSED}.
+   * <p>Not supported for the main Looper in {@link LooperMode.Mode#PAUSED}.
    */
   public abstract boolean setPaused(boolean shouldPause);
 
-  /** Only supported for {@link LooperMode.Mode.LEGACY}. */
+  /** Only supported for {@link LooperMode.Mode#LEGACY}. */
   public abstract void resetScheduler();
 
   /** Causes all enqueued tasks to be discarded, and pause state to be reset */
@@ -244,7 +248,7 @@ public abstract class ShadowLooper {
    * Returns the {@link org.robolectric.util.Scheduler} that is being used to manage the enqueued
    * tasks. This scheduler is managed by the Looper's associated queue.
    *
-   * <p>Only supported for {@link LooperMode.Mode.LEGACY}.
+   * <p>Only supported for {@link LooperMode.Mode#LEGACY}.
    *
    * @return the {@link org.robolectric.util.Scheduler} that is being used to manage the enqueued
    *     tasks.

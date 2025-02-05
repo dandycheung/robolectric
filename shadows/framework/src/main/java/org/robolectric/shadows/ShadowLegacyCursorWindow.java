@@ -1,9 +1,6 @@
 package org.robolectric.shadows;
 
-import static android.os.Build.VERSION_CODES.KITKAT_WATCH;
-import static android.os.Build.VERSION_CODES.LOLLIPOP;
 import static java.nio.charset.StandardCharsets.UTF_8;
-import static org.robolectric.RuntimeEnvironment.castNativePtr;
 
 import android.database.Cursor;
 import android.database.CursorWindow;
@@ -20,32 +17,22 @@ import java.util.concurrent.atomic.AtomicLong;
 import org.robolectric.annotation.Implementation;
 import org.robolectric.annotation.Implements;
 
-/** Legacy shadow for {@link CursowWindow}. */
+/** Legacy shadow for {@link CursorWindow}. */
 @Implements(value = CursorWindow.class, isInAndroidSdk = false)
 public class ShadowLegacyCursorWindow extends ShadowCursorWindow {
   private static final WindowData WINDOW_DATA = new WindowData();
 
   @Implementation
-  protected static Number nativeCreate(String name, int cursorWindowSize) {
-    return castNativePtr(WINDOW_DATA.create(name, cursorWindowSize));
+  protected static long nativeCreate(String name, int cursorWindowSize) {
+    return WINDOW_DATA.create(name, cursorWindowSize);
   }
 
-  @Implementation(maxSdk = KITKAT_WATCH)
-  protected static void nativeDispose(int windowPtr) {
-    nativeDispose((long) windowPtr);
-  }
-
-  @Implementation(minSdk = LOLLIPOP)
+  @Implementation
   protected static void nativeDispose(long windowPtr) {
     WINDOW_DATA.close(windowPtr);
   }
 
-  @Implementation(maxSdk = KITKAT_WATCH)
-  protected static byte[] nativeGetBlob(int windowPtr, int row, int column) {
-    return nativeGetBlob((long) windowPtr, row, column);
-  }
-
-  @Implementation(minSdk = LOLLIPOP)
+  @Implementation
   protected static byte[] nativeGetBlob(long windowPtr, int row, int column) {
     Value value = WINDOW_DATA.get(windowPtr).value(row, column);
 
@@ -54,8 +41,8 @@ public class ShadowLegacyCursorWindow extends ShadowCursorWindow {
         return null;
       case Cursor.FIELD_TYPE_BLOB:
         // This matches Android's behavior, which does not match the SQLite spec
-        byte[] blob = (byte[])value.value;
-        return blob == null ? new byte[]{} : blob;
+        byte[] blob = (byte[]) value.value;
+        return blob == null ? new byte[] {} : blob;
       case Cursor.FIELD_TYPE_STRING:
         // Matches the Android behavior to contain a zero-byte at the end
         byte[] stringBytes = ((String) value.value).getBytes(UTF_8);
@@ -66,12 +53,7 @@ public class ShadowLegacyCursorWindow extends ShadowCursorWindow {
     }
   }
 
-  @Implementation(maxSdk = KITKAT_WATCH)
-  protected static String nativeGetString(int windowPtr, int row, int column) {
-    return nativeGetString((long) windowPtr, row, column);
-  }
-
-  @Implementation(minSdk = LOLLIPOP)
+  @Implementation
   protected static String nativeGetString(long windowPtr, int row, int column) {
     Value val = WINDOW_DATA.get(windowPtr).value(row, column);
     if (val.type == Cursor.FIELD_TYPE_BLOB) {
@@ -82,136 +64,81 @@ public class ShadowLegacyCursorWindow extends ShadowCursorWindow {
     return value == null ? null : String.valueOf(value);
   }
 
-  @Implementation(maxSdk = KITKAT_WATCH)
-  protected static long nativeGetLong(int windowPtr, int row, int column) {
-    return nativeGetLong((long) windowPtr, row, column);
-  }
-
-  @Implementation(minSdk = LOLLIPOP)
+  @Implementation
   protected static long nativeGetLong(long windowPtr, int row, int column) {
     return nativeGetNumber(windowPtr, row, column).longValue();
   }
 
-  @Implementation(maxSdk = KITKAT_WATCH)
-  protected static double nativeGetDouble(int windowPtr, int row, int column) {
-    return nativeGetDouble((long) windowPtr, row, column);
-  }
-
-  @Implementation(minSdk = LOLLIPOP)
+  @Implementation
   protected static double nativeGetDouble(long windowPtr, int row, int column) {
     return nativeGetNumber(windowPtr, row, column).doubleValue();
   }
 
-  @Implementation(maxSdk = KITKAT_WATCH)
-  protected static int nativeGetType(int windowPtr, int row, int column) {
-    return nativeGetType((long) windowPtr, row, column);
-  }
-
-  @Implementation(minSdk = LOLLIPOP)
+  @Implementation
   protected static int nativeGetType(long windowPtr, int row, int column) {
     return WINDOW_DATA.get(windowPtr).value(row, column).type;
   }
 
-  @Implementation(maxSdk = KITKAT_WATCH)
-  protected static void nativeClear(int windowPtr) {
-    nativeClear((long) windowPtr);
-  }
-
-  @Implementation(minSdk = LOLLIPOP)
+  @Implementation
   protected static void nativeClear(long windowPtr) {
     WINDOW_DATA.clear(windowPtr);
   }
 
-  @Implementation(maxSdk = KITKAT_WATCH)
-  protected static int nativeGetNumRows(int windowPtr) {
-    return nativeGetNumRows((long) windowPtr);
-  }
-
-  @Implementation(minSdk = LOLLIPOP)
+  @Implementation
   protected static int nativeGetNumRows(long windowPtr) {
     return WINDOW_DATA.get(windowPtr).numRows();
   }
 
-  @Implementation(maxSdk = KITKAT_WATCH)
-  protected static boolean nativePutBlob(int windowPtr, byte[] value, int row, int column) {
-    return nativePutBlob((long) windowPtr, value, row, column);
-  }
-
-  @Implementation(minSdk = LOLLIPOP)
+  @Implementation
   protected static boolean nativePutBlob(long windowPtr, byte[] value, int row, int column) {
     // Real Android will crash in native code if putString is called with a null value.
     Preconditions.checkNotNull(value);
-    return WINDOW_DATA.get(windowPtr).putValue(new Value(value, Cursor.FIELD_TYPE_BLOB), row, column);
+    return WINDOW_DATA
+        .get(windowPtr)
+        .putValue(new Value(value, Cursor.FIELD_TYPE_BLOB), row, column);
   }
 
-  @Implementation(maxSdk = KITKAT_WATCH)
-  protected static boolean nativePutString(int windowPtr, String value, int row, int column) {
-    return nativePutString((long) windowPtr, value, row, column);
-  }
-
-  @Implementation(minSdk = LOLLIPOP)
+  @Implementation
   protected static boolean nativePutString(long windowPtr, String value, int row, int column) {
     // Real Android will crash in native code if putString is called with a null value.
     Preconditions.checkNotNull(value);
-    return WINDOW_DATA.get(windowPtr).putValue(new Value(value, Cursor.FIELD_TYPE_STRING), row, column);
+    return WINDOW_DATA
+        .get(windowPtr)
+        .putValue(new Value(value, Cursor.FIELD_TYPE_STRING), row, column);
   }
 
-  @Implementation(maxSdk = KITKAT_WATCH)
-  protected static boolean nativePutLong(int windowPtr, long value, int row, int column) {
-    return nativePutLong((long) windowPtr, value, row, column);
-  }
-
-  @Implementation(minSdk = LOLLIPOP)
+  @Implementation
   protected static boolean nativePutLong(long windowPtr, long value, int row, int column) {
-    return WINDOW_DATA.get(windowPtr).putValue(new Value(value, Cursor.FIELD_TYPE_INTEGER), row, column);
+    return WINDOW_DATA
+        .get(windowPtr)
+        .putValue(new Value(value, Cursor.FIELD_TYPE_INTEGER), row, column);
   }
 
-  @Implementation(maxSdk = KITKAT_WATCH)
-  protected static boolean nativePutDouble(int windowPtr, double value, int row, int column) {
-    return nativePutDouble((long) windowPtr, value, row, column);
-  }
-
-  @Implementation(minSdk = LOLLIPOP)
+  @Implementation
   protected static boolean nativePutDouble(long windowPtr, double value, int row, int column) {
-    return WINDOW_DATA.get(windowPtr).putValue(new Value(value, Cursor.FIELD_TYPE_FLOAT), row, column);
+    return WINDOW_DATA
+        .get(windowPtr)
+        .putValue(new Value(value, Cursor.FIELD_TYPE_FLOAT), row, column);
   }
 
-  @Implementation(maxSdk = KITKAT_WATCH)
-  protected static boolean nativePutNull(int windowPtr, int row, int column) {
-    return nativePutNull((long) windowPtr, row, column);
-  }
-
-  @Implementation(minSdk = LOLLIPOP)
+  @Implementation
   protected static boolean nativePutNull(long windowPtr, int row, int column) {
-    return WINDOW_DATA.get(windowPtr).putValue(new Value(null, Cursor.FIELD_TYPE_NULL), row, column);
+    return WINDOW_DATA
+        .get(windowPtr)
+        .putValue(new Value(null, Cursor.FIELD_TYPE_NULL), row, column);
   }
 
-  @Implementation(maxSdk = KITKAT_WATCH)
-  protected static boolean nativeAllocRow(int windowPtr) {
-    return nativeAllocRow((long) windowPtr);
-  }
-
-  @Implementation(minSdk = LOLLIPOP)
+  @Implementation
   protected static boolean nativeAllocRow(long windowPtr) {
     return WINDOW_DATA.get(windowPtr).allocRow();
   }
 
-  @Implementation(maxSdk = KITKAT_WATCH)
-  protected static boolean nativeSetNumColumns(int windowPtr, int columnNum) {
-    return nativeSetNumColumns((long) windowPtr, columnNum);
-  }
-
-  @Implementation(minSdk = LOLLIPOP)
+  @Implementation
   protected static boolean nativeSetNumColumns(long windowPtr, int columnNum) {
     return WINDOW_DATA.get(windowPtr).setNumColumns(columnNum);
   }
 
-  @Implementation(maxSdk = KITKAT_WATCH)
-  protected static String nativeGetName(int windowPtr) {
-    return nativeGetName((long) windowPtr);
-  }
-
-  @Implementation(minSdk = LOLLIPOP)
+  @Implementation
   protected static String nativeGetName(long windowPtr) {
     return WINDOW_DATA.get(windowPtr).getName();
   }
@@ -229,17 +156,18 @@ public class ShadowLegacyCursorWindow extends ShadowCursorWindow {
       case Cursor.FIELD_TYPE_INTEGER:
       case Cursor.FIELD_TYPE_FLOAT:
         return (Number) value.value;
-      case Cursor.FIELD_TYPE_STRING: {
-        try {
-          return Double.parseDouble((String) value.value);
-        } catch (NumberFormatException e) {
-          return 0;
+      case Cursor.FIELD_TYPE_STRING:
+        {
+          try {
+            return Double.parseDouble((String) value.value);
+          } catch (NumberFormatException e) {
+            return 0;
+          }
         }
-      }
       case Cursor.FIELD_TYPE_BLOB:
-        throw new android.database.sqlite.SQLiteException("could not convert "+value);
+        throw new android.database.sqlite.SQLiteException("could not convert " + value);
       default:
-        throw new android.database.sqlite.SQLiteException("unknown type: "+value.type);
+        throw new android.database.sqlite.SQLiteException("unknown type: " + value.type);
     }
   }
 
@@ -250,7 +178,7 @@ public class ShadowLegacyCursorWindow extends ShadowCursorWindow {
 
     public Data(String name, int cursorWindowSize) {
       this.name = name;
-      this.rows = new ArrayList<Row>();
+      this.rows = new ArrayList<>();
     }
 
     public Value value(int rowN, int colN) {
@@ -270,8 +198,8 @@ public class ShadowLegacyCursorWindow extends ShadowCursorWindow {
     }
 
     public void fillWith(SQLiteStatement stmt) throws SQLiteException {
-      //Android caches results in the WindowedCursor to allow moveToPrevious() to function.
-      //Robolectric will have to cache the results too. In the rows list.
+      // Android caches results in the WindowedCursor to allow moveToPrevious() to function.
+      // Robolectric will have to cache the results too. In the rows list.
       while (stmt.step()) {
         rows.add(fillRowValues(stmt));
       }
@@ -279,11 +207,16 @@ public class ShadowLegacyCursorWindow extends ShadowCursorWindow {
 
     private static int cursorValueType(final int sqliteType) {
       switch (sqliteType) {
-        case SQLiteConstants.SQLITE_NULL:    return Cursor.FIELD_TYPE_NULL;
-        case SQLiteConstants.SQLITE_INTEGER: return Cursor.FIELD_TYPE_INTEGER;
-        case SQLiteConstants.SQLITE_FLOAT:   return Cursor.FIELD_TYPE_FLOAT;
-        case SQLiteConstants.SQLITE_TEXT:    return Cursor.FIELD_TYPE_STRING;
-        case SQLiteConstants.SQLITE_BLOB:    return Cursor.FIELD_TYPE_BLOB;
+        case SQLiteConstants.SQLITE_NULL:
+          return Cursor.FIELD_TYPE_NULL;
+        case SQLiteConstants.SQLITE_INTEGER:
+          return Cursor.FIELD_TYPE_INTEGER;
+        case SQLiteConstants.SQLITE_FLOAT:
+          return Cursor.FIELD_TYPE_FLOAT;
+        case SQLiteConstants.SQLITE_TEXT:
+          return Cursor.FIELD_TYPE_STRING;
+        case SQLiteConstants.SQLITE_BLOB:
+          return Cursor.FIELD_TYPE_BLOB;
         default:
           throw new IllegalArgumentException(
               "Bad SQLite type " + sqliteType + ". See possible values in SQLiteConstants.");
@@ -322,8 +255,8 @@ public class ShadowLegacyCursorWindow extends ShadowCursorWindow {
     private final List<Value> values;
 
     public Row(int length) {
-      values = new ArrayList<Value>(length);
-      for (int i=0; i<length; i++) {
+      values = new ArrayList<>(length);
+      for (int i = 0; i < length; i++) {
         values.add(new Value(null, Cursor.FIELD_TYPE_NULL));
       }
     }
@@ -390,5 +323,6 @@ public class ShadowLegacyCursorWindow extends ShadowCursorWindow {
   // private static native int nativeCreateFromParcel(Parcel parcel);
   // private static native void nativeWriteToParcel($ptrClass windowPtr, Parcel parcel);
   // private static native void nativeFreeLastRow($ptrClass windowPtr);
-  // private static native void nativeCopyStringToBuffer($ptrClass windowPtr, int row, int column, CharArrayBuffer buffer);
+  // private static native void nativeCopyStringToBuffer($ptrClass windowPtr, int row, int column,
+  // CharArrayBuffer buffer);
 }

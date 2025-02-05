@@ -3,21 +3,34 @@ package org.robolectric.android;
 import android.content.res.AssetManager;
 import android.content.res.Configuration;
 import android.content.res.Resources;
-import android.os.Build;
-import android.os.Build.VERSION_CODES;
 import android.util.DisplayMetrics;
-import org.robolectric.RuntimeEnvironment;
 import org.robolectric.res.Qualifiers;
+import org.robolectric.shadows.ShadowDateUtils;
 import org.robolectric.shadows.ShadowDisplayManager;
-import org.robolectric.shadows.ShadowWindowManagerImpl;
+import org.robolectric.shadows.ShadowDisplayManagerGlobal;
 
 public class Bootstrap {
 
   private static Configuration configuration = new Configuration();
   private static DisplayMetrics displayMetrics = new DisplayMetrics();
   private static Resources displayResources;
+
   /** internal only */
   public static boolean displaySet = false;
+
+  public static Configuration getConfiguration() {
+    if (displayResources != null) {
+      return displayResources.getConfiguration();
+    }
+    return Bootstrap.configuration;
+  }
+
+  public static DisplayMetrics getDisplayMetrics() {
+    if (displayResources != null) {
+      return displayResources.getDisplayMetrics();
+    }
+    return Bootstrap.displayMetrics;
+  }
 
   /** internal only */
   public static void setDisplayConfiguration(
@@ -28,6 +41,10 @@ public class Bootstrap {
 
   /** internal only */
   public static void resetDisplayConfiguration() {
+    // This is called to avoid the configureDefaultDisplay should only be called once exception that
+    // occurs if ShadowDisplayManagerGlobal is not properly reset during resetter.
+    ShadowDisplayManagerGlobal.reset();
+
     configuration = new Configuration();
     displayMetrics = new DisplayMetrics();
     displayResources = null;
@@ -46,24 +63,10 @@ public class Bootstrap {
   }
 
   /** internal only */
-  public static void updateConfiguration(Resources resources) {
-    if (displayResources == null) {
-      resources.updateConfiguration(Bootstrap.configuration, Bootstrap.displayMetrics);
-    } else {
-      resources.updateConfiguration(
-          displayResources.getConfiguration(), displayResources.getDisplayMetrics());
-    }
-  }
-
-  /** internal only */
   public static void setUpDisplay() {
     if (!displaySet) {
       displaySet = true;
-      if (Build.VERSION.SDK_INT == VERSION_CODES.JELLY_BEAN) {
-        ShadowWindowManagerImpl.configureDefaultDisplayForJBOnly(configuration, displayMetrics);
-      } else {
-        ShadowDisplayManager.configureDefaultDisplay(configuration, displayMetrics);
-      }
+      ShadowDisplayManager.configureDefaultDisplay(configuration, displayMetrics);
     }
   }
 
@@ -100,17 +103,7 @@ public class Bootstrap {
 
     DeviceConfig.applyRules(configuration, displayMetrics, apiLevel);
 
-    fixJellyBean(configuration, displayMetrics);
-  }
-
-  private static void fixJellyBean(Configuration configuration, DisplayMetrics displayMetrics) {
-    if (RuntimeEnvironment.getApiLevel() < Build.VERSION_CODES.KITKAT) {
-      int widthPx = (int) (configuration.screenWidthDp * displayMetrics.density);
-      int heightPx = (int) (configuration.screenHeightDp * displayMetrics.density);
-      displayMetrics.widthPixels = displayMetrics.noncompatWidthPixels = widthPx;
-      displayMetrics.heightPixels = displayMetrics.noncompatHeightPixels = heightPx;
-      displayMetrics.xdpi = displayMetrics.noncompatXdpi = displayMetrics.densityDpi;
-      displayMetrics.ydpi = displayMetrics.noncompatYdpi = displayMetrics.densityDpi;
-    }
+    // DateUtils has a static cache of the last Configuration, so it may need to be reset.
+    ShadowDateUtils.resetLastConfig();
   }
 }

@@ -1,10 +1,9 @@
 package org.robolectric.shadows;
 
-import static android.os.Build.VERSION_CODES.LOLLIPOP;
 import static android.os.Build.VERSION_CODES.M;
 import static android.os.Build.VERSION_CODES.Q;
 
-import android.annotation.TargetApi;
+import android.annotation.RequiresApi;
 import android.media.MediaCodecInfo;
 import android.media.MediaCodecList;
 import java.util.ArrayList;
@@ -23,7 +22,7 @@ import org.robolectric.util.ReflectionHelpers;
  * <p>Custom {@link MediaCodecInfo} can be created using {@link MediaCodecInfoBuilder} and added to
  * the list of codecs via {@link #addCodec}.
  */
-@Implements(value = MediaCodecList.class, minSdk = LOLLIPOP)
+@Implements(value = MediaCodecList.class)
 public class ShadowMediaCodecList {
 
   private static final List<MediaCodecInfo> mediaCodecInfos =
@@ -35,7 +34,7 @@ public class ShadowMediaCodecList {
    * @param mediaCodecInfo {@link MediaCodecInfo} describing the codec. Use {@link
    *     MediaCodecInfoBuilder} to create an instance of it.
    */
-  @TargetApi(Q)
+  @RequiresApi(Q)
   public static void addCodec(MediaCodecInfo mediaCodecInfo) {
     mediaCodecInfos.add(mediaCodecInfo);
   }

@@ -1,8 +1,8 @@
 package org.robolectric.shadows;
 
-import static android.os.Build.VERSION_CODES.LOLLIPOP;
 import static android.os.Build.VERSION_CODES.LOLLIPOP_MR1;
 import static android.os.Build.VERSION_CODES.M;
+import static android.os.Build.VERSION_CODES.R;
 
 import android.net.Network;
 import java.io.FileDescriptor;
@@ -16,7 +16,7 @@ import org.robolectric.annotation.RealObject;
 import org.robolectric.shadow.api.Shadow;
 import org.robolectric.util.ReflectionHelpers;
 
-@Implements(value = Network.class, minSdk = LOLLIPOP)
+@Implements(value = Network.class)
 public class ShadowNetwork {
 
   @RealObject private Network realObject;
@@ -74,8 +74,8 @@ public class ShadowNetwork {
   }
 
   /**
-   * Simulates a socket bind. isSocketBound can be called to verify that the fd was bound to
-   * this network interface, and boundSocketCount() will increment for any unique socket.
+   * Simulates a socket bind. isSocketBound can be called to verify that the fd was bound to this
+   * network interface, and boundSocketCount() will increment for any unique socket.
    */
   @Implementation(minSdk = M)
   protected void bindSocket(FileDescriptor fd) {
@@ -87,6 +87,7 @@ public class ShadowNetwork {
    *
    * @return The netId.
    */
+  @Implementation(minSdk = R)
   public int getNetId() {
     return ReflectionHelpers.getField(realObject, "netId");
   }

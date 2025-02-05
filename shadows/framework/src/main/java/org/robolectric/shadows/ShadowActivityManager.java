@@ -1,9 +1,6 @@
 package org.robolectric.shadows;
 
 import static android.app.ActivityManager.RunningAppProcessInfo.IMPORTANCE_GONE;
-import static android.os.Build.VERSION_CODES.JELLY_BEAN_MR1;
-import static android.os.Build.VERSION_CODES.KITKAT;
-import static android.os.Build.VERSION_CODES.LOLLIPOP;
 import static android.os.Build.VERSION_CODES.M;
 import static android.os.Build.VERSION_CODES.O;
 import static android.os.Build.VERSION_CODES.P;
@@ -11,6 +8,7 @@ import static android.os.Build.VERSION_CODES.R;
 import static java.util.stream.Collectors.toCollection;
 import static org.robolectric.util.reflector.Reflector.reflector;
 
+import android.annotation.RequiresApi;
 import android.annotation.RequiresPermission;
 import android.app.ActivityManager;
 import android.app.ApplicationExitInfo;
@@ -26,14 +24,16 @@ import android.os.Process;
 import android.os.UserHandle;
 import android.util.ArrayMap;
 import android.util.SparseIntArray;
-import androidx.annotation.RequiresApi;
 import com.google.common.base.Preconditions;
+import com.google.errorprone.annotations.CanIgnoreReturnValue;
+import java.io.InputStream;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import org.robolectric.RuntimeEnvironment;
+import org.robolectric.annotation.ClassName;
 import org.robolectric.annotation.HiddenApi;
 import org.robolectric.annotation.Implementation;
 import org.robolectric.annotation.Implements;
@@ -46,23 +46,26 @@ import org.robolectric.util.reflector.Direct;
 import org.robolectric.util.reflector.ForType;
 
 /** Shadow for {@link android.app.ActivityManager} */
-@Implements(value = ActivityManager.class, looseSignatures = true)
+@Implements(value = ActivityManager.class)
 public class ShadowActivityManager {
   private int memoryClass = 16;
-  private String backgroundPackage;
-  private ActivityManager.MemoryInfo memoryInfo;
-  private final List<ActivityManager.AppTask> appTasks = new CopyOnWriteArrayList<>();
-  private final List<ActivityManager.RunningTaskInfo> tasks = new CopyOnWriteArrayList<>();
-  private final List<ActivityManager.RunningServiceInfo> services = new CopyOnWriteArrayList<>();
+  private static String backgroundPackage;
+  private static ActivityManager.MemoryInfo memoryInfo;
+  private static final List<ActivityManager.AppTask> appTasks = new CopyOnWriteArrayList<>();
+  private static final List<ActivityManager.RecentTaskInfo> recentTasks =
+      new CopyOnWriteArrayList<>();
+  private static final List<ActivityManager.RunningTaskInfo> tasks = new CopyOnWriteArrayList<>();
+  private static final List<ActivityManager.RunningServiceInfo> services =
+      new CopyOnWriteArrayList<>();
   private static final List<ActivityManager.RunningAppProcessInfo> processes =
       new CopyOnWriteArrayList<>();
-  private final List<ImportanceListener> importanceListeners = new CopyOnWriteArrayList<>();
-  private final SparseIntArray uidImportances = new SparseIntArray();
+  private static final List<ImportanceListener> importanceListeners = new CopyOnWriteArrayList<>();
+  private static final SparseIntArray uidImportances = new SparseIntArray();
   @RealObject private ActivityManager realObject;
-  private Boolean isLowRamDeviceOverride = null;
+  private static Boolean isLowRamDeviceOverride = null;
   private int lockTaskModeState = ActivityManager.LOCK_TASK_MODE_NONE;
   private boolean isBackgroundRestricted;
-  private final Deque<Object> appExitInfoList = new ArrayDeque<>();
+  private static final Deque<Object> appExitInfoList = new ArrayDeque<>();
   private ConfigurationInfo configurationInfo;
   private Context context;
 
@@ -91,7 +94,7 @@ public class ShadowActivityManager {
     return false;
   }
 
-  @Implementation(minSdk = JELLY_BEAN_MR1)
+  @Implementation
   @HiddenApi
   @RequiresPermission(
       anyOf = {
@@ -114,9 +117,22 @@ public class ShadowActivityManager {
    * @see #setAppTasks(List)
    * @return List of current AppTask.
    */
-  @Implementation(minSdk = LOLLIPOP)
+  @Implementation
   protected List<ActivityManager.AppTask> getAppTasks() {
     return appTasks;
+  }
+
+  /**
+   * For tests, returns the list of {@link android.app.ActivityManager.RecentTaskInfo} set using
+   * {@link #setAppTasks(List)} with at most {@code maxNum} tasks. Returns empty list if nothing is
+   * set {@code flags} is ignored.
+   *
+   * @see #setAppTasks(List)
+   * @return List of current AppTask.
+   */
+  @Implementation
+  protected List<ActivityManager.RecentTaskInfo> getRecentTasks(int maxNum, int flags) {
+    return recentTasks.size() > maxNum ? recentTasks.subList(0, maxNum) : recentTasks;
   }
 
   @Implementation
@@ -156,7 +172,7 @@ public class ShadowActivityManager {
   }
 
   @HiddenApi
-  @Implementation(minSdk = JELLY_BEAN_MR1)
+  @Implementation
   protected boolean switchUser(int userid) {
     ShadowUserManager shadowUserManager =
         Shadow.extract(context.getSystemService(Context.USER_SERVICE));
@@ -197,48 +213,71 @@ public class ShadowActivityManager {
     this.configurationInfo = configurationInfo;
   }
 
-  /** @param tasks List of running tasks. */
+  /**
+   * @param tasks List of running tasks.
+   */
   public void setTasks(List<ActivityManager.RunningTaskInfo> tasks) {
-    this.tasks.clear();
-    this.tasks.addAll(tasks);
+    ShadowActivityManager.tasks.clear();
+    ShadowActivityManager.tasks.addAll(tasks);
   }
 
   /**
    * Sets the values to be returned by {@link #getAppTasks()}.
    *
    * @see #getAppTasks()
-   * @param tasks List of app tasks.
+   * @param appTasks List of app tasks.
    */
   public void setAppTasks(List<ActivityManager.AppTask> appTasks) {
-    this.appTasks.clear();
-    this.appTasks.addAll(appTasks);
+    ShadowActivityManager.appTasks.clear();
+    ShadowActivityManager.appTasks.addAll(appTasks);
   }
 
-  /** @param services List of running services. */
+  /**
+   * Sets the values to be returned by {@link #getRecentTasks(int, int)}.
+   *
+   * @see #getRecentTasks(int, int)
+   * @param recentTasks List of recent tasks.
+   */
+  public void setRecentTasks(List<ActivityManager.RecentTaskInfo> recentTasks) {
+    ShadowActivityManager.recentTasks.clear();
+    ShadowActivityManager.recentTasks.addAll(recentTasks);
+  }
+
+  /**
+   * @param services List of running services.
+   */
   public void setServices(List<ActivityManager.RunningServiceInfo> services) {
-    this.services.clear();
-    this.services.addAll(services);
+    ShadowActivityManager.services.clear();
+    ShadowActivityManager.services.addAll(services);
   }
 
-  /** @param processes List of running processes. */
+  /**
+   * @param processes List of running processes.
+   */
   public void setProcesses(List<ActivityManager.RunningAppProcessInfo> processes) {
     ShadowActivityManager.processes.clear();
     ShadowActivityManager.processes.addAll(processes);
   }
 
-  /** @return Get the package name of the last background processes killed. */
+  /**
+   * @return Get the package name of the last background processes killed.
+   */
   public String getBackgroundPackage() {
     return backgroundPackage;
   }
 
-  /** @param memoryClass Set the application's memory class. */
+  /**
+   * @param memoryClass Set the application's memory class.
+   */
   public void setMemoryClass(int memoryClass) {
     this.memoryClass = memoryClass;
   }
 
-  /** @param memoryInfo Set the application's memory info. */
+  /**
+   * @param memoryInfo Set the application's memory info.
+   */
   public void setMemoryInfo(ActivityManager.MemoryInfo memoryInfo) {
-    this.memoryInfo = memoryInfo;
+    ShadowActivityManager.memoryInfo = memoryInfo;
   }
 
   @Implementation(minSdk = O)
@@ -246,7 +285,7 @@ public class ShadowActivityManager {
     return ReflectionHelpers.createNullProxy(IActivityManager.class);
   }
 
-  @Implementation(minSdk = KITKAT)
+  @Implementation
   protected boolean isLowRamDevice() {
     if (isLowRamDeviceOverride != null) {
       return isLowRamDeviceOverride;
@@ -260,12 +299,15 @@ public class ShadowActivityManager {
   }
 
   @Implementation(minSdk = O)
-  protected void addOnUidImportanceListener(Object listener, Object importanceCutpoint) {
-    importanceListeners.add(new ImportanceListener(listener, (Integer) importanceCutpoint));
+  protected void addOnUidImportanceListener(
+      @ClassName("android.app.ActivityManager$OnUidImportanceListener") Object listener,
+      int importanceCutpoint) {
+    importanceListeners.add(new ImportanceListener(listener, importanceCutpoint));
   }
 
   @Implementation(minSdk = O)
-  protected void removeOnUidImportanceListener(Object listener) {
+  protected void removeOnUidImportanceListener(
+      @ClassName("android.app.ActivityManager$OnUidImportanceListener") Object listener) {
     importanceListeners.remove(new ImportanceListener(listener));
   }
 
@@ -296,7 +338,7 @@ public class ShadowActivityManager {
     return lockTaskModeState;
   }
 
-  @Implementation(minSdk = VERSION_CODES.LOLLIPOP)
+  @Implementation
   protected boolean isInLockTaskMode() {
     return getLockTaskModeState() != ActivityManager.LOCK_TASK_MODE_NONE;
   }
@@ -311,7 +353,17 @@ public class ShadowActivityManager {
 
   @Resetter
   public static void reset() {
+    backgroundPackage = null;
+    memoryInfo = null;
+    appTasks.clear();
+    recentTasks.clear();
+    tasks.clear();
+    services.clear();
     processes.clear();
+    importanceListeners.clear();
+    uidImportances.clear();
+    appExitInfoList.clear();
+    isLowRamDeviceOverride = null;
   }
 
   /** Returns the background restriction state set by {@link #setBackgroundRestricted}. */
@@ -333,12 +385,11 @@ public class ShadowActivityManager {
    * {@code packageName} is ignored.
    */
   @Implementation(minSdk = R)
-  protected Object getHistoricalProcessExitReasons(Object packageName, Object pid, Object maxNum) {
+  protected List</*android.app.ApplicationExitInfo*/ ?> getHistoricalProcessExitReasons(
+      String packageName, int pid, int maxNum) {
     return appExitInfoList.stream()
-        .filter(
-            appExitInfo ->
-                (int) pid == 0 || ((ApplicationExitInfo) appExitInfo).getPid() == (int) pid)
-        .limit((int) maxNum == 0 ? appExitInfoList.size() : (int) maxNum)
+        .filter(appExitInfo -> pid == 0 || ((ApplicationExitInfo) appExitInfo).getPid() == pid)
+        .limit(maxNum == 0 ? appExitInfoList.size() : maxNum)
         .collect(toCollection(ArrayList::new));
   }
 
@@ -391,73 +442,93 @@ public class ShadowActivityManager {
   public static class ApplicationExitInfoBuilder {
 
     private final ApplicationExitInfo instance;
+    private final ShadowApplicationExitInfo shadow;
 
     public static ApplicationExitInfoBuilder newBuilder() {
       return new ApplicationExitInfoBuilder();
     }
 
+    @CanIgnoreReturnValue
     public ApplicationExitInfoBuilder setDefiningUid(int uid) {
       instance.setDefiningUid(uid);
       return this;
     }
 
+    @CanIgnoreReturnValue
     public ApplicationExitInfoBuilder setDescription(String description) {
       instance.setDescription(description);
       return this;
     }
 
+    @CanIgnoreReturnValue
     public ApplicationExitInfoBuilder setImportance(int importance) {
       instance.setImportance(importance);
       return this;
     }
 
+    @CanIgnoreReturnValue
     public ApplicationExitInfoBuilder setPackageUid(int packageUid) {
       instance.setPackageUid(packageUid);
       return this;
     }
 
+    @CanIgnoreReturnValue
     public ApplicationExitInfoBuilder setPid(int pid) {
       instance.setPid(pid);
       return this;
     }
 
+    @CanIgnoreReturnValue
     public ApplicationExitInfoBuilder setProcessName(String processName) {
       instance.setProcessName(processName);
       return this;
     }
 
+    @CanIgnoreReturnValue
     public ApplicationExitInfoBuilder setProcessStateSummary(byte[] processStateSummary) {
       instance.setProcessStateSummary(processStateSummary);
       return this;
     }
 
+    @CanIgnoreReturnValue
     public ApplicationExitInfoBuilder setPss(long pss) {
       instance.setPss(pss);
       return this;
     }
 
+    @CanIgnoreReturnValue
     public ApplicationExitInfoBuilder setRealUid(int realUid) {
       instance.setRealUid(realUid);
       return this;
     }
 
+    @CanIgnoreReturnValue
     public ApplicationExitInfoBuilder setReason(int reason) {
       instance.setReason(reason);
       return this;
     }
 
+    @CanIgnoreReturnValue
     public ApplicationExitInfoBuilder setRss(long rss) {
       instance.setRss(rss);
       return this;
     }
 
+    @CanIgnoreReturnValue
     public ApplicationExitInfoBuilder setStatus(int status) {
       instance.setStatus(status);
       return this;
     }
 
+    @CanIgnoreReturnValue
     public ApplicationExitInfoBuilder setTimestamp(long timestamp) {
       instance.setTimestamp(timestamp);
+      return this;
+    }
+
+    @CanIgnoreReturnValue
+    public ApplicationExitInfoBuilder setTraceInputStream(InputStream in) {
+      shadow.setTraceInputStream(in);
       return this;
     }
 
@@ -467,6 +538,7 @@ public class ShadowActivityManager {
 
     private ApplicationExitInfoBuilder() {
       this.instance = new ApplicationExitInfo();
+      this.shadow = Shadow.extract(instance);
     }
   }
 
@@ -478,7 +550,7 @@ public class ShadowActivityManager {
   }
 
   /**
-   * Helper class mimicing the package-private UidObserver class inside {@link ActivityManager}.
+   * Helper class mimicking the package-private UidObserver class inside {@link ActivityManager}.
    *
    * <p>This class is responsible for maintaining the cutpoint of the corresponding {@link
    * ActivityManager.OnUidImportanceListener} and invoking the listener only when the importance of

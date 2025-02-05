@@ -1,11 +1,8 @@
 package org.robolectric.shadows;
 
-import static android.os.Build.VERSION_CODES.JELLY_BEAN_MR1;
-import static android.os.Build.VERSION_CODES.JELLY_BEAN_MR2;
-import static android.os.Build.VERSION_CODES.KITKAT;
-import static android.os.Build.VERSION_CODES.LOLLIPOP;
 import static android.os.Build.VERSION_CODES.M;
 import static android.os.Build.VERSION_CODES.Q;
+import static android.os.Build.VERSION_CODES.R;
 import static org.robolectric.util.reflector.Reflector.reflector;
 
 import android.os.Environment;
@@ -24,7 +21,9 @@ import org.robolectric.annotation.Implements;
 import org.robolectric.annotation.Resetter;
 import org.robolectric.util.ReflectionHelpers;
 import org.robolectric.util.reflector.Accessor;
+import org.robolectric.util.reflector.Direct;
 import org.robolectric.util.reflector.ForType;
+import org.robolectric.util.reflector.Static;
 
 @Implements(Environment.class)
 @SuppressWarnings("NewApi")
@@ -37,6 +36,7 @@ public class ShadowEnvironment {
   private static Path tmpExternalFilesDirBase;
   private static final List<File> externalDirs = new ArrayList<>();
   private static Map<Path, String> storageState = new HashMap<>();
+  private static Path rootStorageDirectory;
 
   static Path EXTERNAL_CACHE_DIR;
   static Path EXTERNAL_FILES_DIR;
@@ -74,11 +74,33 @@ public class ShadowEnvironment {
   }
 
   /**
-   * Sets the return value of {@link #getExternalStorageDirectory()}.  Note that
-   * the default value provides a directory that is usable in the test environment.
-   * If the test app uses this method to override that default directory, please
-   * clean up any files written to that directory, as the Robolectric environment
-   * will not purge that directory when the test ends.
+   * Sets the return value of {@link #getStorageDirectory()}. This can be used for example, when
+   * testing code paths that need to perform regex matching on this directory.
+   *
+   * <p>Note that the default value provides a directory that is usable in the test environment. If
+   * the test app uses this method to override that default directory, please clean up any files
+   * written to that directory, as the Robolectric environment will not purge that directory when
+   * the test ends.
+   *
+   * @param directory Path to return from {@link #getStorageDirectory()}.
+   */
+  public static void setStorageDirectory(Path directory) {
+    rootStorageDirectory = directory;
+  }
+
+  @Implementation(minSdk = R)
+  protected static File getStorageDirectory() {
+    if (rootStorageDirectory == null) {
+      return reflector(EnvironmentReflector.class).getStorageDirectory();
+    }
+    return rootStorageDirectory.toFile();
+  }
+
+  /**
+   * Sets the return value of {@link #getExternalStorageDirectory()}. Note that the default value
+   * provides a directory that is usable in the test environment. If the test app uses this method
+   * to override that default directory, please clean up any files written to that directory, as the
+   * Robolectric environment will not purge that directory when the test ends.
    *
    * @param directory Path to return from {@link #getExternalStorageDirectory()}.
    */
@@ -96,7 +118,7 @@ public class ShadowEnvironment {
     return EXTERNAL_CACHE_DIR.toFile();
   }
 
-  @Implementation(minSdk = KITKAT)
+  @Implementation
   protected static File[] buildExternalStorageAppCacheDirs(String packageName) {
     Path externalStorageDirectoryPath = getExternalStorageDirectory().toPath();
     // Add cache directory in path.
@@ -113,13 +135,23 @@ public class ShadowEnvironment {
     return new File[] {path.toFile()};
   }
 
-  @Implementation(maxSdk = JELLY_BEAN_MR2)
-  protected static File getExternalStorageAppCacheDirectory(String packageName) {
-    return buildExternalStorageAppCacheDirs(packageName)[0];
+  /**
+   * Sets the return value of {@link #getExternalStoragePublicDirectory}. Note that the default
+   * value provides a directory that is usable in the test environment. If the test app uses this
+   * method to override that default directory, please clean up any files written to that directory,
+   * as the Robolectric environment will not purge that directory when the test ends.
+   *
+   * @param directory Path to return from {@link #getExternalStoragePublicDirectory}.
+   */
+  public static void setExternalStoragePublicDirectory(Path directory) {
+    EXTERNAL_FILES_DIR = directory;
   }
 
   @Implementation
   protected static File getExternalStoragePublicDirectory(String type) {
+    if (externalStorageState.equals(Environment.MEDIA_UNKNOWN)) {
+      return null;
+    }
     if (EXTERNAL_FILES_DIR == null) {
       EXTERNAL_FILES_DIR =
           RuntimeEnvironment.getTempDirectory().createIfNotExists("external-files");
@@ -137,6 +169,7 @@ public class ShadowEnvironment {
   @Resetter
   public static void reset() {
 
+    rootStorageDirectory = null;
     EXTERNAL_CACHE_DIR = null;
     EXTERNAL_FILES_DIR = null;
 
@@ -145,6 +178,7 @@ public class ShadowEnvironment {
 
     storageState = new HashMap<>();
     externalDirs.clear();
+    externalStorageState = Environment.MEDIA_REMOVED;
 
     sIsExternalStorageEmulated = false;
     isExternalStorageLegacy = false;
@@ -156,7 +190,7 @@ public class ShadowEnvironment {
     return exists != null ? exists : false;
   }
 
-  @Implementation(minSdk = KITKAT)
+  @Implementation
   protected static String getStorageState(File directory) {
     Path directoryPath = directory.toPath();
     for (Map.Entry<Path, String> entry : storageState.entrySet()) {
@@ -167,7 +201,7 @@ public class ShadowEnvironment {
     return null;
   }
 
-  @Implementation(minSdk = LOLLIPOP)
+  @Implementation
   protected static String getExternalStorageState(File directory) {
     Path directoryPath = directory.toPath();
     for (Map.Entry<Path, String> entry : storageState.entrySet()) {
@@ -178,13 +212,13 @@ public class ShadowEnvironment {
     return null;
   }
 
-  @Implementation(minSdk = LOLLIPOP)
+  @Implementation
   protected static boolean isExternalStorageRemovable(File path) {
     final Boolean exists = STORAGE_REMOVABLE.get(path);
     return exists != null ? exists : false;
   }
 
-  @Implementation(minSdk = LOLLIPOP)
+  @Implementation
   protected static boolean isExternalStorageEmulated(File path) {
     final Boolean emulated = STORAGE_EMULATED.get(path);
     return emulated != null ? emulated : false;
@@ -248,15 +282,7 @@ public class ShadowEnvironment {
       }
     }
 
-    if (RuntimeEnvironment.getApiLevel() >= JELLY_BEAN_MR1
-        && RuntimeEnvironment.getApiLevel() < KITKAT) {
-      if (externalDirs.size() == 1 && externalFileDir != null) {
-        Environment.UserEnvironment userEnvironment =
-            ReflectionHelpers.getStaticField(Environment.class, "sCurrentUser");
-        reflector(_UserEnvironment_.class, userEnvironment)
-            .setExternalStorageAndroidData(externalFileDir.toFile());
-      }
-    } else if (RuntimeEnvironment.getApiLevel() >= KITKAT && RuntimeEnvironment.getApiLevel() < M) {
+    if (RuntimeEnvironment.getApiLevel() < M) {
       Environment.UserEnvironment userEnvironment =
           ReflectionHelpers.getStaticField(Environment.class, "sCurrentUser");
       reflector(_UserEnvironment_.class, userEnvironment)
@@ -272,19 +298,18 @@ public class ShadowEnvironment {
   /**
    * Sets the {@link #getExternalStorageState(File)} for given directory.
    *
-   * @param externalStorageState Value to return from {@link #getExternalStorageState(File)}.
+   * @param state Value to return from {@link #getExternalStorageState(File)}.
    */
   public static void setExternalStorageState(File directory, String state) {
     storageState.put(directory.toPath(), state);
   }
 
-  @Implements(className = "android.os.Environment$UserEnvironment", isInAndroidSdk = false,
-      minSdk = JELLY_BEAN_MR1)
+  @Implements(className = "android.os.Environment$UserEnvironment", isInAndroidSdk = false)
   public static class ShadowUserEnvironment {
 
     @Implementation(minSdk = M)
     protected File[] getExternalDirs() {
-      return externalDirs.toArray(new File[externalDirs.size()]);
+      return externalDirs.toArray(new File[0]);
     }
   }
 
@@ -296,5 +321,12 @@ public class ShadowEnvironment {
 
     @Accessor("mExternalStorageAndroidData")
     void setExternalStorageAndroidData(File file);
+  }
+
+  @ForType(Environment.class)
+  interface EnvironmentReflector {
+    @Static
+    @Direct
+    File getStorageDirectory();
   }
 }

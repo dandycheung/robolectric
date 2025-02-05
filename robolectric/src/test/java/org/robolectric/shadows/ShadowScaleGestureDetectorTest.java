@@ -9,6 +9,7 @@ import android.view.MotionEvent;
 import android.view.ScaleGestureDetector;
 import androidx.test.core.app.ApplicationProvider;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
+import javax.annotation.Nonnull;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -21,8 +22,9 @@ public class ShadowScaleGestureDetectorTest {
 
   @Before
   public void setUp() throws Exception {
-    detector = new ScaleGestureDetector(ApplicationProvider.getApplicationContext(),
-        new TestOnGestureListener());
+    detector =
+        new ScaleGestureDetector(
+            ApplicationProvider.getApplicationContext(), new TestOnGestureListener());
     motionEvent = MotionEvent.obtain(-1, -1, MotionEvent.ACTION_UP, 100, 30, -1);
   }
 
@@ -75,19 +77,19 @@ public class ShadowScaleGestureDetectorTest {
     assertThat(detector.getFocusY()).isEqualTo(0f);
   }
 
-  private static class TestOnGestureListener implements ScaleGestureDetector.OnScaleGestureListener {
+  private static class TestOnGestureListener
+      implements ScaleGestureDetector.OnScaleGestureListener {
     @Override
-    public boolean onScale(ScaleGestureDetector detector) {
+    public boolean onScale(@Nonnull ScaleGestureDetector detector) {
       return false;
     }
 
     @Override
-    public boolean onScaleBegin(ScaleGestureDetector detector) {
+    public boolean onScaleBegin(@Nonnull ScaleGestureDetector detector) {
       return false;
     }
 
     @Override
-    public void onScaleEnd(ScaleGestureDetector detector) {
-    }
+    public void onScaleEnd(@Nonnull ScaleGestureDetector detector) {}
   }
 }

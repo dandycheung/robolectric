@@ -5,6 +5,7 @@ import java.io.File;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import javax.annotation.processing.AbstractProcessor;
@@ -15,7 +16,6 @@ import javax.annotation.processing.SupportedOptions;
 import javax.lang.model.SourceVersion;
 import javax.lang.model.element.Element;
 import javax.lang.model.element.TypeElement;
-import org.robolectric.annotation.processing.RobolectricModel.Builder;
 import org.robolectric.annotation.processing.generator.Generator;
 import org.robolectric.annotation.processing.generator.JavadocJsonGenerator;
 import org.robolectric.annotation.processing.generator.ServiceLoaderGenerator;
@@ -28,24 +28,32 @@ import org.robolectric.annotation.processing.validator.ResetterValidator;
 import org.robolectric.annotation.processing.validator.SdkStore;
 import org.robolectric.annotation.processing.validator.Validator;
 
-/**
- * Annotation processor entry point for Robolectric annotations.
- */
+/** Annotation processor entry point for Robolectric annotations. */
 @SupportedOptions({
-  RobolectricProcessor.PACKAGE_OPT, 
-  RobolectricProcessor.SHOULD_INSTRUMENT_PKG_OPT})
+  RobolectricProcessor.PACKAGE_OPT,
+  RobolectricProcessor.SHOULD_INSTRUMENT_PKG_OPT
+})
 @SupportedAnnotationTypes("org.robolectric.annotation.*")
 public class RobolectricProcessor extends AbstractProcessor {
   static final String PACKAGE_OPT = "org.robolectric.annotation.processing.shadowPackage";
-  static final String SHOULD_INSTRUMENT_PKG_OPT = 
+  static final String SHOULD_INSTRUMENT_PKG_OPT =
       "org.robolectric.annotation.processing.shouldInstrumentPackage";
   static final String JSON_DOCS_DIR = "org.robolectric.annotation.processing.jsonDocsDir";
   static final String JSON_DOCS_ENABLED = "org.robolectric.annotation.processing.jsonDocsEnabled";
   static final String SDK_CHECK_MODE = "org.robolectric.annotation.processing.sdkCheckMode";
   private static final String SDKS_FILE = "org.robolectric.annotation.processing.sdks";
+  private static final String DISABLE_INDEVELOPMENT =
+      "org.robolectric.annotation.processing.disableInDevelopment";
+  private static final String ALLOW_LOOSE_SIGNATURES =
+      "org.robolectric.annotation.processing.allowLooseSignatures";
+
+  /** required for Android Development. */
+  private static final String VALIDATE_COMPILE_SDKS =
+      "org.robolectric.annotation.processing.validateCompileSdk";
+
   private static final String PRIORITY = "org.robolectric.annotation.processing.priority";
 
-  private Builder modelBuilder;
+  private RobolectricModel.Builder modelBuilder;
   private String shadowPackage;
   private boolean shouldInstrumentPackages;
   private int priority;
@@ -57,36 +65,47 @@ public class RobolectricProcessor extends AbstractProcessor {
   private final Map<TypeElement, Validator> elementValidators = new HashMap<>(13);
   private File jsonDocsDir;
   private boolean jsonDocsEnabled;
+  private boolean validateCompiledSdk;
+  private boolean allowInDev;
+  private String overrideSdkLocation;
+  private int overrideSdkInt;
+  private boolean allowLooseSignatures;
+
+  /** Default constructor. */
+  public RobolectricProcessor() {}
 
   /**
-   * Default constructor.
-   */
-  public RobolectricProcessor() {
-  }
-
-  /**
-   * Constructor to use for testing passing options in. Only
-   * necessary until compile-testing supports passing options
-   * in.
+   * Constructor to use for testing passing options in. Only necessary until compile-testing
+   * supports passing options in.
    *
-   * @param options simulated options that would ordinarily
-   *                be passed in the {@link ProcessingEnvironment}.
+   * @param options simulated options that would ordinarily be passed in the {@link
+   *     ProcessingEnvironment}.
    */
   @VisibleForTesting
   public RobolectricProcessor(Map<String, String> options) {
+    this(options, null, -1);
+  }
+
+  public RobolectricProcessor(
+      Map<String, String> options, String overrideSdkLocation, int overrideSdkInt) {
     processOptions(options);
+    this.overrideSdkLocation = overrideSdkLocation;
+    this.overrideSdkInt = overrideSdkInt;
   }
 
   @Override
   public synchronized void init(ProcessingEnvironment environment) {
     super.init(environment);
     processOptions(environment.getOptions());
-    modelBuilder = new Builder(environment);
+    modelBuilder = new RobolectricModel.Builder(environment);
 
-    SdkStore sdkStore = new SdkStore(sdksFile);
+    SdkStore sdkStore =
+        new SdkStore(sdksFile, validateCompiledSdk, overrideSdkLocation, overrideSdkInt);
 
     addValidator(new ImplementationValidator(modelBuilder, environment));
-    addValidator(new ImplementsValidator(modelBuilder, environment, sdkCheckMode, sdkStore));
+    addValidator(
+        new ImplementsValidator(
+            modelBuilder, environment, sdkCheckMode, sdkStore, allowInDev, allowLooseSignatures));
     addValidator(new RealObjectValidator(modelBuilder, environment));
     addValidator(new ResetterValidator(modelBuilder, environment));
   }
@@ -133,11 +152,16 @@ public class RobolectricProcessor extends AbstractProcessor {
       this.jsonDocsDir = new File(options.getOrDefault(JSON_DOCS_DIR, "build/docs/json"));
       this.jsonDocsEnabled = "true".equalsIgnoreCase(options.get(JSON_DOCS_ENABLED));
       this.sdkCheckMode =
-          SdkCheckMode.valueOf(options.getOrDefault(SDK_CHECK_MODE, "WARN").toUpperCase());
+          SdkCheckMode.valueOf(
+              options.getOrDefault(SDK_CHECK_MODE, "WARN").toUpperCase(Locale.ROOT));
+      this.validateCompiledSdk =
+          "true".equalsIgnoreCase(options.getOrDefault(VALIDATE_COMPILE_SDKS, "false"));
       this.sdksFile = getSdksFile(options, SDKS_FILE);
-      this.priority =
-          Integer.parseInt(options.getOrDefault(PRIORITY, "0"));
-
+      this.priority = Integer.parseInt(options.getOrDefault(PRIORITY, "0"));
+      this.allowInDev =
+          !"true".equalsIgnoreCase(options.getOrDefault(DISABLE_INDEVELOPMENT, "false"));
+      this.allowLooseSignatures =
+          "true".equalsIgnoreCase(options.getOrDefault(ALLOW_LOOSE_SIGNATURES, "false"));
       if (this.shadowPackage == null) {
         throw new IllegalArgumentException("no package specified for " + PACKAGE_OPT);
       }

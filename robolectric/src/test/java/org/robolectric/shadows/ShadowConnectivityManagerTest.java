@@ -3,19 +3,23 @@ package org.robolectric.shadows;
 import static android.net.ConnectivityManager.RESTRICT_BACKGROUND_STATUS_DISABLED;
 import static android.net.ConnectivityManager.RESTRICT_BACKGROUND_STATUS_ENABLED;
 import static android.net.ConnectivityManager.RESTRICT_BACKGROUND_STATUS_WHITELISTED;
-import static android.os.Build.VERSION_CODES.KITKAT;
-import static android.os.Build.VERSION_CODES.LOLLIPOP;
 import static android.os.Build.VERSION_CODES.M;
 import static android.os.Build.VERSION_CODES.N;
 import static android.os.Build.VERSION_CODES.O;
+import static android.os.Build.VERSION_CODES.S;
 import static androidx.test.core.app.ApplicationProvider.getApplicationContext;
 import static com.google.common.truth.Truth.assertThat;
+import static org.junit.Assert.assertThrows;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.robolectric.Shadows.shadowOf;
 
+import android.app.Activity;
+import android.app.PendingIntent;
 import android.content.Context;
+import android.content.Intent;
 import android.net.ConnectivityManager;
 import android.net.LinkProperties;
 import android.net.Network;
@@ -23,15 +27,21 @@ import android.net.NetworkCapabilities;
 import android.net.NetworkInfo;
 import android.net.NetworkRequest;
 import android.net.ProxyInfo;
+import android.os.Build;
+import android.os.Build.VERSION_CODES;
 import android.os.Handler;
 import android.provider.Settings;
 import android.telephony.TelephonyManager;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import java.util.Arrays;
 import java.util.Map;
+import javax.annotation.Nonnull;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.robolectric.Robolectric;
+import org.robolectric.RuntimeEnvironment;
+import org.robolectric.android.controller.ActivityController;
 import org.robolectric.annotation.Config;
 import org.robolectric.util.ReflectionHelpers;
 
@@ -69,7 +79,7 @@ public class ShadowConnectivityManagerTest {
   }
 
   @Test
-  public void getNetworkInfo_shouldReturnDefaultNetworks() throws Exception {
+  public void getNetworkInfo_shouldReturnDefaultNetworks() {
     NetworkInfo wifi = connectivityManager.getNetworkInfo(ConnectivityManager.TYPE_WIFI);
     assertThat(wifi.getDetailedState()).isEqualTo(NetworkInfo.DetailedState.DISCONNECTED);
 
@@ -77,17 +87,17 @@ public class ShadowConnectivityManagerTest {
     assertThat(mobile.getDetailedState()).isEqualTo(NetworkInfo.DetailedState.CONNECTED);
   }
 
-  @Test @Config(minSdk = LOLLIPOP)
-  public void getNetworkInfo_shouldReturnSomeForAllNetworks() throws Exception {
+  @Test
+  public void getNetworkInfo_shouldReturnSomeForAllNetworks() {
     Network[] allNetworks = connectivityManager.getAllNetworks();
-    for (Network network: allNetworks) {
+    for (Network network : allNetworks) {
       NetworkInfo networkInfo = connectivityManager.getNetworkInfo(network);
       assertThat(networkInfo).isNotNull();
     }
   }
 
-  @Test @Config(minSdk = LOLLIPOP)
-  public void getNetworkInfo_shouldReturnAddedNetwork() throws Exception {
+  @Test
+  public void getNetworkInfo_shouldReturnAddedNetwork() {
     Network vpnNetwork = ShadowNetwork.newInstance(123);
     NetworkInfo vpnNetworkInfo =
         ShadowNetworkInfo.newInstance(
@@ -102,8 +112,8 @@ public class ShadowConnectivityManagerTest {
     assertThat(returnedNetworkInfo).isSameInstanceAs(vpnNetworkInfo);
   }
 
-  @Test @Config(minSdk = LOLLIPOP)
-  public void getNetworkInfo_shouldNotReturnRemovedNetwork() throws Exception {
+  @Test
+  public void getNetworkInfo_shouldNotReturnRemovedNetwork() {
     Network wifiNetwork = ShadowNetwork.newInstance(ShadowConnectivityManager.NET_ID_WIFI);
     shadowOf(connectivityManager).removeNetwork(wifiNetwork);
 
@@ -121,14 +131,14 @@ public class ShadowConnectivityManagerTest {
   }
 
   @Test
-  public void shouldGetAndSetBackgroundDataSetting() throws Exception {
+  public void shouldGetAndSetBackgroundDataSetting() {
     assertThat(connectivityManager.getBackgroundDataSetting()).isFalse();
     shadowOf(connectivityManager).setBackgroundDataSetting(true);
     assertThat(connectivityManager.getBackgroundDataSetting()).isTrue();
   }
 
   @Test
-  public void setActiveNetworkInfo_shouldSetActiveNetworkInfo() throws Exception {
+  public void setActiveNetworkInfo_shouldSetActiveNetworkInfo() {
     shadowOf(connectivityManager).setActiveNetworkInfo(null);
     assertThat(connectivityManager.getActiveNetworkInfo()).isNull();
     shadowOf(connectivityManager)
@@ -163,7 +173,7 @@ public class ShadowConnectivityManagerTest {
 
   @Test
   @Config(minSdk = M)
-  public void setActiveNetworkInfo_shouldSetActiveNetwork() throws Exception {
+  public void setActiveNetworkInfo_shouldSetActiveNetwork() {
     shadowOf(connectivityManager).setActiveNetworkInfo(null);
     assertThat(connectivityManager.getActiveNetworkInfo()).isNull();
     shadowOf(connectivityManager)
@@ -181,11 +191,12 @@ public class ShadowConnectivityManagerTest {
     assertThat(info.getSubtype()).isEqualTo(TelephonyManager.NETWORK_TYPE_EDGE);
     assertThat(info.isAvailable()).isTrue();
     assertThat(info.isConnected()).isFalse();
-    assertThat(shadowOf(connectivityManager.getActiveNetwork()).getNetId()).isEqualTo(info.getType());
+    assertThat(shadowOf(connectivityManager.getActiveNetwork()).getNetId())
+        .isEqualTo(info.getType());
   }
 
   @Test
-  public void getAllNetworkInfo_shouldReturnAllNetworkInterfaces() throws Exception {
+  public void getAllNetworkInfo_shouldReturnAllNetworkInterfaces() {
     NetworkInfo[] infos = connectivityManager.getAllNetworkInfo();
     assertThat(infos).asList().hasSize(2);
     assertThat(infos).asList().contains(connectivityManager.getActiveNetworkInfo());
@@ -195,8 +206,7 @@ public class ShadowConnectivityManagerTest {
   }
 
   @Test
-  @Config(minSdk = LOLLIPOP)
-  public void getAllNetworkInfo_shouldEqualGetAllNetworks() throws Exception {
+  public void getAllNetworkInfo_shouldEqualGetAllNetworks() {
     // Update the active network so that we're no longer in the default state.
     NetworkInfo networkInfo =
         ShadowNetworkInfo.newInstance(
@@ -218,27 +228,26 @@ public class ShadowConnectivityManagerTest {
   }
 
   @Test
-  @Config(minSdk = LOLLIPOP)
   public void getAllNetworkInfo_nullIfNetworkNotActive() {
     shadowOf(connectivityManager).setDefaultNetworkActive(false);
     assertThat(connectivityManager.getAllNetworkInfo()).isNull();
   }
 
-  @Test @Config(minSdk = LOLLIPOP)
-  public void getAllNetworks_shouldReturnAllNetworks() throws Exception {
+  @Test
+  public void getAllNetworks_shouldReturnAllNetworks() {
     Network[] networks = connectivityManager.getAllNetworks();
     assertThat(networks).asList().hasSize(2);
   }
 
-  @Test @Config(minSdk = LOLLIPOP)
-  public void getAllNetworks_shouldReturnNoNetworksWhenCleared() throws Exception {
+  @Test
+  public void getAllNetworks_shouldReturnNoNetworksWhenCleared() {
     shadowOf(connectivityManager).clearAllNetworks();
     Network[] networks = connectivityManager.getAllNetworks();
     assertThat(networks).isEmpty();
   }
 
-  @Test @Config(minSdk = LOLLIPOP)
-  public void getAllNetworks_shouldReturnAddedNetworks() throws Exception {
+  @Test
+  public void getAllNetworks_shouldReturnAddedNetworks() {
     // Let's start clear.
     shadowOf(connectivityManager).clearAllNetworks();
 
@@ -263,8 +272,8 @@ public class ShadowConnectivityManagerTest {
     assertThat(returnedNetworkInfo).isSameInstanceAs(vpnNetworkInfo);
   }
 
-  @Test @Config(minSdk = LOLLIPOP)
-  public void getAllNetworks_shouldNotReturnRemovedNetworks() throws Exception {
+  @Test
+  public void getAllNetworks_shouldNotReturnRemovedNetworks() {
     Network wifiNetwork = ShadowNetwork.newInstance(ShadowConnectivityManager.NET_ID_WIFI);
     shadowOf(connectivityManager).removeNetwork(wifiNetwork);
 
@@ -273,65 +282,72 @@ public class ShadowConnectivityManagerTest {
 
     Network returnedNetwork = networks[0];
     ShadowNetwork shadowReturnedNetwork = shadowOf(returnedNetwork);
-    assertThat(shadowReturnedNetwork.getNetId()).isNotEqualTo(ShadowConnectivityManager.NET_ID_WIFI);
+    assertThat(shadowReturnedNetwork.getNetId())
+        .isNotEqualTo(ShadowConnectivityManager.NET_ID_WIFI);
   }
 
   @Test
-  public void getNetworkPreference_shouldGetDefaultValue() throws Exception {
-    assertThat(connectivityManager.getNetworkPreference()).isEqualTo(ConnectivityManager.DEFAULT_NETWORK_PREFERENCE);
+  public void getNetworkPreference_shouldGetDefaultValue() {
+    assertThat(connectivityManager.getNetworkPreference())
+        .isEqualTo(ConnectivityManager.DEFAULT_NETWORK_PREFERENCE);
   }
 
   @Test
   @Config(minSdk = M)
-  public void getReportedNetworkConnectivity() throws Exception {
+  public void getReportedNetworkConnectivity() {
     Network wifiNetwork = ShadowNetwork.newInstance(ShadowConnectivityManager.NET_ID_WIFI);
     connectivityManager.reportNetworkConnectivity(wifiNetwork, true);
 
     Map<Network, Boolean> reportedNetworks =
         shadowOf(connectivityManager).getReportedNetworkConnectivity();
-    assertThat(reportedNetworks.size()).isEqualTo(1);
+    assertThat(reportedNetworks).hasSize(1);
     assertThat(reportedNetworks.get(wifiNetwork)).isTrue();
 
     // Update the status.
     connectivityManager.reportNetworkConnectivity(wifiNetwork, false);
     reportedNetworks = shadowOf(connectivityManager).getReportedNetworkConnectivity();
-    assertThat(reportedNetworks.size()).isEqualTo(1);
+    assertThat(reportedNetworks).hasSize(1);
     assertThat(reportedNetworks.get(wifiNetwork)).isFalse();
   }
 
   @Test
-  public void setNetworkPreference_shouldSetDefaultValue() throws Exception {
+  public void setNetworkPreference_shouldSetDefaultValue() {
     connectivityManager.setNetworkPreference(ConnectivityManager.TYPE_MOBILE);
-    assertThat(connectivityManager.getNetworkPreference()).isEqualTo(connectivityManager.getNetworkPreference());
+    assertThat(connectivityManager.getNetworkPreference())
+        .isEqualTo(connectivityManager.getNetworkPreference());
     connectivityManager.setNetworkPreference(ConnectivityManager.TYPE_WIFI);
     assertThat(connectivityManager.getNetworkPreference()).isEqualTo(ConnectivityManager.TYPE_WIFI);
   }
 
-  @Test @Config(minSdk = LOLLIPOP)
-  public void getNetworkCallbacks_shouldHaveEmptyDefault() throws Exception {
+  @Test
+  public void getNetworkCallbacks_shouldHaveEmptyDefault() {
     assertThat(shadowOf(connectivityManager).getNetworkCallbacks()).isEmpty();
   }
 
   private static ConnectivityManager.NetworkCallback createSimpleCallback() {
     return new ConnectivityManager.NetworkCallback() {
       @Override
-      public void onAvailable(Network network) {}
+      public void onAvailable(@Nonnull Network network) {}
+
       @Override
-      public void onLost(Network network) {}
+      public void onLost(@Nonnull Network network) {}
     };
   }
 
+  private static PendingIntent createSimplePendingIntent() {
+    return PendingIntent.getActivity(getApplicationContext(), 0, new Intent(), 0);
+  }
+
   @Test
-  @Config(minSdk = LOLLIPOP)
-  public void requestNetwork_shouldAddCallback() throws Exception {
+  public void requestNetwork_shouldAddCallback() {
     NetworkRequest.Builder builder = new NetworkRequest.Builder();
     ConnectivityManager.NetworkCallback callback = createSimpleCallback();
     connectivityManager.requestNetwork(builder.build(), callback);
     assertThat(shadowOf(connectivityManager).getNetworkCallbacks()).hasSize(1);
   }
 
-  @Test @Config(minSdk = LOLLIPOP)
-  public void registerCallback_shouldAddCallback() throws Exception {
+  @Test
+  public void registerCallback_shouldAddCallback() {
     NetworkRequest.Builder builder = new NetworkRequest.Builder();
     ConnectivityManager.NetworkCallback callback = createSimpleCallback();
     connectivityManager.registerNetworkCallback(builder.build(), callback);
@@ -339,8 +355,17 @@ public class ShadowConnectivityManagerTest {
   }
 
   @Test
+  @Config(minSdk = M)
+  public void registerCallback_withPendingIntent_shouldAddCallback() {
+    NetworkRequest.Builder builder = new NetworkRequest.Builder();
+    PendingIntent pendingIntent = createSimplePendingIntent();
+    connectivityManager.registerNetworkCallback(builder.build(), pendingIntent);
+    assertThat(shadowOf(connectivityManager).getNetworkCallbackPendingIntents()).hasSize(1);
+  }
+
+  @Test
   @Config(minSdk = O)
-  public void requestNetwork_withTimeout_shouldAddCallback() throws Exception {
+  public void requestNetwork_withTimeout_shouldAddCallback() {
     NetworkRequest.Builder builder = new NetworkRequest.Builder();
     ConnectivityManager.NetworkCallback callback = createSimpleCallback();
     connectivityManager.requestNetwork(builder.build(), callback, 0);
@@ -349,7 +374,7 @@ public class ShadowConnectivityManagerTest {
 
   @Test
   @Config(minSdk = O)
-  public void requestNetwork_withHandler_shouldAddCallback() throws Exception {
+  public void requestNetwork_withHandler_shouldAddCallback() {
     NetworkRequest.Builder builder = new NetworkRequest.Builder();
     ConnectivityManager.NetworkCallback callback = createSimpleCallback();
     connectivityManager.requestNetwork(builder.build(), callback, new Handler());
@@ -358,7 +383,7 @@ public class ShadowConnectivityManagerTest {
 
   @Test
   @Config(minSdk = O)
-  public void requestNetwork_withHandlerAndTimer_shouldAddCallback() throws Exception {
+  public void requestNetwork_withHandlerAndTimer_shouldAddCallback() {
     NetworkRequest.Builder builder = new NetworkRequest.Builder();
     ConnectivityManager.NetworkCallback callback = createSimpleCallback();
     connectivityManager.requestNetwork(builder.build(), callback, new Handler(), 0);
@@ -367,14 +392,32 @@ public class ShadowConnectivityManagerTest {
 
   @Test
   @Config(minSdk = N)
-  public void registerDefaultCallback_shouldAddCallback() throws Exception {
+  public void registerDefaultCallback_shouldAddCallback() {
     ConnectivityManager.NetworkCallback callback = createSimpleCallback();
     connectivityManager.registerDefaultNetworkCallback(callback);
     assertThat(shadowOf(connectivityManager).getNetworkCallbacks()).hasSize(1);
   }
 
-  @Test @Config(minSdk = LOLLIPOP)
-  public void unregisterCallback_shouldRemoveCallbacks() throws Exception {
+  @Test
+  @Config(minSdk = O)
+  public void registerDefaultCallback_withHandler_shouldAddCallback() {
+    ConnectivityManager.NetworkCallback callback = createSimpleCallback();
+    connectivityManager.registerDefaultNetworkCallback(callback, new Handler());
+    assertThat(shadowOf(connectivityManager).getNetworkCallbacks()).hasSize(1);
+  }
+
+  @Test
+  @Config(minSdk = S)
+  public void registerBestMatchingNetworkCallback_shouldAddCallback() {
+    NetworkRequest.Builder builder = new NetworkRequest.Builder();
+    ConnectivityManager.NetworkCallback callback = createSimpleCallback();
+    connectivityManager.registerBestMatchingNetworkCallback(
+        builder.build(), callback, new Handler());
+    assertThat(shadowOf(connectivityManager).getNetworkCallbacks()).hasSize(1);
+  }
+
+  @Test
+  public void unregisterCallback_shouldRemoveCallbacks() {
     NetworkRequest.Builder builder = new NetworkRequest.Builder();
     // Add two different callbacks.
     ConnectivityManager.NetworkCallback callback1 = createSimpleCallback();
@@ -389,10 +432,38 @@ public class ShadowConnectivityManagerTest {
     assertThat(shadowOf(connectivityManager).getNetworkCallbacks()).isEmpty();
   }
 
-  @Test(expected=IllegalArgumentException.class) @Config(minSdk = LOLLIPOP)
-  public void unregisterCallback_shouldNotAllowNullCallback() throws Exception {
+  @Test
+  @Config(minSdk = M)
+  public void unregisterCallback_withPendingIntent_shouldRemoveCallbacks() {
+    NetworkRequest.Builder builder = new NetworkRequest.Builder();
+    // Add two pendingIntents, should treat them as equal based on Intent#filterEquals
+    PendingIntent pendingIntent1 = createSimplePendingIntent();
+    PendingIntent pendingIntent2 = createSimplePendingIntent();
+    connectivityManager.registerNetworkCallback(builder.build(), pendingIntent1);
+    connectivityManager.registerNetworkCallback(builder.build(), pendingIntent2);
+
+    assertThat(shadowOf(connectivityManager).getNetworkCallbackPendingIntents()).hasSize(1);
+    connectivityManager.unregisterNetworkCallback(pendingIntent2);
+    assertThat(shadowOf(connectivityManager).getNetworkCallbackPendingIntents()).isEmpty();
+  }
+
+  @Test
+  public void unregisterCallback_shouldNotAllowNullCallback() {
     // Verify that exception is thrown.
-    connectivityManager.unregisterNetworkCallback((ConnectivityManager.NetworkCallback) null);
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            connectivityManager.unregisterNetworkCallback(
+                (ConnectivityManager.NetworkCallback) null));
+  }
+
+  @Config(minSdk = M)
+  @Test
+  public void unregisterCallback_withPendingIntent_shouldNotAllowNullCallback() {
+    // Verify that exception is thrown.
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> connectivityManager.unregisterNetworkCallback((PendingIntent) null));
   }
 
   @Test
@@ -435,19 +506,18 @@ public class ShadowConnectivityManagerTest {
   }
 
   @Test
-  @Config(minSdk = LOLLIPOP)
   public void isDefaultNetworkActive_defaultActive() {
     assertThat(shadowOf(connectivityManager).isDefaultNetworkActive()).isTrue();
   }
 
   @Test
-  @Config(minSdk = LOLLIPOP)
   public void isDefaultNetworkActive_notActive() {
     shadowOf(connectivityManager).setDefaultNetworkActive(false);
     assertThat(shadowOf(connectivityManager).isDefaultNetworkActive()).isFalse();
   }
 
   private static ConnectivityManager.OnNetworkActiveListener createSimpleOnNetworkActiveListener() {
+    //noinspection Convert2Lambda
     return new ConnectivityManager.OnNetworkActiveListener() {
       @Override
       public void onNetworkActive() {}
@@ -455,8 +525,7 @@ public class ShadowConnectivityManagerTest {
   }
 
   @Test
-  @Config(minSdk = LOLLIPOP)
-  public void addDefaultNetworkActiveListener_shouldAddListener() throws Exception {
+  public void addDefaultNetworkActiveListener_shouldAddListener() {
     ConnectivityManager.OnNetworkActiveListener listener1 =
         spy(createSimpleOnNetworkActiveListener());
     ConnectivityManager.OnNetworkActiveListener listener2 =
@@ -471,8 +540,7 @@ public class ShadowConnectivityManagerTest {
   }
 
   @Test
-  @Config(minSdk = LOLLIPOP)
-  public void removeDefaultNetworkActiveListener_shouldRemoveListeners() throws Exception {
+  public void removeDefaultNetworkActiveListener_shouldRemoveListeners() {
     // Add two different callbacks.
     ConnectivityManager.OnNetworkActiveListener listener1 =
         spy(createSimpleOnNetworkActiveListener());
@@ -501,21 +569,21 @@ public class ShadowConnectivityManagerTest {
     verify(listener2).onNetworkActive();
   }
 
-  @Test(expected = IllegalArgumentException.class)
-  @Config(minSdk = LOLLIPOP)
-  public void removeDefaultNetworkActiveListener_shouldNotAllowNullListener() throws Exception {
+  @Test
+  public void removeDefaultNetworkActiveListener_shouldNotAllowNullListener() {
     // Verify that exception is thrown.
-    connectivityManager.removeDefaultNetworkActiveListener(null);
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> connectivityManager.removeDefaultNetworkActiveListener(null));
   }
 
   @Test
-  @Config(minSdk = LOLLIPOP)
-  public void getNetworkCapabilities() throws Exception {
+  public void getNetworkCapabilities() {
     NetworkCapabilities nc = ShadowNetworkCapabilities.newInstance();
     shadowOf(nc).addCapability(NetworkCapabilities.NET_CAPABILITY_MMS);
 
-    shadowOf(connectivityManager).setNetworkCapabilities(
-        shadowOf(connectivityManager).getActiveNetwork(), nc);
+    shadowOf(connectivityManager)
+        .setNetworkCapabilities(shadowOf(connectivityManager).getActiveNetwork(), nc);
 
     assertThat(
             shadowOf(connectivityManager)
@@ -525,8 +593,7 @@ public class ShadowConnectivityManagerTest {
   }
 
   @Test
-  @Config(minSdk = LOLLIPOP)
-  public void getNetworkCapabilities_shouldReturnDefaultCapabilities() throws Exception {
+  public void getNetworkCapabilities_shouldReturnDefaultCapabilities() {
     for (Network network : connectivityManager.getAllNetworks()) {
       NetworkCapabilities nc = connectivityManager.getNetworkCapabilities(network);
       assertThat(nc).isNotNull();
@@ -554,7 +621,6 @@ public class ShadowConnectivityManagerTest {
   }
 
   @Test
-  @Config(minSdk = KITKAT)
   public void setAirplaneMode() {
     connectivityManager.setAirplaneMode(false);
     assertThat(
@@ -569,7 +635,6 @@ public class ShadowConnectivityManagerTest {
   }
 
   @Test
-  @Config(minSdk = LOLLIPOP)
   public void getLinkProperties() {
     Network network = shadowOf(connectivityManager).getActiveNetwork();
     LinkProperties lp = ReflectionHelpers.callConstructor(LinkProperties.class);
@@ -579,7 +644,6 @@ public class ShadowConnectivityManagerTest {
   }
 
   @Test
-  @Config(minSdk = LOLLIPOP)
   public void getLinkProperties_shouldReturnNull() {
     Network network = shadowOf(connectivityManager).getActiveNetwork();
     shadowOf(connectivityManager).setLinkProperties(network, null);
@@ -610,20 +674,24 @@ public class ShadowConnectivityManagerTest {
         .isEqualTo(RESTRICT_BACKGROUND_STATUS_DISABLED);
   }
 
-  @Test(expected = IllegalArgumentException.class)
   @Config(minSdk = N)
-  public void setRestrictBackgroundStatus_throwsExceptionOnIncorrectStatus0() throws Exception{
-    shadowOf(connectivityManager).setRestrictBackgroundStatus(0);
+  @Test
+  public void setRestrictBackgroundStatus_throwsExceptionOnIncorrectStatus0() {
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> shadowOf(connectivityManager).setRestrictBackgroundStatus(0));
   }
 
-  @Test(expected = IllegalArgumentException.class)
   @Config(minSdk = N)
-  public void setRestrictBackgroundStatus_throwsExceptionOnIncorrectStatus4() throws Exception{
-    shadowOf(connectivityManager).setRestrictBackgroundStatus(4);
+  @Test
+  public void setRestrictBackgroundStatus_throwsExceptionOnIncorrectStatus4() {
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> shadowOf(connectivityManager).setRestrictBackgroundStatus(4));
   }
 
   @Test
-  public void checkPollingTetherThreadNotCreated() throws Exception {
+  public void checkPollingTetherThreadNotCreated() {
     for (StackTraceElement[] elements : Thread.getAllStackTraces().values()) {
       for (StackTraceElement element : elements) {
         if (element.toString().contains("android.net.TetheringManager")) {
@@ -663,5 +731,118 @@ public class ShadowConnectivityManagerTest {
 
     assertThat(connectivityManager.getProxyForNetwork(network)).isNull();
     assertThat(connectivityManager.getDefaultProxy()).isNull();
+  }
+
+  @Test
+  @Config(minSdk = VERSION_CODES.O)
+  public void connectivityManager_instanceBasedOnSdkVersion() {
+    String originalProperty = System.getProperty("robolectric.createActivityContexts", "");
+    System.setProperty("robolectric.createActivityContexts", "true");
+    try (ActivityController<Activity> controller =
+        Robolectric.buildActivity(Activity.class).setup()) {
+      Activity activity = controller.get();
+      ConnectivityManager activityConnectivityManager =
+          (ConnectivityManager) activity.getSystemService(Context.CONNECTIVITY_SERVICE);
+
+      if (Build.VERSION.SDK_INT >= S) {
+        assertThat(connectivityManager).isNotSameInstanceAs(activityConnectivityManager);
+      } else {
+        assertThat(connectivityManager).isSameInstanceAs(activityConnectivityManager);
+      }
+      Network applicationActiveNetwork = connectivityManager.getActiveNetwork();
+      Network activityActiveNetwork = activityConnectivityManager.getActiveNetwork();
+
+      assertThat(activityActiveNetwork).isEqualTo(applicationActiveNetwork);
+    } finally {
+      System.setProperty("robolectric.createActivityContexts", originalProperty);
+    }
+  }
+
+  @Test
+  public void setDefaultNetworkActive_isActiveTrue_triggersOnAvailableInCallbacks() {
+    NetworkRequest.Builder builder = new NetworkRequest.Builder();
+    ConnectivityManager.NetworkCallback callback1 = spy(createSimpleCallback());
+    ConnectivityManager.NetworkCallback callback2 = spy(createSimpleCallback());
+    ShadowConnectivityManager shadowConnectivityManager = shadowOf(connectivityManager);
+    shadowConnectivityManager.registerDefaultNetworkCallback(callback1);
+    shadowConnectivityManager.registerNetworkCallback(builder.build(), callback2);
+    shadowConnectivityManager.setActiveNetworkInfo(
+        ShadowNetworkInfo.newInstance(
+            null,
+            ConnectivityManager.TYPE_MOBILE,
+            TelephonyManager.NETWORK_TYPE_LTE,
+            true,
+            NetworkInfo.State.CONNECTED));
+
+    shadowConnectivityManager.setDefaultNetworkActive(true);
+
+    verify(callback1).onAvailable(shadowConnectivityManager.getActiveNetwork());
+    verify(callback2).onAvailable(shadowConnectivityManager.getActiveNetwork());
+  }
+
+  @Test
+  public void setDefaultNetworkActive_isActiveFalse_triggersOnLostInCallbacks() {
+    NetworkRequest.Builder builder = new NetworkRequest.Builder();
+    ConnectivityManager.NetworkCallback callback1 = spy(createSimpleCallback());
+    ConnectivityManager.NetworkCallback callback2 = spy(createSimpleCallback());
+    ShadowConnectivityManager shadowConnectivityManager = shadowOf(connectivityManager);
+    shadowConnectivityManager.registerDefaultNetworkCallback(callback1);
+    shadowConnectivityManager.registerNetworkCallback(builder.build(), callback2);
+    shadowConnectivityManager.setActiveNetworkInfo(
+        ShadowNetworkInfo.newInstance(
+            null,
+            ConnectivityManager.TYPE_MOBILE,
+            TelephonyManager.NETWORK_TYPE_LTE,
+            true,
+            NetworkInfo.State.CONNECTED));
+    Network previouslyActiveNetwork = shadowConnectivityManager.getActiveNetwork();
+
+    shadowConnectivityManager.setDefaultNetworkActive(false);
+
+    verify(callback1).onLost(previouslyActiveNetwork);
+    verify(callback2).onLost(previouslyActiveNetwork);
+  }
+
+  @Test
+  public void
+      setDefaultNetworkActive_withSetNetworkCallbacksEnabledFalse_doesNotTriggerCallbacks() {
+    NetworkRequest.Builder builder = new NetworkRequest.Builder();
+    ConnectivityManager.NetworkCallback callback1 = spy(createSimpleCallback());
+    ConnectivityManager.NetworkCallback callback2 = spy(createSimpleCallback());
+    ShadowConnectivityManager shadowConnectivityManager = shadowOf(connectivityManager);
+    shadowConnectivityManager.registerDefaultNetworkCallback(callback1);
+    shadowConnectivityManager.registerNetworkCallback(builder.build(), callback2);
+    shadowConnectivityManager.setActiveNetworkInfo(
+        ShadowNetworkInfo.newInstance(
+            null,
+            ConnectivityManager.TYPE_MOBILE,
+            TelephonyManager.NETWORK_TYPE_LTE,
+            true,
+            NetworkInfo.State.CONNECTED));
+    shadowConnectivityManager.setNetworkCallbacksEnabled(false);
+
+    shadowConnectivityManager.setDefaultNetworkActive(true);
+    shadowConnectivityManager.setDefaultNetworkActive(false);
+
+    verify(callback1, never()).onAvailable(shadowConnectivityManager.getActiveNetwork());
+    verify(callback2, never()).onAvailable(shadowConnectivityManager.getActiveNetwork());
+  }
+
+  @Test
+  public void defaults_afterReset() {
+    ShadowConnectivityManager.reset();
+    assertThat(connectivityManager.getAllNetworkInfo()).hasLength(2);
+    assertThat(connectivityManager.getAllNetworks()).hasLength(2);
+    assertThat(connectivityManager.isDefaultNetworkActive()).isTrue();
+    if (RuntimeEnvironment.getApiLevel() >= M) {
+      assertThat(connectivityManager.getActiveNetwork()).isNotNull();
+    }
+  }
+
+  @Config(minSdk = M)
+  @Test
+  public void getActiveNetwork_afterSetActiveNetworkInfoNull() {
+    shadowOf(connectivityManager).setActiveNetworkInfo(null);
+    assertThat(connectivityManager.getActiveNetwork()).isNull();
   }
 }

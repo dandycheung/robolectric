@@ -22,6 +22,7 @@ import org.junit.runner.RunWith;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.annotation.Config;
 import org.robolectric.shadows.ShadowRcsUceAdapter.CapabilityFailureInfo;
+import org.robolectric.util.ReflectionHelpers;
 
 /**
  * Unit tests for {@link ShadowRcsUceAdapter} on S. Split out from ShadowRcsUceAdapterTest since the
@@ -59,10 +60,14 @@ public class ShadowRcsUceAdapterSTest {
     RcsContactUceCapability capability =
         new RcsContactUceCapability.OptionsBuilder(URI).addFeatureTag(FEATURE_TAG).build();
     ShadowRcsUceAdapter.setCapabilitiesForUri(URI, capability);
-    SuccessfulCapabilityVerifierCallback verifierCallback =
-        new SuccessfulCapabilityVerifierCallback(ImmutableList.of(capability));
+    SuccessfulCapabilityVerifierCallbackDelegate verifierCallback =
+        new SuccessfulCapabilityVerifierCallbackDelegate(ImmutableList.of(capability));
 
-    rcsUceAdapter.requestCapabilities(ImmutableList.of(URI), executorService, verifierCallback);
+    rcsUceAdapter.requestCapabilities(
+        ImmutableList.of(URI),
+        executorService,
+        ReflectionHelpers.createDelegatingProxy(CapabilitiesCallback.class, verifierCallback));
+    executorService.shutdown();
     executorService.awaitTermination(10, SECONDS);
 
     verifierCallback.assertExchangeSuccessfullyCompleted();
@@ -76,11 +81,14 @@ public class ShadowRcsUceAdapterSTest {
     RcsContactUceCapability otherEmptyCapability =
         new RcsContactUceCapability.OptionsBuilder(OTHER_URI).build();
     ShadowRcsUceAdapter.setCapabilitiesForUri(URI, capability);
-    SuccessfulCapabilityVerifierCallback verifierCallback =
-        new SuccessfulCapabilityVerifierCallback(ImmutableList.of(otherEmptyCapability));
+    SuccessfulCapabilityVerifierCallbackDelegate verifierCallback =
+        new SuccessfulCapabilityVerifierCallbackDelegate(ImmutableList.of(otherEmptyCapability));
 
     rcsUceAdapter.requestCapabilities(
-        ImmutableList.of(OTHER_URI), executorService, verifierCallback);
+        ImmutableList.of(OTHER_URI),
+        executorService,
+        ReflectionHelpers.createDelegatingProxy(CapabilitiesCallback.class, verifierCallback));
+    executorService.shutdown();
     executorService.awaitTermination(10, SECONDS);
 
     verifierCallback.assertExchangeSuccessfullyCompleted();
@@ -90,9 +98,13 @@ public class ShadowRcsUceAdapterSTest {
   public void setCapabilitiesFailureForUri_requestCapabilities_failsForUri() throws Exception {
     CapabilityFailureInfo failureInfo = CapabilityFailureInfo.create(ERROR_CODE, RETRY_MILLIS);
     ShadowRcsUceAdapter.setCapabilitiesFailureForUri(URI, failureInfo);
-    ErrorVerifierCallback verifierCallback = new ErrorVerifierCallback(failureInfo);
+    ErrorVerifierCallbackDelegate verifierCallback = new ErrorVerifierCallbackDelegate(failureInfo);
 
-    rcsUceAdapter.requestCapabilities(ImmutableList.of(URI), executorService, verifierCallback);
+    rcsUceAdapter.requestCapabilities(
+        ImmutableList.of(URI),
+        executorService,
+        ReflectionHelpers.createDelegatingProxy(CapabilitiesCallback.class, verifierCallback));
+    executorService.shutdown();
     executorService.awaitTermination(10, SECONDS);
 
     verifierCallback.assertOnErrorCalled();
@@ -105,11 +117,14 @@ public class ShadowRcsUceAdapterSTest {
     ShadowRcsUceAdapter.setCapabilitiesFailureForUri(URI, failureInfo);
     RcsContactUceCapability otherEmptyCapability =
         new RcsContactUceCapability.OptionsBuilder(OTHER_URI).build();
-    SuccessfulCapabilityVerifierCallback verifierCallback =
-        new SuccessfulCapabilityVerifierCallback(ImmutableList.of(otherEmptyCapability));
+    SuccessfulCapabilityVerifierCallbackDelegate verifierCallback =
+        new SuccessfulCapabilityVerifierCallbackDelegate(ImmutableList.of(otherEmptyCapability));
 
     rcsUceAdapter.requestCapabilities(
-        ImmutableList.of(OTHER_URI), executorService, verifierCallback);
+        ImmutableList.of(OTHER_URI),
+        executorService,
+        ReflectionHelpers.createDelegatingProxy(CapabilitiesCallback.class, verifierCallback));
+    executorService.shutdown();
     executorService.awaitTermination(10, SECONDS);
 
     verifierCallback.assertExchangeSuccessfullyCompleted();
@@ -121,10 +136,14 @@ public class ShadowRcsUceAdapterSTest {
     RcsContactUceCapability capability =
         new RcsContactUceCapability.OptionsBuilder(URI).addFeatureTag(FEATURE_TAG).build();
     ShadowRcsUceAdapter.setCapabilitiesForUri(URI, capability);
-    SuccessfulCapabilityVerifierCallback verifierCallback =
-        new SuccessfulCapabilityVerifierCallback(ImmutableList.of(capability));
+    SuccessfulCapabilityVerifierCallbackDelegate verifierCallback =
+        new SuccessfulCapabilityVerifierCallbackDelegate(ImmutableList.of(capability));
 
-    rcsUceAdapter.requestAvailability(URI, executorService, verifierCallback);
+    rcsUceAdapter.requestAvailability(
+        URI,
+        executorService,
+        ReflectionHelpers.createDelegatingProxy(CapabilitiesCallback.class, verifierCallback));
+    executorService.shutdown();
     executorService.awaitTermination(10, SECONDS);
 
     verifierCallback.assertExchangeSuccessfullyCompleted();
@@ -138,10 +157,14 @@ public class ShadowRcsUceAdapterSTest {
     RcsContactUceCapability otherEmptyCapability =
         new RcsContactUceCapability.OptionsBuilder(OTHER_URI).build();
     ShadowRcsUceAdapter.setCapabilitiesForUri(URI, capability);
-    SuccessfulCapabilityVerifierCallback verifierCallback =
-        new SuccessfulCapabilityVerifierCallback(ImmutableList.of(otherEmptyCapability));
+    SuccessfulCapabilityVerifierCallbackDelegate verifierCallback =
+        new SuccessfulCapabilityVerifierCallbackDelegate(ImmutableList.of(otherEmptyCapability));
 
-    rcsUceAdapter.requestAvailability(OTHER_URI, executorService, verifierCallback);
+    rcsUceAdapter.requestAvailability(
+        OTHER_URI,
+        executorService,
+        ReflectionHelpers.createDelegatingProxy(CapabilitiesCallback.class, verifierCallback));
+    executorService.shutdown();
     executorService.awaitTermination(10, SECONDS);
 
     verifierCallback.assertExchangeSuccessfullyCompleted();
@@ -151,9 +174,13 @@ public class ShadowRcsUceAdapterSTest {
   public void setCapabilitiesFailureForUri_requestAvailability_failsForUri() throws Exception {
     CapabilityFailureInfo failureInfo = CapabilityFailureInfo.create(ERROR_CODE, RETRY_MILLIS);
     ShadowRcsUceAdapter.setCapabilitiesFailureForUri(URI, failureInfo);
-    ErrorVerifierCallback verifierCallback = new ErrorVerifierCallback(failureInfo);
+    ErrorVerifierCallbackDelegate verifierCallback = new ErrorVerifierCallbackDelegate(failureInfo);
 
-    rcsUceAdapter.requestAvailability(URI, executorService, verifierCallback);
+    rcsUceAdapter.requestAvailability(
+        URI,
+        executorService,
+        ReflectionHelpers.createDelegatingProxy(CapabilitiesCallback.class, verifierCallback));
+    executorService.shutdown();
     executorService.awaitTermination(10, SECONDS);
 
     verifierCallback.assertOnErrorCalled();
@@ -166,26 +193,29 @@ public class ShadowRcsUceAdapterSTest {
     ShadowRcsUceAdapter.setCapabilitiesFailureForUri(URI, failureInfo);
     RcsContactUceCapability otherEmptyCapability =
         new RcsContactUceCapability.OptionsBuilder(OTHER_URI).build();
-    SuccessfulCapabilityVerifierCallback verifierCallback =
-        new SuccessfulCapabilityVerifierCallback(ImmutableList.of(otherEmptyCapability));
+    SuccessfulCapabilityVerifierCallbackDelegate verifierCallback =
+        new SuccessfulCapabilityVerifierCallbackDelegate(ImmutableList.of(otherEmptyCapability));
 
-    rcsUceAdapter.requestAvailability(OTHER_URI, executorService, verifierCallback);
+    rcsUceAdapter.requestAvailability(
+        OTHER_URI,
+        executorService,
+        ReflectionHelpers.createDelegatingProxy(CapabilitiesCallback.class, verifierCallback));
+    executorService.shutdown();
     executorService.awaitTermination(10, SECONDS);
 
     verifierCallback.assertExchangeSuccessfullyCompleted();
   }
 
-  private static class SuccessfulCapabilityVerifierCallback implements CapabilitiesCallback {
+  private static class SuccessfulCapabilityVerifierCallbackDelegate {
     private final List<RcsContactUceCapability> expectedCapabilities;
     private int currentIndex = 0;
     private boolean onCompleteCalled = false;
 
-    private SuccessfulCapabilityVerifierCallback(
+    private SuccessfulCapabilityVerifierCallbackDelegate(
         List<RcsContactUceCapability> expectedCapabilities) {
       this.expectedCapabilities = expectedCapabilities;
     }
 
-    @Override
     public void onCapabilitiesReceived(List<RcsContactUceCapability> contactCapabilities) {
       if (onCompleteCalled) {
         Assert.fail();
@@ -197,12 +227,10 @@ public class ShadowRcsUceAdapterSTest {
       }
     }
 
-    @Override
     public void onComplete() {
       onCompleteCalled = true;
     }
 
-    @Override
     public void onError(int i, long l) {
       Assert.fail();
     }
@@ -213,25 +241,22 @@ public class ShadowRcsUceAdapterSTest {
     }
   }
 
-  private static class ErrorVerifierCallback implements CapabilitiesCallback {
+  private static class ErrorVerifierCallbackDelegate {
     private final CapabilityFailureInfo failureInfo;
     private boolean onErrorCalled = false;
 
-    private ErrorVerifierCallback(CapabilityFailureInfo failureInfo) {
+    private ErrorVerifierCallbackDelegate(CapabilityFailureInfo failureInfo) {
       this.failureInfo = failureInfo;
     }
 
-    @Override
     public void onCapabilitiesReceived(List<RcsContactUceCapability> contactCapabilities) {
       Assert.fail();
     }
 
-    @Override
     public void onComplete() {
       Assert.fail();
     }
 
-    @Override
     public void onError(int errorCode, long retryMillis) {
       assertThat(errorCode).isEqualTo(failureInfo.errorCode());
       assertThat(retryMillis).isEqualTo(failureInfo.retryMillis());

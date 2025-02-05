@@ -17,12 +17,14 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.robolectric.R;
 import org.robolectric.Robolectric;
+import org.robolectric.annotation.ResourcesMode;
 
 @RunWith(AndroidJUnit4.class)
 public class ViewStubTest {
   private Context ctxt;
 
-  @Before public void setUp() throws Exception {
+  @Before
+  public void setUp() throws Exception {
     ctxt = ApplicationProvider.getApplicationContext();
   }
 
@@ -52,12 +54,15 @@ public class ViewStubTest {
   }
 
   @Test
+  @ResourcesMode(ResourcesMode.Mode.BINARY)
   public void shouldApplyAttributes() {
-    ViewStub viewStub = new ViewStub(ctxt,
-        Robolectric.buildAttributeSet()
-            .addAttribute(android.R.attr.inflatedId, "@+id/include_id")
-            .addAttribute(android.R.attr.layout, "@layout/media")
-            .build());
+    ViewStub viewStub =
+        new ViewStub(
+            ctxt,
+            Robolectric.buildAttributeSet()
+                .addAttribute(android.R.attr.inflatedId, "@+id/include_id")
+                .addAttribute(android.R.attr.layout, "@layout/media")
+                .build());
 
     assertThat(viewStub.getInflatedId()).isEqualTo(R.id.include_id);
     assertThat(viewStub.getLayoutResource()).isEqualTo(R.layout.media);

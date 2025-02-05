@@ -4,9 +4,6 @@ import static android.app.ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREG
 import static android.app.ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND_SERVICE;
 import static android.app.ActivityManager.RunningAppProcessInfo.IMPORTANCE_GONE;
 import static android.app.ActivityManager.RunningAppProcessInfo.IMPORTANCE_VISIBLE;
-import static android.os.Build.VERSION_CODES.JELLY_BEAN_MR1;
-import static android.os.Build.VERSION_CODES.KITKAT;
-import static android.os.Build.VERSION_CODES.LOLLIPOP;
 import static android.os.Build.VERSION_CODES.M;
 import static android.os.Build.VERSION_CODES.O;
 import static android.os.Build.VERSION_CODES.P;
@@ -16,8 +13,10 @@ import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.robolectric.Shadows.shadowOf;
 
+import android.app.Activity;
 import android.app.ActivityManager;
 import android.app.ActivityManager.AppTask;
+import android.app.ActivityManager.RecentTaskInfo;
 import android.app.Application;
 import android.app.ApplicationExitInfo;
 import android.content.ComponentName;
@@ -36,6 +35,8 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.InOrder;
+import org.robolectric.Robolectric;
+import org.robolectric.android.controller.ActivityController;
 import org.robolectric.annotation.Config;
 import org.robolectric.shadow.api.Shadow;
 
@@ -95,7 +96,6 @@ public class ShadowActivityManagerTest {
   }
 
   @Test
-  @Config(minSdk = LOLLIPOP)
   public void getAppTasks_shouldReturnAppTaskList() {
     final AppTask task1 = ShadowAppTask.newInstance();
     final AppTask task2 = ShadowAppTask.newInstance();
@@ -106,13 +106,32 @@ public class ShadowActivityManagerTest {
   }
 
   @Test
+  public void testRecentTasks_shouldReturnTaskList() {
+    RecentTaskInfo taskInfo1 = new RecentTaskInfo();
+    taskInfo1.id = 123;
+    RecentTaskInfo taskInfo2 = new RecentTaskInfo();
+    taskInfo1.id = 234;
+    RecentTaskInfo taskInfo3 = new RecentTaskInfo();
+    taskInfo1.id = 345;
+
+    assertThat(activityManager.getRecentTasks(Integer.MAX_VALUE, 0)).isEmpty();
+    shadowActivityManager.setRecentTasks(Lists.newArrayList(taskInfo1, taskInfo2, taskInfo3));
+    assertThat(activityManager.getRecentTasks(2, 0))
+        .containsExactly(taskInfo1, taskInfo2)
+        .inOrder();
+    assertThat(activityManager.getRecentTasks(Integer.MAX_VALUE, 0))
+        .containsExactly(taskInfo1, taskInfo2, taskInfo3)
+        .inOrder();
+  }
+
+  @Test
   public void getRunningAppProcesses_shouldReturnProcessList() {
     final ActivityManager.RunningAppProcessInfo process1 =
         buildProcessInfo(new ComponentName("org.robolectric", "Process 1"));
     final ActivityManager.RunningAppProcessInfo process2 =
         buildProcessInfo(new ComponentName("org.robolectric", "Process 2"));
 
-    assertThat(activityManager.getRunningAppProcesses().size()).isEqualTo(1);
+    assertThat(activityManager.getRunningAppProcesses()).hasSize(1);
     ActivityManager.RunningAppProcessInfo myInfo = activityManager.getRunningAppProcesses().get(0);
     assertThat(myInfo.pid).isEqualTo(android.os.Process.myPid());
     assertThat(myInfo.uid).isEqualTo(android.os.Process.myUid());
@@ -161,7 +180,6 @@ public class ShadowActivityManagerTest {
   }
 
   @Test
-  @Config(minSdk = KITKAT)
   public void setIsLowRamDevice() {
     shadowActivityManager.setIsLowRamDevice(true);
     assertThat(activityManager.isLowRamDevice()).isTrue();
@@ -198,7 +216,6 @@ public class ShadowActivityManagerTest {
   }
 
   @Test
-  @Config(minSdk = JELLY_BEAN_MR1)
   public void switchUser() {
     shadowOf(application).setSystemService(Context.USER_SERVICE, userManager);
     shadowOf(userManager).addUser(10, "secondary_user", 0);
@@ -215,13 +232,11 @@ public class ShadowActivityManagerTest {
   }
 
   @Test
-  @Config(minSdk = JELLY_BEAN_MR1)
   public void getCurrentUser_default_returnZero() {
     assertThat(ActivityManager.getCurrentUser()).isEqualTo(0);
   }
 
   @Test
-  @Config(minSdk = JELLY_BEAN_MR1)
   public void getCurrentUser_nonDefault_returnValueSet() {
     shadowOf(application).setSystemService(Context.USER_SERVICE, userManager);
     shadowOf(userManager).addUser(10, "secondary_user", 0);
@@ -308,7 +323,7 @@ public class ShadowActivityManagerTest {
 
   @Config(minSdk = R)
   @Test
-  public void getHistoricalProcessExitReasons_recordsRetunredInCorrectOrder() {
+  public void getHistoricalProcessExitReasons_recordsReturnedInCorrectOrder() {
     addApplicationExitInfo(/* pid= */ 1);
     addApplicationExitInfo(/* pid= */ 2);
     addApplicationExitInfo(/* pid= */ 3);
@@ -424,13 +439,11 @@ public class ShadowActivityManagerTest {
     assertThat(activityManager.getDeviceConfigurationInfo()).isEqualTo(configurationInfo);
   }
 
-  @Config(minSdk = KITKAT)
   @Test
   public void isApplicationUserDataCleared_returnsDefaultFalse() {
     assertThat(shadowActivityManager.isApplicationUserDataCleared()).isFalse();
   }
 
-  @Config(minSdk = KITKAT)
   @Test
   public void isApplicationUserDataCleared_returnsTrue() {
     activityManager.clearApplicationUserData();
@@ -468,5 +481,30 @@ public class ShadowActivityManagerTest {
     final ActivityManager.RunningAppProcessInfo info = new ActivityManager.RunningAppProcessInfo();
     info.importanceReasonComponent = name;
     return info;
+  }
+
+  @Test
+  @Config(minSdk = O)
+  public void activityManager_activityContextEnabled_retrievesConsistentLowRamDeviceStatus() {
+    String originalProperty = System.getProperty("robolectric.createActivityContexts", "");
+    System.setProperty("robolectric.createActivityContexts", "true");
+    try (ActivityController<Activity> controller =
+        Robolectric.buildActivity(Activity.class).setup()) {
+      ActivityManager applicationActivityManager =
+          (ActivityManager)
+              ApplicationProvider.getApplicationContext()
+                  .getSystemService(Context.ACTIVITY_SERVICE);
+
+      Activity activity = controller.get();
+      ActivityManager activityActivityManager =
+          (ActivityManager) activity.getSystemService(Context.ACTIVITY_SERVICE);
+
+      boolean applicationLowRamStatus = applicationActivityManager.isLowRamDevice();
+      boolean activityLowRamStatus = activityActivityManager.isLowRamDevice();
+
+      assertThat(activityLowRamStatus).isEqualTo(applicationLowRamStatus);
+    } finally {
+      System.setProperty("robolectric.createActivityContexts", originalProperty);
+    }
   }
 }

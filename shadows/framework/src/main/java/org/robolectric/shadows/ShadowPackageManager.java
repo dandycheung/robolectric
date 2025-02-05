@@ -1,6 +1,7 @@
 package org.robolectric.shadows;
 
 import static android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_DISABLED;
+import static android.content.pm.PackageManager.EXTRA_VERIFICATION_ID;
 import static android.content.pm.PackageManager.GET_ACTIVITIES;
 import static android.content.pm.PackageManager.GET_CONFIGURATIONS;
 import static android.content.pm.PackageManager.GET_GIDS;
@@ -25,14 +26,19 @@ import static android.content.pm.PackageManager.SIGNATURE_MATCH;
 import static android.content.pm.PackageManager.SIGNATURE_NEITHER_SIGNED;
 import static android.content.pm.PackageManager.SIGNATURE_NO_MATCH;
 import static android.content.pm.PackageManager.SIGNATURE_SECOND_NOT_SIGNED;
-import static android.os.Build.VERSION_CODES.JELLY_BEAN_MR1;
-import static android.os.Build.VERSION_CODES.KITKAT;
+import static android.content.pm.PackageManager.VERIFICATION_ALLOW;
 import static android.os.Build.VERSION_CODES.N;
+import static android.os.Build.VERSION_CODES.TIRAMISU;
+import static com.google.common.collect.ImmutableList.toImmutableList;
 import static java.util.Arrays.asList;
 import static org.robolectric.util.reflector.Reflector.reflector;
 
 import android.Manifest;
+import android.Manifest.permission;
+import android.Manifest.permission_group;
 import android.annotation.UserIdInt;
+import android.app.Application;
+import android.content.BroadcastReceiver;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
@@ -44,10 +50,10 @@ import android.content.pm.ComponentInfo;
 import android.content.pm.FeatureInfo;
 import android.content.pm.IPackageDataObserver;
 import android.content.pm.IPackageDeleteObserver;
+import android.content.pm.InstallSourceInfo;
 import android.content.pm.ModuleInfo;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
-import android.content.pm.PackageManager.NameNotFoundException;
 import android.content.pm.PackageParser;
 import android.content.pm.PackageParser.Component;
 import android.content.pm.PackageParser.IntentInfo;
@@ -60,11 +66,12 @@ import android.content.pm.ProviderInfo;
 import android.content.pm.ResolveInfo;
 import android.content.pm.ServiceInfo;
 import android.content.pm.Signature;
+import android.content.pm.SigningInfo;
+import android.content.pm.pkg.FrameworkPackageUserState;
 import android.content.res.Resources;
 import android.graphics.drawable.Drawable;
 import android.net.Uri;
 import android.os.Binder;
-import android.os.Build;
 import android.os.PersistableBundle;
 import android.os.Process;
 import android.os.RemoteException;
@@ -74,7 +81,10 @@ import android.util.Pair;
 import com.google.common.base.Function;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.HashMultimap;
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Multimap;
+import com.google.errorprone.annotations.InlineMe;
 import java.lang.reflect.Array;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -111,6 +121,8 @@ public class ShadowPackageManager {
 
   @RealObject PackageManager realPackageManager;
 
+  // The big-lock to control concurrency in this class.
+  // Note: not all APIs in this class have been made thread safe yet.
   static final Object lock = new Object();
   static Map<String, Boolean> permissionRationaleMap = new HashMap<>();
   static List<FeatureInfo> systemAvailableFeatures = new ArrayList<>();
@@ -131,25 +143,34 @@ public class ShadowPackageManager {
   static final SortedMap<ComponentName, List<IntentFilter>> providerFilters = new TreeMap<>();
   static final SortedMap<ComponentName, List<IntentFilter>> receiverFilters = new TreeMap<>();
 
-  private static Map<String, PackageInfo> packageArchiveInfo = new HashMap<>();
+  private static final Map<String, PackageInfo> packageArchiveInfo = new HashMap<>();
   static final Map<String, PackageStats> packageStatsMap = new HashMap<>();
   static final Map<String, String> packageInstallerMap = new HashMap<>();
+  static final Map<String, Object> packageInstallSourceInfoMap = new HashMap<>();
   static final Map<Integer, String[]> packagesForUid = new HashMap<>();
   static final Map<String, Integer> uidForPackage = new HashMap<>();
   static final Map<Integer, String> namesForUid = new HashMap<>();
   static final Map<Integer, Integer> verificationResults = new HashMap<>();
+
+  @GuardedBy("lock")
   static final Map<Integer, Long> verificationTimeoutExtension = new HashMap<>();
+
+  @GuardedBy("lock")
+  static final Map<Integer, Integer> verificationCodeAtTimeoutExtension = new HashMap<>();
+
   static final Map<String, String> currentToCanonicalNames = new HashMap<>();
   static final Map<String, String> canonicalToCurrentNames = new HashMap<>();
   static final Map<ComponentName, ComponentState> componentList = new LinkedHashMap<>();
   static final Map<ComponentName, Drawable> drawableList = new LinkedHashMap<>();
   static final Map<String, Drawable> applicationIcons = new HashMap<>();
   static final Map<String, Drawable> unbadgedApplicationIcons = new HashMap<>();
-  static final Map<String, Boolean> systemFeatureList = new LinkedHashMap<>();
+  static final Map<String, Boolean> systemFeatureList =
+      new LinkedHashMap<>(SystemFeatureListInitializer.getSystemFeatures());
   static final SortedMap<ComponentName, List<IntentFilter>> preferredActivities = new TreeMap<>();
   static final SortedMap<ComponentName, List<IntentFilter>> persistentPreferredActivities =
       new TreeMap<>();
   static final Map<Pair<String, Integer>, Drawable> drawables = new LinkedHashMap<>();
+
   /**
    * Map of package names to an inner map where the key is the resource id which fetches its
    * corresponding text.
@@ -159,6 +180,7 @@ public class ShadowPackageManager {
   static final Map<String, Integer> applicationEnabledSettingMap = new HashMap<>();
   static Map<String, PermissionInfo> extraPermissions = new HashMap<>();
   static Map<String, PermissionGroupInfo> permissionGroups = new HashMap<>();
+
   /**
    * Map of package names to an inner map where the key is the permission and the integer represents
    * the permission flags set for that particular permission
@@ -168,7 +190,10 @@ public class ShadowPackageManager {
   public static Map<String, Resources> resources = new HashMap<>();
   static final Map<Intent, List<ResolveInfo>> resolveInfoForIntent =
       new TreeMap<>(new IntentComparator());
+
+  @GuardedBy("lock")
   static Set<String> deletedPackages = new HashSet<>();
+
   static Map<String, IPackageDeleteObserver> pendingDeleteCallbacks = new HashMap<>();
   static Set<String> hiddenPackages = new HashSet<>();
   static Multimap<Integer, String> sequenceNumberChangedPackagesMap = HashMultimap.create();
@@ -178,27 +203,130 @@ public class ShadowPackageManager {
   boolean shouldShowActivityChooser = false;
   static final Map<String, Integer> distractingPackageRestrictions = new ConcurrentHashMap<>();
 
+  static final String AOSP_PLATFORM_PERMISSION_GROUP_PREFIX = "android.permission-group.";
+  static final String AOSP_PLATFORM_PERMISSION_PREFIX = "android.permission.";
+
+  /**
+   * Limited set of platform permission groups and their metadata as defined in API level 23.
+   *
+   * <p>The source of truth for the list of platform permission groups and their metadata is the
+   * core framework AndroidManifest.xml file in the Android SDK. For the latest version see:
+   * https://cs.android.com/android/platform/superproject/main/+/main:frameworks/base/core/res/AndroidManifest.xml
+   * Note that new groups may be added and changes to existing groups may be made in each existing
+   * and future versions.
+   */
+  static final ImmutableMap<String, PermissionGroupInfo> AOSP_PLATFORM_PERMISSION_GROUPS =
+      ImmutableMap.of(
+          permission_group.CALENDAR,
+          createPermissionGroupInfo(
+              permission_group.CALENDAR, "Calendar", "access your calendar", 200),
+          permission_group.CONTACTS,
+          createPermissionGroupInfo(
+              permission_group.CONTACTS, "Contacts", "access your contacts", 100));
+
+  /**
+   * Limited set of platform permissions and their metadata as defined in API level 23.
+   *
+   * <p>The source of truth for the list of platform permissions and their metadata is the core
+   * framework AndroidManifest.xml file in the Android SDK. For the latest version see:
+   * https://cs.android.com/android/platform/superproject/main/+/main:frameworks/base/core/res/AndroidManifest.xml
+   * Note that new permissions may be added and changes to existing permissions may be made in each
+   * existing and future versions.
+   *
+   * <p>The mapping of permissions to groups was removed from the core framework AndroidManifest.xml
+   * file. The current source of truth is in the Permission mainline module:
+   * https://cs.android.com/android/platform/superproject/main/+/main:packages/modules/Permission/PermissionController/src/com/android/permissioncontroller/permission/utils/PermissionMapping.kt
+   */
+  static final ImmutableMap<String, PermissionInfo> AOSP_PLATFORM_PERMISSIONS =
+      ImmutableMap.of(
+          permission.READ_CALENDAR,
+          createPermissionInfo(
+              permission.READ_CALENDAR,
+              "read calendar events plus confidential information",
+              "Allows the app to read all calendar events stored on your phone, including those of"
+                  + " friends or co-workers. This may allow the app to share or save your calendar"
+                  + " data, regardless of confidentiality or sensitivity.",
+              PermissionInfo.PROTECTION_DANGEROUS,
+              permission_group.CALENDAR),
+          permission.WRITE_CALENDAR,
+          createPermissionInfo(
+              permission.WRITE_CALENDAR,
+              "add or modify calendar events and send email to guests without owners\' knowledge",
+              "Allows the app to add, remove, change events that you can modify on your phone,"
+                  + " including those of friends or co-workers. This may allow the app to send"
+                  + " messages that appear to come from calendar owners, or modify events without"
+                  + " the owners\' knowledge.",
+              PermissionInfo.PROTECTION_DANGEROUS,
+              permission_group.CALENDAR),
+          permission.GET_ACCOUNTS,
+          createPermissionInfo(
+              permission.GET_ACCOUNTS,
+              "find accounts on the device",
+              "Allows the app to get the list of accounts known by the phone. This may include any"
+                  + " accounts created by applications you have installed.",
+              PermissionInfo.PROTECTION_DANGEROUS,
+              permission_group.CONTACTS),
+          permission.READ_CONTACTS,
+          createPermissionInfo(
+              permission.READ_CONTACTS,
+              "read your contacts",
+              "Allows the app to read data about your contacts stored on your phone, including the"
+                  + " frequency with which you\'ve called, emailed, or communicated in other ways"
+                  + " with specific individuals. This permission allows apps to save your contact"
+                  + " data, and malicious apps may share contact data without your knowledge.",
+              PermissionInfo.PROTECTION_DANGEROUS,
+              permission_group.CONTACTS),
+          permission.WRITE_CONTACTS,
+          createPermissionInfo(
+              permission.WRITE_CONTACTS,
+              "modify your contacts",
+              "Allows the app to modify the data about your contacts stored on your phone,"
+                  + " including the frequency with which you\'ve called, emailed, or communicated"
+                  + " in other ways with specific contacts. This permission allows apps to delete"
+                  + " contact data.",
+              PermissionInfo.PROTECTION_DANGEROUS,
+              permission_group.CONTACTS));
+
+  private static PermissionGroupInfo createPermissionGroupInfo(
+      String name, String label, String description, int priority) {
+    PermissionGroupInfo permissionGroupInfo = new PermissionGroupInfo();
+    permissionGroupInfo.name = name;
+    permissionGroupInfo.nonLocalizedDescription = description;
+    permissionGroupInfo.nonLocalizedLabel = label;
+    permissionGroupInfo.priority = priority;
+    return permissionGroupInfo;
+  }
+
+  private static PermissionInfo createPermissionInfo(
+      String name, String label, String description, int protectionLevel, String group) {
+    PermissionInfo permissionInfo = new PermissionInfo();
+    permissionInfo.group = group;
+    permissionInfo.name = name;
+    permissionInfo.nonLocalizedDescription = description;
+    permissionInfo.nonLocalizedLabel = label;
+    permissionInfo.protectionLevel = protectionLevel;
+    return permissionInfo;
+  }
+
   /**
    * Makes sure that given activity exists.
    *
-   * If the activity doesn't exist yet, it will be created with {@code applicationInfo} set to an
+   * <p>If the activity doesn't exist yet, it will be created with {@code applicationInfo} set to an
    * existing application, or if it doesn't exist, a new package will be created.
    *
    * @return existing or newly created activity info.
    */
   public ActivityInfo addActivityIfNotPresent(ComponentName componentName) {
+    ActivityInfo activityInfo = updateName(componentName, new ActivityInfo());
+    activityInfo.flags |= ActivityInfo.FLAG_HARDWARE_ACCELERATED;
     return addComponent(
-        activityFilters,
-        p -> p.activities,
-        (p, a) -> p.activities = a,
-        updateName(componentName, new ActivityInfo()),
-        false);
+        activityFilters, p -> p.activities, (p, a) -> p.activities = a, activityInfo, false);
   }
 
   /**
    * Makes sure that given service exists.
    *
-   * If the service doesn't exist yet, it will be created with {@code applicationInfo} set to an
+   * <p>If the service doesn't exist yet, it will be created with {@code applicationInfo} set to an
    * existing application, or if it doesn't exist, a new package will be created.
    *
    * @return existing or newly created service info.
@@ -215,7 +343,7 @@ public class ShadowPackageManager {
   /**
    * Makes sure that given receiver exists.
    *
-   * If the receiver doesn't exist yet, it will be created with {@code applicationInfo} set to an
+   * <p>If the receiver doesn't exist yet, it will be created with {@code applicationInfo} set to an
    * existing application, or if it doesn't exist, a new package will be created.
    *
    * @return existing or newly created receiver info.
@@ -232,7 +360,7 @@ public class ShadowPackageManager {
   /**
    * Makes sure that given provider exists.
    *
-   * If the provider doesn't exist yet, it will be created with {@code applicationInfo} set to an
+   * <p>If the provider doesn't exist yet, it will be created with {@code applicationInfo} set to an
    * existing application, or if it doesn't exist, a new package will be created.
    *
    * @return existing or newly created provider info.
@@ -258,10 +386,10 @@ public class ShadowPackageManager {
   /**
    * Adds or updates given activity in the system.
    *
-   * If activity with the same {@link ComponentInfo#name} and {@code ComponentInfo#packageName}
+   * <p>If activity with the same {@link ComponentInfo#name} and {@code ComponentInfo#packageName}
    * exists it will be updated. Its {@link ComponentInfo#applicationInfo} is always set to {@link
-   * ApplicationInfo} already existing in the system, but if no application exists a new one will
-   * be created using {@link ComponentInfo#applicationInfo} in this component.
+   * ApplicationInfo} already existing in the system, but if no application exists a new one will be
+   * created using {@link ComponentInfo#applicationInfo} in this component.
    */
   public void addOrUpdateActivity(ActivityInfo activityInfo) {
     addComponent(
@@ -275,7 +403,7 @@ public class ShadowPackageManager {
   /**
    * Adds or updates given service in the system.
    *
-   * If service with the same {@link ComponentInfo#name} and {@code ComponentInfo#packageName}
+   * <p>If service with the same {@link ComponentInfo#name} and {@code ComponentInfo#packageName}
    * exists it will be updated. Its {@link ComponentInfo#applicationInfo} is always set to {@link
    * ApplicationInfo} already existing in the system, but if no application exists a new one will be
    * created using {@link ComponentInfo#applicationInfo} in this component.
@@ -292,11 +420,10 @@ public class ShadowPackageManager {
   /**
    * Adds or updates given broadcast receiver in the system.
    *
-   * If broadcast receiver with the same {@link ComponentInfo#name} and {@code
+   * <p>If broadcast receiver with the same {@link ComponentInfo#name} and {@code
    * ComponentInfo#packageName} exists it will be updated. Its {@link ComponentInfo#applicationInfo}
-   * is always set to {@link ApplicationInfo} already existing in the system, but if no
-   * application exists a new one will be created using {@link ComponentInfo#applicationInfo} in
-   * this component.
+   * is always set to {@link ApplicationInfo} already existing in the system, but if no application
+   * exists a new one will be created using {@link ComponentInfo#applicationInfo} in this component.
    */
   public void addOrUpdateReceiver(ActivityInfo receiverInfo) {
     addComponent(
@@ -310,11 +437,10 @@ public class ShadowPackageManager {
   /**
    * Adds or updates given content provider in the system.
    *
-   * If content provider with the same {@link ComponentInfo#name} and {@code
+   * <p>If content provider with the same {@link ComponentInfo#name} and {@code
    * ComponentInfo#packageName} exists it will be updated. Its {@link ComponentInfo#applicationInfo}
-   * is always set to {@link ApplicationInfo} already existing in the system, but if no
-   * application exists a new one will be created using {@link ComponentInfo#applicationInfo} in
-   * this component.
+   * is always set to {@link ApplicationInfo} already existing in the system, but if no application
+   * exists a new one will be created using {@link ComponentInfo#applicationInfo} in this component.
    */
   public void addOrUpdateProvider(ProviderInfo providerInfo) {
     addComponent(
@@ -458,7 +584,7 @@ public class ShadowPackageManager {
   /**
    * Settings for a particular package.
    *
-   * This class mirrors {@link com.android.server.pm.PackageSetting}, which is used by {@link
+   * <p>This class mirrors {@link com.android.server.pm.PackageSetting}, which is used by {@link
    * PackageManager}.
    */
   public static class PackageSetting {
@@ -536,7 +662,6 @@ public class ShadowPackageManager {
     private static PersistableBundle deepCopyNullablePersistableBundle(PersistableBundle bundle) {
       return bundle == null ? null : bundle.deepCopy();
     }
-
   }
 
   static final Map<String, PackageSetting> packageSettings = new HashMap<>();
@@ -585,9 +710,9 @@ public class ShadowPackageManager {
   /**
    * Sets extra resolve infos for an intent.
    *
-   * Those entries are added to whatever might be in the manifest already.
+   * <p>Those entries are added to whatever might be in the manifest already.
    *
-   * Note that all resolve infos will have {@link ResolveInfo#isDefault} field set to {@code
+   * <p>Note that all resolve infos will have {@link ResolveInfo#isDefault} field set to {@code
    * true} to allow their resolution for implicit intents. If this is not what you want, then you
    * still have the reference to those ResolveInfos, and you can set the field back to {@code
    * false}.
@@ -602,7 +727,9 @@ public class ShadowPackageManager {
     }
   }
 
-  /** @deprecated see note on {@link #addResolveInfoForIntent(Intent, ResolveInfo)}. */
+  /**
+   * @deprecated see note on {@link #addResolveInfoForIntent(Intent, ResolveInfo)}.
+   */
   @Deprecated
   public void addResolveInfoForIntent(Intent intent, List<ResolveInfo> info) {
     setResolveInfosForIntent(intent, info);
@@ -611,7 +738,7 @@ public class ShadowPackageManager {
   /**
    * Adds extra resolve info for an intent.
    *
-   * Note that this resolve info will have {@link ResolveInfo#isDefault} field set to {@code
+   * <p>Note that this resolve info will have {@link ResolveInfo#isDefault} field set to {@code
    * true} to allow its resolution for implicit intents. If this is not what you want, then please
    * use {@link #addResolveInfoForIntentNoDefaults} instead.
    *
@@ -623,11 +750,7 @@ public class ShadowPackageManager {
   public void addResolveInfoForIntent(Intent intent, ResolveInfo info) {
     info.isDefault = true;
     ComponentInfo[] componentInfos =
-        new ComponentInfo[] {
-          info.activityInfo,
-          info.serviceInfo,
-          Build.VERSION.SDK_INT >= KITKAT ? info.providerInfo : null
-        };
+        new ComponentInfo[] {info.activityInfo, info.serviceInfo, info.providerInfo};
     for (ComponentInfo component : componentInfos) {
       if (component != null && component.applicationInfo != null) {
         component.applicationInfo.flags |= ApplicationInfo.FLAG_INSTALLED;
@@ -646,7 +769,7 @@ public class ShadowPackageManager {
    * Adds the {@code info} as {@link ResolveInfo} for the intent but without applying any default
    * values.
    *
-   * In particular it will not make the {@link ResolveInfo#isDefault} field {@code true}, that
+   * <p>In particular it will not make the {@link ResolveInfo#isDefault} field {@code true}, that
    * means that this resolve info will not resolve for {@link Intent#resolveActivity} and {@link
    * Context#startActivity}.
    *
@@ -770,14 +893,14 @@ public class ShadowPackageManager {
   /**
    * Installs a package with the {@link PackageManager}.
    *
-   * In order to create PackageInfo objects in a valid state please use {@link
+   * <p>In order to create PackageInfo objects in a valid state please use {@link
    * androidx.test.core.content.pm.PackageInfoBuilder}.
    *
-   * This method automatically simulates instalation of a package in the system, so it adds a
+   * <p>This method automatically simulates installation of a package in the system, so it adds a
    * flag {@link ApplicationInfo#FLAG_INSTALLED} to the application info and makes sure it exits. It
    * will update applicationInfo in package components as well.
    *
-   * If you don't want the package to be installed, use {@link #addPackageNoDefaults} instead.
+   * <p>If you don't want the package to be installed, use {@link #addPackageNoDefaults} instead.
    */
   public void installPackage(PackageInfo packageInfo) {
     ApplicationInfo appInfo = packageInfo.applicationInfo;
@@ -790,6 +913,9 @@ public class ShadowPackageManager {
     }
     if (appInfo.processName == null) {
       appInfo.processName = appInfo.packageName;
+    }
+    if (appInfo.targetSdkVersion == 0) {
+      appInfo.targetSdkVersion = RuntimeEnvironment.getApiLevel();
     }
     appInfo.flags |= ApplicationInfo.FLAG_INSTALLED;
     ComponentInfo[][] componentInfoArrays =
@@ -807,7 +933,6 @@ public class ShadowPackageManager {
       for (ComponentInfo componentInfo : componentInfos) {
         if (componentInfo.name == null) {
           componentInfo.name = appInfo.packageName + ".DefaultName" + uniqueNameCounter++;
-          componentInfo.packageName = packageInfo.packageName;
         }
         componentInfo.applicationInfo = appInfo;
         componentInfo.packageName = appInfo.packageName;
@@ -819,10 +944,37 @@ public class ShadowPackageManager {
     addPackageNoDefaults(packageInfo);
   }
 
+  /** Adds install source information for a package. */
+  public void setInstallSourceInfo(
+      String packageName, String initiatingPackage, String installerPackage) {
+    packageInstallSourceInfoMap.put(
+        packageName, new InstallSourceInfo(initiatingPackage, null, null, installerPackage));
+  }
+
+  /** Adds install source information for a package. */
+  public void setInstallSourceInfo(
+      String packageName,
+      @Nullable String initiatingPackageName,
+      @Nullable SigningInfo initiatingPackageSigningInfo,
+      @Nullable String originatingPackageName,
+      @Nullable String installingPackageName,
+      @Nullable String updateOwnerPackageName,
+      int packageSource) {
+    packageInstallSourceInfoMap.put(
+        packageName,
+        new InstallSourceInfo(
+            initiatingPackageName,
+            initiatingPackageSigningInfo,
+            originatingPackageName,
+            installingPackageName,
+            updateOwnerPackageName,
+            packageSource));
+  }
+
   /**
    * Adds a package to the {@link PackageManager}, but doesn't set any default values on it.
    *
-   * Right now it will not set {@link ApplicationInfo#FLAG_INSTALLED} flag on its application, so
+   * <p>Right now it will not set {@link ApplicationInfo#FLAG_INSTALLED} flag on its application, so
    * if not set explicitly, it will be treated as not installed.
    */
   public void addPackageNoDefaults(PackageInfo packageInfo) {
@@ -844,6 +996,19 @@ public class ShadowPackageManager {
       }
       Preconditions.checkArgument(packageInfo.packageName.equals(packageStats.packageName));
 
+      if (packageInfo.permissions != null) {
+        for (PermissionInfo permissionInfo : packageInfo.permissions) {
+          if (AOSP_PLATFORM_PERMISSIONS.containsKey(permissionInfo.name)
+              || permissionInfo.name.startsWith(AOSP_PLATFORM_PERMISSION_PREFIX)) {
+            throw new IllegalArgumentException(
+                "Permission "
+                    + permissionInfo.name
+                    + " is a platform permission. Do not declare it as part of the package or test"
+                    + " app manifest.");
+          }
+        }
+      }
+
       packageInfos.put(packageInfo.packageName, packageInfo);
       packageStatsMap.put(packageInfo.packageName, packageStats);
 
@@ -858,7 +1023,9 @@ public class ShadowPackageManager {
     }
   }
 
-  /** @deprecated Use {@link #installPackage(PackageInfo)} instead. */
+  /**
+   * @deprecated Use {@link #installPackage(PackageInfo)} instead.
+   */
   @Deprecated
   public void addPackage(String packageName) {
     PackageInfo packageInfo = new PackageInfo();
@@ -873,22 +1040,25 @@ public class ShadowPackageManager {
     installPackage(packageInfo);
   }
 
-  /** This method is getting renamed to {link {@link #installPackage}. */
+  /**
+   * @deprecated Use {@link #installPackage} instead.
+   */
   @Deprecated
-  public void addPackage(PackageInfo packageInfo) {
+  @InlineMe(replacement = "this.installPackage(packageInfo)")
+  public final void addPackage(PackageInfo packageInfo) {
     installPackage(packageInfo);
   }
 
   /**
    * Testing API allowing to retrieve internal package representation.
    *
-   * This will allow to modify the package in a way visible to Robolectric, as this is
+   * <p>This will allow to modify the package in a way visible to Robolectric, as this is
    * Robolectric's internal full package representation.
    *
-   * Note that maybe a better way is to just modify the test manifest to make those modifications
+   * <p>Note that maybe a better way is to just modify the test manifest to make those modifications
    * in a standard way.
    *
-   * Retrieving package info using {@link PackageManager#getPackageInfo} / {@link
+   * <p>Retrieving package info using {@link PackageManager#getPackageInfo} / {@link
    * PackageManager#getApplicationInfo} will return defensive copies that will be stripped out of
    * information according to provided flags. Don't use it to modify Robolectric state.
    */
@@ -896,12 +1066,6 @@ public class ShadowPackageManager {
     synchronized (lock) {
       return packageInfos.get(packageName);
     }
-  }
-
-  /** @deprecated Use {@link #getInternalMutablePackageInfo} instead. It has better name. */
-  @Deprecated
-  public PackageInfo getPackageInfoForTesting(String packageName) {
-    return getInternalMutablePackageInfo(packageName);
   }
 
   public void addPermissionInfo(PermissionInfo permissionInfo) {
@@ -930,7 +1094,7 @@ public class ShadowPackageManager {
    * itself)[https://developer.android.com/guide/topics/manifest/permission-group-element.html], as
    * part of its manifest
    *
-   * {@link android.content.pm.PackageParser.PermissionGroup}s added through this method have
+   * <p>{@link android.content.pm.PackageParser.PermissionGroup}s added through this method have
    * precedence over those specified with the same name by one of the aforementioned methods.
    *
    * @see PackageManager#getAllPermissionGroups(int)
@@ -995,11 +1159,31 @@ public class ShadowPackageManager {
   }
 
   public long getVerificationExtendedTimeout(int id) {
-    Long result = verificationTimeoutExtension.get(id);
-    if (result == null) {
-      return 0;
+    synchronized (lock) {
+      return verificationTimeoutExtension.getOrDefault(id, 0L);
     }
-    return result;
+  }
+
+  public int getVerificationCodeAtTimeoutExtension(int id) {
+    synchronized (lock) {
+      return verificationCodeAtTimeoutExtension.getOrDefault(id, VERIFICATION_ALLOW);
+    }
+  }
+
+  public void triggerInstallVerificationTimeout(Application appContext, int id) {
+    Intent intent = new Intent(Intent.ACTION_PACKAGE_VERIFIED);
+    intent.putExtra(EXTRA_VERIFICATION_ID, id);
+    intent.putExtra(
+        PackageManager.EXTRA_VERIFICATION_RESULT, getVerificationCodeAtTimeoutExtension(id));
+
+    // Send PACKAGE_VERIFIED broadcast to trigger the verification timeout.
+    // Replacement api does not return the actual receiver objects.
+    @SuppressWarnings("deprecation")
+    List<BroadcastReceiver> receivers =
+        ShadowApplication.getShadowInstrumentation().getReceiversForIntent(intent);
+    for (BroadcastReceiver receiver : receivers) {
+      receiver.onReceive(appContext, intent);
+    }
   }
 
   public void setShouldShowRequestPermissionRationale(String permission, boolean show) {
@@ -1022,12 +1206,6 @@ public class ShadowPackageManager {
   /** Clears the values returned by {@link PackageManager#getSystemSharedLibraryNames()}. */
   public void clearSystemSharedLibraryNames() {
     systemSharedLibraryNames.clear();
-  }
-
-  @Deprecated
-  /** @deprecated use {@link #addCanonicalName} instead.} */
-  public void addCurrentToCannonicalName(String currentName, String canonicalName) {
-    currentToCanonicalNames.put(currentName, canonicalName);
   }
 
   /**
@@ -1056,7 +1234,7 @@ public class ShadowPackageManager {
     return null;
   }
 
-  @Implementation(minSdk = JELLY_BEAN_MR1)
+  @Implementation
   protected List<ResolveInfo> queryBroadcastReceivers(
       Intent intent, int flags, @UserIdInt int userId) {
     return null;
@@ -1088,8 +1266,7 @@ public class ShadowPackageManager {
         }
       }
 
-      List<PackageInfo> packages = result;
-      for (PackageInfo aPackage : packages) {
+      for (PackageInfo aPackage : result) {
         ApplicationInfo appInfo = aPackage.applicationInfo;
         if (appInfo != null && archiveFilePath.equals(appInfo.sourceDir)) {
           return aPackage;
@@ -1121,6 +1298,7 @@ public class ShadowPackageManager {
     }
   }
 
+  @Implementation
   protected void deletePackage(String packageName, IPackageDeleteObserver observer, int flags) {
     pendingDeleteCallbacks.put(packageName, observer);
   }
@@ -1169,19 +1347,17 @@ public class ShadowPackageManager {
    * must have {@link android.Manifest.permission#DELETE_PACKAGES} permission set.
    */
   public Set<String> getDeletedPackages() {
-    return deletedPackages;
+    synchronized (lock) {
+      return deletedPackages;
+    }
   }
 
   protected List<ResolveInfo> queryOverriddenIntents(Intent intent, int flags) {
     List<ResolveInfo> overrides = resolveInfoForIntent.get(intent);
     if (overrides == null) {
-      return Collections.emptyList();
+      return ImmutableList.of();
     }
-    List<ResolveInfo> result = new ArrayList<>(overrides.size());
-    for (ResolveInfo resolveInfo : overrides) {
-      result.add(ShadowResolveInfo.newResolveInfo(resolveInfo));
-    }
-    return result;
+    return overrides.stream().map(ShadowResolveInfo::newResolveInfo).collect(toImmutableList());
   }
 
   /**
@@ -1214,11 +1390,19 @@ public class ShadowPackageManager {
     for (PermissionGroup permissionGroup : appPackage.permissionGroups) {
       PermissionGroupInfo permissionGroupInfo =
           PackageParser.generatePermissionGroupInfo(permissionGroup, flags);
+
+      if (AOSP_PLATFORM_PERMISSION_GROUPS.containsKey(permissionGroupInfo.name)
+          || permissionGroupInfo.name.startsWith(AOSP_PLATFORM_PERMISSION_GROUP_PREFIX)) {
+        throw new IllegalArgumentException(
+            "Permission group "
+                + permissionGroupInfo.name
+                + " is a platform permission group. Do not declare it as part of the test app"
+                + " manifest.");
+      }
+
       addPermissionGroupInfo(permissionGroupInfo);
     }
-    PackageInfo packageInfo =
-        reflector(_PackageParser_.class)
-            .generatePackageInfo(appPackage, new int[] {0}, flags, 0, 0);
+    PackageInfo packageInfo = generatePackageInfo(appPackage, flags);
 
     packageInfo.applicationInfo.uid = Process.myUid();
     packageInfo.applicationInfo.dataDir = createTempDir(packageInfo.packageName + "-dataDir");
@@ -1227,6 +1411,24 @@ public class ShadowPackageManager {
     addFilters(serviceFilters, appPackage.services);
     addFilters(providerFilters, appPackage.providers);
     addFilters(receiverFilters, appPackage.receivers);
+  }
+
+  protected PackageInfo generatePackageInfo(Package appPackage, int flags) {
+
+    if (RuntimeEnvironment.getApiLevel() >= TIRAMISU) {
+      return PackageParser.generatePackageInfo(
+          appPackage,
+          new int[] {0},
+          flags,
+          0,
+          0,
+          Collections.emptySet(),
+          FrameworkPackageUserState.DEFAULT,
+          0);
+    } else {
+      return reflector(_PackageParser_.class)
+          .generatePackageInfo(appPackage, new int[] {0}, flags, 0, 0);
+    }
   }
 
   private void addFilters(
@@ -1358,10 +1560,9 @@ public class ShadowPackageManager {
    *
    * @param componentName Name of the activity whose intent filters are to be retrieved
    * @return the activity's intent filters
-   * @throws NameNotFoundException if component with given name doesn't exist.
+   * @throws IllegalArgumentException if component with given name doesn't exist.
    */
-  public List<IntentFilter> getIntentFiltersForActivity(ComponentName componentName)
-      throws NameNotFoundException {
+  public List<IntentFilter> getIntentFiltersForActivity(ComponentName componentName) {
     return getIntentFiltersForComponent(componentName, activityFilters);
   }
 
@@ -1370,10 +1571,9 @@ public class ShadowPackageManager {
    *
    * @param componentName Name of the service whose intent filters are to be retrieved
    * @return the service's intent filters
-   * @throws NameNotFoundException if component with given name doesn't exist.
+   * @throws IllegalArgumentException if component with given name doesn't exist.
    */
-  public List<IntentFilter> getIntentFiltersForService(ComponentName componentName)
-      throws NameNotFoundException {
+  public List<IntentFilter> getIntentFiltersForService(ComponentName componentName) {
     return getIntentFiltersForComponent(componentName, serviceFilters);
   }
 
@@ -1382,11 +1582,10 @@ public class ShadowPackageManager {
    *
    * @param componentName Name of the receiver whose intent filters are to be retrieved
    * @return the receiver's intent filters
-   * @throws NameNotFoundException if component with given name doesn't exist.
+   * @throws IllegalArgumentException if component with given name doesn't exist.
    */
-  public List<IntentFilter> getIntentFiltersForReceiver(ComponentName componentName)
-      throws NameNotFoundException {
-      return getIntentFiltersForComponent(componentName, receiverFilters);
+  public List<IntentFilter> getIntentFiltersForReceiver(ComponentName componentName) {
+    return getIntentFiltersForComponent(componentName, receiverFilters);
   }
 
   /**
@@ -1394,98 +1593,88 @@ public class ShadowPackageManager {
    *
    * @param componentName Name of the provider whose intent filters are to be retrieved
    * @return the provider's intent filters
-   * @throws NameNotFoundException if component with given name doesn't exist.
+   * @throws IllegalArgumentException if component with given name doesn't exist.
    */
-  public List<IntentFilter> getIntentFiltersForProvider(ComponentName componentName)
-      throws NameNotFoundException {
+  public List<IntentFilter> getIntentFiltersForProvider(ComponentName componentName) {
     return getIntentFiltersForComponent(componentName, providerFilters);
   }
 
   /**
    * Add intent filter for given activity.
    *
-   * @throws NameNotFoundException if component with given name doesn't exist.
+   * @throws IllegalArgumentException if component with given name doesn't exist.
    */
-  public void addIntentFilterForActivity(ComponentName componentName, IntentFilter filter)
-      throws NameNotFoundException {
+  public void addIntentFilterForActivity(ComponentName componentName, IntentFilter filter) {
     addIntentFilterForComponent(componentName, filter, activityFilters);
   }
 
   /**
    * Add intent filter for given service.
    *
-   * @throws NameNotFoundException if component with given name doesn't exist.
+   * @throws IllegalArgumentException if component with given name doesn't exist.
    */
-  public void addIntentFilterForService(ComponentName componentName, IntentFilter filter)
-      throws NameNotFoundException {
+  public void addIntentFilterForService(ComponentName componentName, IntentFilter filter) {
     addIntentFilterForComponent(componentName, filter, serviceFilters);
   }
 
   /**
    * Add intent filter for given receiver.
    *
-   * @throws NameNotFoundException if component with given name doesn't exist.
+   * @throws IllegalArgumentException if component with given name doesn't exist.
    */
-  public void addIntentFilterForReceiver(ComponentName componentName, IntentFilter filter)
-      throws NameNotFoundException {
+  public void addIntentFilterForReceiver(ComponentName componentName, IntentFilter filter) {
     addIntentFilterForComponent(componentName, filter, receiverFilters);
   }
 
   /**
    * Add intent filter for given provider.
    *
-   * @throws NameNotFoundException if component with given name doesn't exist.
+   * @throws IllegalArgumentException if component with given name doesn't exist.
    */
-  public void addIntentFilterForProvider(ComponentName componentName, IntentFilter filter)
-      throws NameNotFoundException {
+  public void addIntentFilterForProvider(ComponentName componentName, IntentFilter filter) {
     addIntentFilterForComponent(componentName, filter, providerFilters);
   }
 
   /**
    * Clears intent filters for given activity.
    *
-   * @throws NameNotFoundException if component with given name doesn't exist.
+   * @throws IllegalArgumentException if component with given name doesn't exist.
    */
-  public void clearIntentFilterForActivity(ComponentName componentName)
-      throws NameNotFoundException {
+  public void clearIntentFilterForActivity(ComponentName componentName) {
     clearIntentFilterForComponent(componentName, activityFilters);
   }
 
   /**
    * Clears intent filters for given service.
    *
-   * @throws NameNotFoundException if component with given name doesn't exist.
+   * @throws IllegalArgumentException if component with given name doesn't exist.
    */
-  public void clearIntentFilterForService(ComponentName componentName)
-      throws NameNotFoundException {
+  public void clearIntentFilterForService(ComponentName componentName) {
     clearIntentFilterForComponent(componentName, serviceFilters);
   }
 
   /**
    * Clears intent filters for given receiver.
    *
-   * @throws NameNotFoundException if component with given name doesn't exist.
+   * @throws IllegalArgumentException if component with given name doesn't exist.
    */
-  public void clearIntentFilterForReceiver(ComponentName componentName)
-      throws NameNotFoundException {
+  public void clearIntentFilterForReceiver(ComponentName componentName) {
     clearIntentFilterForComponent(componentName, receiverFilters);
   }
 
   /**
    * Clears intent filters for given provider.
    *
-   * @throws NameNotFoundException if component with given name doesn't exist.
+   * @throws IllegalArgumentException if component with given name doesn't exist.
    */
-  public void clearIntentFilterForProvider(ComponentName componentName)
-      throws NameNotFoundException {
+  public void clearIntentFilterForProvider(ComponentName componentName) {
     clearIntentFilterForComponent(componentName, providerFilters);
   }
 
   private void addIntentFilterForComponent(
       ComponentName componentName,
       IntentFilter filter,
-      Map<ComponentName, List<IntentFilter>> filterMap)
-      throws NameNotFoundException {
+      Map<ComponentName, List<IntentFilter>> filterMap) {
     // Existing components should have an entry in respective filterMap.
     // It is OK to search over all filter maps, as it is impossible to have the same component name
     // being of two comopnent types (like activity and service at the same time).
@@ -1494,28 +1683,26 @@ public class ShadowPackageManager {
       filters.add(filter);
       return;
     }
-    throw new NameNotFoundException(componentName + " doesn't exist");
+    throw new IllegalArgumentException(componentName + " doesn't exist");
   }
 
   private void clearIntentFilterForComponent(
-      ComponentName componentName, Map<ComponentName, List<IntentFilter>> filterMap)
-      throws NameNotFoundException {
+      ComponentName componentName, Map<ComponentName, List<IntentFilter>> filterMap) {
     List<IntentFilter> filters = filterMap.get(componentName);
     if (filters != null) {
       filters.clear();
       return;
     }
-    throw new NameNotFoundException(componentName + " doesn't exist");
+    throw new IllegalArgumentException(componentName + " doesn't exist");
   }
 
   private List<IntentFilter> getIntentFiltersForComponent(
-      ComponentName componentName, Map<ComponentName, List<IntentFilter>> filterMap)
-      throws NameNotFoundException {
+      ComponentName componentName, Map<ComponentName, List<IntentFilter>> filterMap) {
     List<IntentFilter> filters = filterMap.get(componentName);
     if (filters != null) {
       return new ArrayList<>(filters);
     }
-    throw new NameNotFoundException(componentName + " doesn't exist");
+    throw new IllegalArgumentException(componentName + " doesn't exist");
   }
 
   /**
@@ -1583,9 +1770,6 @@ public class ShadowPackageManager {
     if (packageName == null) {
       return input;
     }
-    if (packageName == null) {
-      return input;
-    }
     return input.subMap(
         new ComponentName(packageName, ""), new ComponentName(packageName + " ", ""));
   }
@@ -1612,7 +1796,7 @@ public class ShadowPackageManager {
   /**
    * Returns the current {@link PackageSetting} of {@code packageName}.
    *
-   * If {@code packageName} is not present in this {@link ShadowPackageManager}, this method will
+   * <p>If {@code packageName} is not present in this {@link ShadowPackageManager}, this method will
    * return null.
    */
   public PackageSetting getPackageSetting(String packageName) {
@@ -1636,7 +1820,7 @@ public class ShadowPackageManager {
   /**
    * Returns the last value provided to {@code setDistractingPackageRestrictions} for {@code pkg}.
    *
-   * Defaults to {@code PackageManager.RESTRICTION_NONE} if {@code
+   * <p>Defaults to {@code PackageManager.RESTRICTION_NONE} if {@code
    * setDistractingPackageRestrictions} has not been called for {@code pkg}.
    */
   public int getDistractingPackageRestrictions(String pkg) {
@@ -1671,11 +1855,13 @@ public class ShadowPackageManager {
       packageArchiveInfo.clear();
       packageStatsMap.clear();
       packageInstallerMap.clear();
+      packageInstallSourceInfoMap.clear();
       packagesForUid.clear();
       uidForPackage.clear();
       namesForUid.clear();
       verificationResults.clear();
       verificationTimeoutExtension.clear();
+      verificationCodeAtTimeoutExtension.clear();
       currentToCanonicalNames.clear();
       canonicalToCurrentNames.clear();
       componentList.clear();
@@ -1683,6 +1869,7 @@ public class ShadowPackageManager {
       applicationIcons.clear();
       unbadgedApplicationIcons.clear();
       systemFeatureList.clear();
+      systemFeatureList.putAll(SystemFeatureListInitializer.getSystemFeatures());
       preferredActivities.clear();
       persistentPreferredActivities.clear();
       drawables.clear();

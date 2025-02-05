@@ -4,7 +4,9 @@ import static android.os.Build.VERSION_CODES.N;
 import static android.os.Build.VERSION_CODES.Q;
 import static androidx.test.core.app.ApplicationProvider.getApplicationContext;
 import static com.google.common.truth.Truth.assertThat;
+import static org.junit.Assert.assertThrows;
 
+import android.app.VoiceInteractor.CommandRequest;
 import android.content.Intent;
 import android.os.Bundle;
 import android.service.voice.VoiceInteractionSession;
@@ -14,10 +16,11 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.robolectric.annotation.Config;
 import org.robolectric.shadow.api.Shadow;
+import org.robolectric.versioning.AndroidVersions;
 
 /** Tests for {@link ShadowVoiceInteractionSession}. */
 @RunWith(AndroidJUnit4.class)
-@Config(sdk = Q)
+@Config(minSdk = Q)
 public class ShadowVoiceInteractionSessionTest {
 
   private VoiceInteractionSession session;
@@ -46,6 +49,16 @@ public class ShadowVoiceInteractionSessionTest {
   }
 
   @Test
+  @Config(minSdk = AndroidVersions.U.SDK_INT)
+  public void isWindowShowing_afterShowSdk34_returnsTrue() {
+    shadowSession.create();
+
+    session.show(new Bundle(), /* flags= */ 0);
+
+    assertThat(shadowSession.isWindowShowing()).isTrue();
+  }
+
+  @Test
   public void isWindowShowing_afterShowThenHide_returnsFalse() {
     shadowSession.create();
 
@@ -53,6 +66,15 @@ public class ShadowVoiceInteractionSessionTest {
     session.hide();
 
     assertThat(shadowSession.isWindowShowing()).isFalse();
+  }
+
+  @Test
+  public void startAssistantActivity_exceptionSet_throws() {
+    shadowSession.create();
+
+    shadowSession.setStartAssistantActivityException(new SecurityException());
+
+    assertThrows(SecurityException.class, () -> session.startAssistantActivity(new Intent()));
   }
 
   @Test
@@ -158,5 +180,72 @@ public class ShadowVoiceInteractionSessionTest {
   @Config(sdk = N)
   public void isUiEnabled_belowAndroidO_throws() {
     shadowSession.isUiEnabled();
+  }
+
+  @Test
+  public void sendCommandRequest_cancel_requestCanceled() {
+    TestCommandRequest commandRequest = new TestCommandRequest("test_command", new Bundle());
+    VoiceInteractionSession.CommandRequest receivedCommandRequest =
+        shadowSession.sendCommandRequest(commandRequest, "test_package", 123);
+
+    assertThat(receivedCommandRequest.isActive()).isTrue();
+    assertThat(receivedCommandRequest.getCommand()).isEqualTo("test_command");
+
+    receivedCommandRequest.cancel();
+
+    assertThat(commandRequest.isCancelled).isTrue();
+  }
+
+  @Test
+  public void sendCommandRequest_sendIntermediateResult_requestRemainsActive() {
+    TestCommandRequest commandRequest = new TestCommandRequest("test_command", new Bundle());
+    VoiceInteractionSession.CommandRequest receivedCommandRequest =
+        shadowSession.sendCommandRequest(commandRequest, "test_package", 123);
+
+    assertThat(receivedCommandRequest.isActive()).isTrue();
+    assertThat(receivedCommandRequest.getCommand()).isEqualTo("test_command");
+
+    Bundle result = new Bundle();
+    result.putBoolean("intermediate", true);
+    receivedCommandRequest.sendIntermediateResult(result);
+    assertThat(commandRequest.isCompleted).isFalse();
+    assertThat(commandRequest.result).isEqualTo(result);
+  }
+
+  @Test
+  public void sendCommandRequest_sendFinalResult_requestCompleted() {
+    TestCommandRequest commandRequest = new TestCommandRequest("test_command", new Bundle());
+    VoiceInteractionSession.CommandRequest receivedCommandRequest =
+        shadowSession.sendCommandRequest(commandRequest, "test_package", 123);
+
+    assertThat(receivedCommandRequest.isActive()).isTrue();
+    assertThat(receivedCommandRequest.getCommand()).isEqualTo("test_command");
+
+    Bundle result = new Bundle();
+    result.putBoolean("final", true);
+    receivedCommandRequest.sendResult(result);
+    assertThat(commandRequest.isCompleted).isTrue();
+    assertThat(commandRequest.result).isEqualTo(result);
+  }
+
+  private static class TestCommandRequest extends CommandRequest {
+    public boolean isCancelled = false;
+    public boolean isCompleted = false;
+    public Bundle result = null;
+
+    public TestCommandRequest(String command, Bundle args) {
+      super(command, args);
+    }
+
+    @Override
+    public void onCommandResult(boolean isCompleted, Bundle result) {
+      this.isCompleted = isCompleted;
+      this.result = result;
+    }
+
+    @Override
+    public void onCancel() {
+      this.isCancelled = true;
+    }
   }
 }

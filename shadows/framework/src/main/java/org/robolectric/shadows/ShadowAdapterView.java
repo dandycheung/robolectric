@@ -16,7 +16,7 @@ import org.robolectric.util.reflector.ForType;
 @SuppressWarnings({"UnusedDeclaration"})
 @Implements(AdapterView.class)
 public class ShadowAdapterView<T extends Adapter> extends ShadowViewGroup {
-  private static int ignoreRowsAtEndOfList = 0;
+  private static final int ignoreRowsAtEndOfList = 0;
 
   @RealObject private AdapterView<T> realAdapterView;
 
@@ -43,7 +43,10 @@ public class ShadowAdapterView<T extends Adapter> extends ShadowViewGroup {
 
   public int findIndexOfItemContainingText(String targetText) {
     for (int i = 0; i < realAdapterView.getCount(); i++) {
-      View childView = realAdapterView.getAdapter().getView(i, null, new FrameLayout(realAdapterView.getContext()));
+      View childView =
+          realAdapterView
+              .getAdapter()
+              .getView(i, null, new FrameLayout(realAdapterView.getContext()));
       ShadowView shadowView = Shadow.extract(childView);
       String innerText = shadowView.innerText();
       if (innerText.contains(targetText)) {

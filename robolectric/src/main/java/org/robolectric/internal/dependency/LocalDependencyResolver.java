@@ -3,9 +3,10 @@ package org.robolectric.internal.dependency;
 import java.io.File;
 import java.net.MalformedURLException;
 import java.net.URL;
+import org.robolectric.util.Logger;
 
 public class LocalDependencyResolver implements DependencyResolver {
-  private File offlineJarDir;
+  private final File offlineJarDir;
 
   public LocalDependencyResolver(File offlineJarDir) {
     super();
@@ -15,17 +16,13 @@ public class LocalDependencyResolver implements DependencyResolver {
   @Override
   public URL getLocalArtifactUrl(DependencyJar dependency) {
     StringBuilder filenameBuilder = new StringBuilder();
-    filenameBuilder.append(dependency.getArtifactId())
-        .append("-")
-        .append(dependency.getVersion());
+    filenameBuilder.append(dependency.getArtifactId()).append("-").append(dependency.getVersion());
 
     if (dependency.getClassifier() != null) {
-      filenameBuilder.append("-")
-          .append(dependency.getClassifier());
+      filenameBuilder.append("-").append(dependency.getClassifier());
     }
 
-    filenameBuilder.append(".")
-        .append(dependency.getType());
+    filenameBuilder.append(".").append(dependency.getType());
 
     return fileToUrl(validateFile(new File(offlineJarDir, filenameBuilder.toString())));
   }
@@ -39,6 +36,17 @@ public class LocalDependencyResolver implements DependencyResolver {
    */
   private static File validateFile(File file) throws IllegalArgumentException {
     if (!file.isFile()) {
+      Logger.error("Unable to locate dependency: '%s'", file);
+      File parentFile = file.getParentFile();
+      if (!parentFile.isDirectory()) {
+        Logger.error("No such directory '%s'", parentFile);
+      } else {
+        Logger.error("Parent directory exists but is missing the dependency");
+        Logger.error("Contents of directory '%s':", parentFile);
+        for (File f : parentFile.listFiles()) {
+          Logger.error(f.getAbsolutePath());
+        }
+      }
       throw new IllegalArgumentException("Path is not a file: " + file);
     }
     if (!file.canRead()) {

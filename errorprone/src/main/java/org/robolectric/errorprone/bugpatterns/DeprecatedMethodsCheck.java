@@ -4,7 +4,6 @@ import static com.google.errorprone.BugPattern.SeverityLevel.WARNING;
 import static com.google.errorprone.matchers.Description.NO_MATCH;
 import static com.google.errorprone.matchers.Matchers.instanceMethod;
 import static com.google.errorprone.matchers.Matchers.staticMethod;
-import static com.google.errorprone.util.ASTHelpers.hasAnnotation;
 import static org.robolectric.errorprone.bugpatterns.Helpers.isCastableTo;
 import static org.robolectric.errorprone.bugpatterns.Helpers.isInShadowClass;
 
@@ -18,8 +17,10 @@ import com.google.errorprone.bugpatterns.BugChecker.ClassTreeMatcher;
 import com.google.errorprone.fixes.Fix;
 import com.google.errorprone.fixes.SuggestedFix;
 import com.google.errorprone.matchers.Description;
-import com.google.errorprone.matchers.method.MethodMatchers.MethodNameMatcher;
+import com.google.errorprone.matchers.Matcher;
+import com.google.errorprone.util.ASTHelpers;
 import com.sun.source.tree.ClassTree;
+import com.sun.source.tree.ExpressionTree;
 import com.sun.source.tree.ImportTree;
 import com.sun.source.tree.MethodInvocationTree;
 import com.sun.source.tree.Tree;
@@ -31,13 +32,17 @@ import com.sun.tools.javac.tree.JCTree.JCMethodInvocation;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 import org.robolectric.annotation.Implements;
 
-/** @author christianw@google.com (Christian Williams) */
+/**
+ * Checks for the deprecated methods.
+ *
+ * @author christianw@google.com (Christian Williams)
+ */
 @AutoService(BugChecker.class)
 @BugPattern(
-    name = "DeprecatedMethods",
     summary = "Prefer supported APIs.",
     severity = WARNING,
     documentSuppression = false,
@@ -45,12 +50,12 @@ import org.robolectric.annotation.Implements;
     link = "http://robolectric.org/migrating/#deprecations",
     linkType = LinkType.CUSTOM)
 public class DeprecatedMethodsCheck extends BugChecker implements ClassTreeMatcher {
-  private final java.util.List<MethodInvocationMatcher> matchers =
+  private final List<MethodInvocationMatcher> matchers =
       Arrays.asList(
           // Matches calls to <code>ShadowApplication.getInstance()</code>.
           new MethodInvocationMatcher() {
             @Override
-            MethodNameMatcher matcher() {
+            Matcher<ExpressionTree> matcher() {
               return staticMethod()
                   .onClass(shadowName("org.robolectric.shadows.ShadowApplication"))
                   .named("getInstance");
@@ -99,7 +104,7 @@ public class DeprecatedMethodsCheck extends BugChecker implements ClassTreeMatch
               "org.robolectric.shadows.ShadowPopupMenu", "ShadowPopupMenu", "getLatestPopupMenu"));
 
   abstract static class MethodInvocationMatcher {
-    abstract MethodNameMatcher matcher();
+    abstract Matcher<ExpressionTree> matcher();
 
     abstract void replace(
         MethodInvocationTree tree,
@@ -123,7 +128,8 @@ public class DeprecatedMethodsCheck extends BugChecker implements ClassTreeMatch
       @Override
       public Void visitClass(ClassTree classTree, VisitorState visitorState) {
         boolean priorInShadowClass = inShadowClass;
-        inShadowClass = hasAnnotation(classTree, Implements.class, visitorState);
+        inShadowClass =
+            ASTHelpers.hasAnnotation(classTree, Implements.class.getName(), visitorState);
         try {
           return super.visitClass(classTree, visitorState);
         } finally {
@@ -223,7 +229,7 @@ public class DeprecatedMethodsCheck extends BugChecker implements ClassTreeMatch
     }
 
     @Override
-    MethodNameMatcher matcher() {
+    Matcher<ExpressionTree> matcher() {
       return instanceMethod()
           .onClass(isCastableTo(shadowName("org.robolectric.shadows.ShadowApplication")))
           .named(methodName);

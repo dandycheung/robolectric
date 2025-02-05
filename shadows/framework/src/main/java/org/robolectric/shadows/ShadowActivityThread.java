@@ -1,5 +1,8 @@
 package org.robolectric.shadows;
 
+import static android.os.Build.VERSION_CODES.N;
+import static android.os.Build.VERSION_CODES.O_MR1;
+import static android.os.Build.VERSION_CODES.P;
 import static android.os.Build.VERSION_CODES.R;
 import static android.os.Build.VERSION_CODES.S;
 import static org.robolectric.util.ReflectionHelpers.ClassParameter.from;
@@ -10,36 +13,42 @@ import android.app.ActivityThread;
 import android.app.ActivityThread.ActivityClientRecord;
 import android.app.Application;
 import android.app.Instrumentation;
+import android.app.ResultInfo;
+import android.content.ComponentName;
 import android.content.Intent;
 import android.content.pm.ActivityInfo;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
+import android.content.pm.PackageManager.ComponentInfoFlags;
 import android.content.res.Configuration;
-import android.os.Binder;
 import android.os.IBinder;
-import java.lang.reflect.InvocationHandler;
-import java.lang.reflect.Method;
+import com.android.internal.content.ReferrerIntent;
 import java.lang.reflect.Proxy;
 import java.util.Collections;
+import java.util.List;
 import java.util.Map;
-import javax.annotation.Nonnull;
 import org.robolectric.RuntimeEnvironment;
+import org.robolectric.annotation.ClassName;
 import org.robolectric.annotation.Implementation;
 import org.robolectric.annotation.Implements;
 import org.robolectric.annotation.RealObject;
+import org.robolectric.annotation.ReflectorObject;
 import org.robolectric.annotation.Resetter;
+import org.robolectric.util.Logger;
 import org.robolectric.util.ReflectionHelpers;
 import org.robolectric.util.reflector.Accessor;
 import org.robolectric.util.reflector.ForType;
 import org.robolectric.util.reflector.Reflector;
 
-@Implements(value = ActivityThread.class, isInAndroidSdk = false, looseSignatures = true)
+/** Shadow for {@link ActivityThread}. */
+@Implements(value = ActivityThread.class, isInAndroidSdk = false)
 public class ShadowActivityThread {
   private static ApplicationInfo applicationInfo;
   @RealObject protected ActivityThread realActivityThread;
+  @ReflectorObject protected _ActivityThread_ activityThreadReflector;
 
   @Implementation
-  public static Object getPackageManager() {
+  public static @ClassName("android.content.pm.IPackageManager") Object getPackageManager() {
     ClassLoader classLoader = ShadowActivityThread.class.getClassLoader();
     Class<?> iPackageManagerClass;
     try {
@@ -50,42 +59,54 @@ public class ShadowActivityThread {
     return Proxy.newProxyInstance(
         classLoader,
         new Class[] {iPackageManagerClass},
-        new InvocationHandler() {
-          @Override
-          public Object invoke(Object proxy, @Nonnull Method method, Object[] args)
-              throws Exception {
-            if (method.getName().equals("getApplicationInfo")) {
-              String packageName = (String) args[0];
-              int flags = (Integer) args[1];
+        (proxy, method, args) -> {
+          if (method.getName().equals("getApplicationInfo")) {
+            String packageName = (String) args[0];
+            int flags = ((Number) args[1]).intValue();
+            if (packageName.equals(ShadowActivityThread.applicationInfo.packageName)) {
+              return ShadowActivityThread.applicationInfo;
+            }
 
-              if (packageName.equals(ShadowActivityThread.applicationInfo.packageName)) {
-                return ShadowActivityThread.applicationInfo;
-              }
-
-              try {
-                return RuntimeEnvironment.getApplication()
-                    .getPackageManager()
-                    .getApplicationInfo(packageName, flags);
-              } catch (PackageManager.NameNotFoundException e) {
-                return null;
-              }
-            } else if (method.getName().equals("notifyPackageUse")) {
-              return null;
-            } else if (method.getName().equals("getPackageInstaller")) {
-              return null;
-            } else if (method.getName().equals("hasSystemFeature")) {
-              String featureName = (String) args[0];
+            try {
               return RuntimeEnvironment.getApplication()
                   .getPackageManager()
-                  .hasSystemFeature(featureName);
+                  .getApplicationInfo(packageName, flags);
+            } catch (PackageManager.NameNotFoundException e) {
+              return null;
             }
-            throw new UnsupportedOperationException("sorry, not supporting " + method + " yet!");
+          } else if (method.getName().equals("notifyPackageUse")) {
+            return null;
+          } else if (method.getName().equals("getPackageInstaller")) {
+            try {
+              Class<?> iPackageInstallerClass =
+                  classLoader.loadClass("android.content.pm.IPackageInstaller");
+              return ReflectionHelpers.createNullProxy(iPackageInstallerClass);
+            } catch (ClassNotFoundException e) {
+              throw new RuntimeException(e);
+            }
+          } else if (method.getName().equals("hasSystemFeature")) {
+            String featureName = (String) args[0];
+            return RuntimeEnvironment.getApplication()
+                .getPackageManager()
+                .hasSystemFeature(featureName);
+          } else if (method.getName().equals("getServiceInfo")) {
+            ComponentName componentName = (ComponentName) args[0];
+            if (args[1] instanceof ComponentInfoFlags) {
+              return RuntimeEnvironment.getApplication()
+                  .getPackageManager()
+                  .getServiceInfo(componentName, (ComponentInfoFlags) args[1]);
+            } else {
+              return RuntimeEnvironment.getApplication()
+                  .getPackageManager()
+                  .getServiceInfo(componentName, ((Number) args[1]).intValue());
+            }
           }
+          throw new UnsupportedOperationException("sorry, not supporting " + method + " yet!");
         });
   }
 
   @Implementation
-  public static Object currentActivityThread() {
+  public static @ClassName("android.app.ActivityThread") Object currentActivityThread() {
     return RuntimeEnvironment.getActivityThread();
   }
 
@@ -107,7 +128,7 @@ public class ShadowActivityThread {
   }
 
   @Implementation(minSdk = R)
-  public static Object getPermissionManager() {
+  public static @ClassName("android.permission.IPermissionManager") Object getPermissionManager() {
     ClassLoader classLoader = ShadowActivityThread.class.getClassLoader();
     Class<?> iPermissionManagerClass;
     try {
@@ -118,22 +139,41 @@ public class ShadowActivityThread {
     return Proxy.newProxyInstance(
         classLoader,
         new Class<?>[] {iPermissionManagerClass},
-        new InvocationHandler() {
-          @Override
-          public Object invoke(Object proxy, @Nonnull Method method, Object[] args)
-              throws Exception {
-            if (method.getName().equals("getSplitPermissions")) {
-              return Collections.emptyList();
-            }
-            return method.getDefaultValue();
+        (proxy, method, args) -> {
+          if (method.getName().equals("getSplitPermissions")) {
+            return Collections.emptyList();
           }
+          return method.getDefaultValue();
         });
   }
 
+  // Override this method as it's used directly by reflection by androidx ActivityRecreator.
+  @Implementation(minSdk = N, maxSdk = O_MR1)
+  protected void requestRelaunchActivity(
+      IBinder token,
+      List<ResultInfo> pendingResults,
+      List<ReferrerIntent> pendingNewIntents,
+      int configChanges,
+      boolean notResumed,
+      Configuration config,
+      Configuration overrideConfig,
+      boolean fromServer,
+      boolean preserveWindow) {
+    ActivityClientRecord record = activityThreadReflector.getActivities().get(token);
+    if (record != null) {
+      reflector(ActivityClientRecordReflector.class, record).getActivity().recreate();
+    }
+  }
+
   /** Update's ActivityThread's list of active Activities */
-  IBinder registerActivityLaunch(Intent intent, ActivityInfo activityInfo, Activity activity) {
-    IBinder token = new Binder();
-    ActivityClientRecord record = new ActivityClientRecord();
+  void registerActivityLaunch(
+      Intent intent, ActivityInfo activityInfo, Activity activity, IBinder token) {
+    ActivityClientRecord record;
+    if (RuntimeEnvironment.getApiLevel() >= P) {
+      record = new ActivityClientRecord();
+    } else {
+      record = ReflectionHelpers.callConstructor(ActivityClientRecord.class);
+    }
     ActivityClientRecordReflector recordReflector =
         reflector(ActivityClientRecordReflector.class, record);
     recordReflector.setToken(token);
@@ -141,7 +181,6 @@ public class ShadowActivityThread {
     recordReflector.setActivityInfo(activityInfo);
     recordReflector.setActivity(activity);
     reflector(_ActivityThread_.class, realActivityThread).getActivities().put(token, record);
-    return token;
   }
 
   void removeActivity(IBinder token) {
@@ -184,8 +223,6 @@ public class ShadowActivityThread {
           configController,
           "setCompatConfiguration",
           from(Configuration.class, androidConfiguration));
-      androidConfiguration =
-          ReflectionHelpers.callInstanceMethod(configController, "getCompatConfiguration");
       ReflectionHelpers.setField(realActivityThread, "mConfigurationController", configController);
     } else {
       reflector(_ActivityThread_.class, realActivityThread)
@@ -209,7 +246,7 @@ public class ShadowActivityThread {
     @Accessor("mInitialApplication")
     void setInitialApplication(Application application);
 
-    /** internal use only. Tests should use {@link ActivityThread.getApplication} */
+    /** internal use only. Tests should use {@link ActivityThread#getApplication()} */
     @Accessor("mInitialApplication")
     Application getInitialApplication();
 
@@ -236,6 +273,9 @@ public class ShadowActivityThread {
     @Accessor("activity")
     void setActivity(Activity activity);
 
+    @Accessor("activity")
+    Activity getActivity();
+
     @Accessor("token")
     void setToken(IBinder token);
 
@@ -248,8 +288,13 @@ public class ShadowActivityThread {
 
   @Resetter
   public static void reset() {
-    reflector(_ActivityThread_.class, RuntimeEnvironment.getActivityThread())
-        .getActivities()
-        .clear();
+    Object activityThread = RuntimeEnvironment.getActivityThread();
+    if (activityThread == null) {
+      Logger.warn(
+          "RuntimeEnvironment.getActivityThread() is null, an error likely occurred during test"
+              + " initialization.");
+    } else {
+      reflector(_ActivityThread_.class, activityThread).getActivities().clear();
+    }
   }
 }

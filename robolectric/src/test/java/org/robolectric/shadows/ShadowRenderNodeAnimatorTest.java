@@ -1,6 +1,5 @@
 package org.robolectric.shadows;
 
-import static android.os.Build.VERSION_CODES.LOLLIPOP;
 import static com.google.common.truth.Truth.assertThat;
 import static org.robolectric.shadows.ShadowLooper.shadowMainLooper;
 
@@ -15,10 +14,11 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.robolectric.Robolectric;
-import org.robolectric.annotation.Config;
+import org.robolectric.annotation.GraphicsMode;
+import org.robolectric.annotation.GraphicsMode.Mode;
 
 @RunWith(AndroidJUnit4.class)
-@Config(minSdk = LOLLIPOP)
+@GraphicsMode(Mode.LEGACY)
 public class ShadowRenderNodeAnimatorTest {
   private Activity activity;
   private View view;

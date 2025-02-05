@@ -15,7 +15,6 @@ import org.junit.runner.RunWith;
 import org.robolectric.annotation.Config;
 
 /** Tests for {@link StreamConfigurationMapBuilder}. */
-@Config(minSdk = VERSION_CODES.LOLLIPOP)
 @RunWith(AndroidJUnit4.class)
 public class StreamConfigurationMapBuilderTest {
   @Test
@@ -66,6 +65,54 @@ public class StreamConfigurationMapBuilderTest {
             .addOutputSize(PixelFormat.RGBA_8888, size2)
             .build();
     assertThat(Arrays.asList(map.getOutputSizes(PixelFormat.RGBA_8888)))
+        .containsExactly(size1, size2);
+  }
+
+  @Test
+  @Config(minSdk = VERSION_CODES.M)
+  public void testGetInputSizesIfNotAddInputSizes() {
+    StreamConfigurationMap map = StreamConfigurationMapBuilder.newBuilder().build();
+    assertThat(map.getInputSizes(ImageFormat.PRIVATE)).isNull();
+  }
+
+  @Test
+  @Config(minSdk = VERSION_CODES.M)
+  public void testGetInputSizesForTwoFormats() {
+    Size size1 = new Size(1920, 1080);
+    Size size2 = new Size(1280, 720);
+    StreamConfigurationMap map =
+        StreamConfigurationMapBuilder.newBuilder()
+            .addInputSize(ImageFormat.PRIVATE, size1)
+            .addInputSize(ImageFormat.YUV_420_888, size2)
+            .build();
+    assertThat(Arrays.asList(map.getInputSizes(ImageFormat.PRIVATE))).containsExactly(size1);
+    assertThat(Arrays.asList(map.getInputSizes(ImageFormat.YUV_420_888))).containsExactly(size2);
+  }
+
+  @Test
+  @Config(minSdk = VERSION_CODES.M)
+  public void testGetInputSizesForImageFormatNV21() {
+    Size size1 = new Size(1920, 1080);
+    Size size2 = new Size(1280, 720);
+    StreamConfigurationMap map =
+        StreamConfigurationMapBuilder.newBuilder()
+            .addInputSize(ImageFormat.NV21, size1)
+            .addInputSize(ImageFormat.NV21, size2)
+            .build();
+    assertThat(Arrays.asList(map.getInputSizes(ImageFormat.NV21))).containsExactly(size1, size2);
+  }
+
+  @Test
+  @Config(minSdk = VERSION_CODES.M)
+  public void testGetInputSizesPixelFormatRgba8888() {
+    Size size1 = new Size(1920, 1080);
+    Size size2 = new Size(1280, 720);
+    StreamConfigurationMap map =
+        StreamConfigurationMapBuilder.newBuilder()
+            .addInputSize(PixelFormat.RGBA_8888, size1)
+            .addInputSize(PixelFormat.RGBA_8888, size2)
+            .build();
+    assertThat(Arrays.asList(map.getInputSizes(PixelFormat.RGBA_8888)))
         .containsExactly(size1, size2);
   }
 }

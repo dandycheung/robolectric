@@ -1,10 +1,12 @@
 package org.robolectric.shadows;
 
-import static android.os.Build.VERSION_CODES.LOLLIPOP;
 import static android.os.Build.VERSION_CODES.M;
+import static android.os.Build.VERSION_CODES.P;
 import static com.google.common.truth.Truth.assertThat;
+import static org.junit.Assert.assertThrows;
 import static org.robolectric.Shadows.shadowOf;
 
+import android.app.Activity;
 import android.content.Context;
 import android.os.BatteryManager;
 import androidx.test.core.app.ApplicationProvider;
@@ -12,14 +14,15 @@ import androidx.test.ext.junit.runners.AndroidJUnit4;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.robolectric.Robolectric;
+import org.robolectric.android.controller.ActivityController;
 import org.robolectric.annotation.Config;
 
 @RunWith(AndroidJUnit4.class)
-@Config(minSdk = LOLLIPOP)
 public class ShadowBatteryManagerTest {
+  private static final int TEST_ID = 123;
   private BatteryManager batteryManager;
   private ShadowBatteryManager shadowBatteryManager;
-  private static final int TEST_ID = 123;
 
   @Before
   public void before() {
@@ -69,5 +72,50 @@ public class ShadowBatteryManagerTest {
 
     shadowBatteryManager.setLongProperty(TEST_ID, Long.MAX_VALUE);
     assertThat(batteryManager.getLongProperty(TEST_ID)).isEqualTo(Long.MAX_VALUE);
+  }
+
+  @Test
+  @Config(minSdk = P)
+  public void testChargeTimeRemaining() {
+    shadowBatteryManager.setChargeTimeRemaining(0L);
+    assertThat(batteryManager.computeChargeTimeRemaining()).isEqualTo(0L);
+
+    shadowBatteryManager.setChargeTimeRemaining(20L);
+    assertThat(batteryManager.computeChargeTimeRemaining()).isEqualTo(20L);
+
+    shadowBatteryManager.setChargeTimeRemaining(-1L);
+    assertThat(batteryManager.computeChargeTimeRemaining()).isEqualTo(-1L);
+  }
+
+  @Test
+  @Config(minSdk = P)
+  public void testChargeTimeRemainingRejectsInvalidValues() {
+    assertThrows(
+        IllegalArgumentException.class, () -> shadowBatteryManager.setChargeTimeRemaining(-50L));
+    assertThrows(
+        IllegalArgumentException.class, () -> shadowBatteryManager.setChargeTimeRemaining(-100L));
+  }
+
+  @Test
+  @Config(minSdk = P)
+  public void batteryManager_activityContextEnabled_sharedState() {
+    String originalProperty = System.getProperty("robolectric.createActivityContexts", "");
+    System.setProperty("robolectric.createActivityContexts", "true");
+    try (ActivityController<Activity> controller =
+        Robolectric.buildActivity(Activity.class).setup()) {
+      Context context = ApplicationProvider.getApplicationContext();
+      BatteryManager applicationBatteryManager = context.getSystemService(BatteryManager.class);
+      Activity activity = controller.get();
+      BatteryManager activityBatteryManager = activity.getSystemService(BatteryManager.class);
+
+      assertThat(applicationBatteryManager).isNotSameInstanceAs(activityBatteryManager);
+
+      ShadowBatteryManager shadowApplicationBatteryManager = shadowOf(applicationBatteryManager);
+      shadowApplicationBatteryManager.setIsCharging(true);
+
+      assertThat(activityBatteryManager.isCharging()).isTrue();
+    } finally {
+      System.setProperty("robolectric.createActivityContexts", originalProperty);
+    }
   }
 }

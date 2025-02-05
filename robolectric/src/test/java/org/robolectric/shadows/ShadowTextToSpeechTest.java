@@ -1,6 +1,5 @@
 package org.robolectric.shadows;
 
-import static android.os.Build.VERSION_CODES.LOLLIPOP;
 import static com.google.common.truth.Truth.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -17,15 +16,17 @@ import android.speech.tts.Voice;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import com.google.common.collect.ImmutableSet;
 import java.io.File;
+import java.io.IOException;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Locale;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.Before;
 import org.junit.Test;
+import org.junit.rules.TemporaryFolder;
 import org.junit.runner.RunWith;
 import org.robolectric.Robolectric;
 import org.robolectric.Shadows;
-import org.robolectric.annotation.Config;
 
 @RunWith(AndroidJUnit4.class)
 public class ShadowTextToSpeechTest {
@@ -168,7 +169,6 @@ public class ShadowTextToSpeechTest {
   }
 
   @Test
-  @Config(minSdk = LOLLIPOP)
   public void speak_withUtteranceId_shouldReturnSpokenText() {
     TextToSpeech textToSpeech = new TextToSpeech(activity, result -> {});
     textToSpeech.speak("Hello", TextToSpeech.QUEUE_FLUSH, null, "TTSEnable");
@@ -176,7 +176,6 @@ public class ShadowTextToSpeechTest {
   }
 
   @Test
-  @Config(minSdk = LOLLIPOP)
   public void onUtteranceProgressListener_shouldGetCallbackUtteranceId() {
     TextToSpeech textToSpeech = new TextToSpeech(activity, result -> {});
     UtteranceProgressListener mockListener = mock(UtteranceProgressListener.class);
@@ -190,12 +189,10 @@ public class ShadowTextToSpeechTest {
   }
 
   @Test
-  @Config(minSdk = LOLLIPOP)
-  public void synthesizeToFile_lastSynthesizeToFileTextStored() {
+  public void synthesizeToFile_lastSynthesizeToFileTextStored() throws IOException {
     TextToSpeech textToSpeech = new TextToSpeech(activity, result -> {});
     Bundle bundle = new Bundle();
-    File file = new File("example.txt");
-
+    File file = createFile("example.txt");
     int result = textToSpeech.synthesizeToFile("text", bundle, file, "id");
 
     assertThat(result).isEqualTo(TextToSpeech.SUCCESS);
@@ -203,7 +200,98 @@ public class ShadowTextToSpeechTest {
   }
 
   @Test
-  @Config(minSdk = LOLLIPOP)
+  public void synthesizeToFile_byDefault_doesNotCallOnStart() throws IOException {
+    TextToSpeech textToSpeech = new TextToSpeech(activity, result -> {});
+    UtteranceProgressListener mockListener = mock(UtteranceProgressListener.class);
+    textToSpeech.setOnUtteranceProgressListener(mockListener);
+    Bundle bundle = new Bundle();
+    File file = createFile("example.txt");
+
+    textToSpeech.synthesizeToFile("text", bundle, file, "id");
+
+    verify(mockListener, never()).onDone("id");
+  }
+
+  @Test
+  public void synthesizeToFile_byDefault_doesNotCallOnDone() throws IOException {
+    TextToSpeech textToSpeech = new TextToSpeech(activity, result -> {});
+    UtteranceProgressListener mockListener = mock(UtteranceProgressListener.class);
+    textToSpeech.setOnUtteranceProgressListener(mockListener);
+    Bundle bundle = new Bundle();
+    File file = createFile("example.txt");
+
+    textToSpeech.synthesizeToFile("text", bundle, file, "id");
+
+    verify(mockListener, never()).onDone("id");
+  }
+
+  @Test
+  public void synthesizeToFile_successSimulated_callsOnStart() throws IOException {
+    TextToSpeech textToSpeech = new TextToSpeech(activity, result -> {});
+    UtteranceProgressListener mockListener = mock(UtteranceProgressListener.class);
+    textToSpeech.setOnUtteranceProgressListener(mockListener);
+    Bundle bundle = new Bundle();
+    File file = createFile("example.txt");
+
+    ShadowTextToSpeech shadowTextToSpeech = shadowOf(textToSpeech);
+    shadowTextToSpeech.simulateSynthesizeToFileResult(TextToSpeech.SUCCESS);
+
+    textToSpeech.synthesizeToFile("text", bundle, file, "id");
+
+    verify(mockListener).onStart("id");
+  }
+
+  @Test
+  public void synthesizeToFile_successSimulated_callsOnDone() throws IOException {
+    TextToSpeech textToSpeech = new TextToSpeech(activity, result -> {});
+    UtteranceProgressListener mockListener = mock(UtteranceProgressListener.class);
+    textToSpeech.setOnUtteranceProgressListener(mockListener);
+    Bundle bundle = new Bundle();
+    File file = createFile("example.txt");
+
+    ShadowTextToSpeech shadowTextToSpeech = shadowOf(textToSpeech);
+    shadowTextToSpeech.simulateSynthesizeToFileResult(TextToSpeech.SUCCESS);
+
+    textToSpeech.synthesizeToFile("text", bundle, file, "id");
+
+    verify(mockListener).onDone("id");
+  }
+
+  @Test
+  public void synthesizeToFile_setToFail_doesNotCallIsDone() throws IOException {
+    TextToSpeech textToSpeech = new TextToSpeech(activity, result -> {});
+    UtteranceProgressListener mockListener = mock(UtteranceProgressListener.class);
+    textToSpeech.setOnUtteranceProgressListener(mockListener);
+    Bundle bundle = new Bundle();
+    File file = createFile("example.txt");
+
+    ShadowTextToSpeech shadowTextToSpeech = shadowOf(textToSpeech);
+    // The actual error used does not matter for this test.
+    shadowTextToSpeech.simulateSynthesizeToFileResult(TextToSpeech.ERROR_NETWORK_TIMEOUT);
+
+    textToSpeech.synthesizeToFile("text", bundle, file, "id");
+
+    verify(mockListener, never()).onDone("id");
+  }
+
+  @Test
+  public void synthesizeToFile_setToFail_callsOnErrorWithErrorCode() throws IOException {
+    TextToSpeech textToSpeech = new TextToSpeech(activity, result -> {});
+    UtteranceProgressListener mockListener = mock(UtteranceProgressListener.class);
+    textToSpeech.setOnUtteranceProgressListener(mockListener);
+    Bundle bundle = new Bundle();
+    File file = createFile("example.txt");
+
+    ShadowTextToSpeech shadowTextToSpeech = shadowOf(textToSpeech);
+    int errorCode = TextToSpeech.ERROR_NETWORK_TIMEOUT;
+    shadowTextToSpeech.simulateSynthesizeToFileResult(errorCode);
+
+    textToSpeech.synthesizeToFile("text", bundle, file, "id");
+
+    verify(mockListener).onError("id", errorCode);
+  }
+
+  @Test
   public void synthesizeToFile_neverCalled_lastSynthesizeToFileTextNull() {
     TextToSpeech textToSpeech = new TextToSpeech(activity, result -> {});
     assertThat(shadowOf(textToSpeech).getLastSynthesizeToFileText()).isNull();
@@ -295,6 +383,42 @@ public class ShadowTextToSpeechTest {
   }
 
   @Test
+  public void setLanguage_languageAvailable_shouldSetVoiceToLocaleDefault() {
+    TextToSpeech textToSpeech = new TextToSpeech(activity, result -> {});
+    ShadowTextToSpeech.addLanguageAvailability(Locale.US);
+
+    textToSpeech.setLanguage(Locale.US);
+
+    assertThat(textToSpeech.getVoice().getName()).isEqualTo("en-US");
+  }
+
+  @Test
+  public void setLanguage_languageUnavailable_voiceIsNull() {
+    TextToSpeech textToSpeech = new TextToSpeech(activity, result -> {});
+
+    textToSpeech.setLanguage(Locale.US);
+
+    assertThat(textToSpeech.getVoice()).isNull();
+  }
+
+  @Test
+  public void getVoice_setVoice_returnsVoiceThatWasSet() {
+    TextToSpeech textToSpeech = new TextToSpeech(activity, result -> {});
+    Voice testVoice =
+        new Voice(
+            "test",
+            Locale.US,
+            Voice.QUALITY_NORMAL,
+            Voice.LATENCY_NORMAL,
+            /* requiresNetworkConnection= */ false,
+            new HashSet<>());
+
+    textToSpeech.setVoice(testVoice);
+
+    assertThat(textToSpeech.getVoice()).isEqualTo(testVoice);
+  }
+
+  @Test
   public void getLastTextToSpeechInstance_neverConstructed_returnsNull() {
     assertThat(ShadowTextToSpeech.getLastTextToSpeechInstance()).isNull();
   }
@@ -332,7 +456,6 @@ public class ShadowTextToSpeechTest {
   }
 
   @Test
-  @Config(minSdk = LOLLIPOP)
   public void getCurrentVoice_voiceSet_returnsVoice() {
     TextToSpeech textToSpeech = new TextToSpeech(activity, result -> {});
 
@@ -350,7 +473,6 @@ public class ShadowTextToSpeechTest {
   }
 
   @Test
-  @Config(minSdk = LOLLIPOP)
   public void getVoices_returnsAvailableVoices() {
     TextToSpeech textToSpeech = new TextToSpeech(activity, result -> {});
 
@@ -365,5 +487,11 @@ public class ShadowTextToSpeechTest {
     ShadowTextToSpeech.addVoice(voice);
 
     assertThat(shadowOf(textToSpeech).getVoices()).containsExactly(voice);
+  }
+
+  private static File createFile(String filename) throws IOException {
+    TemporaryFolder temporaryFolder = new TemporaryFolder();
+    temporaryFolder.create();
+    return temporaryFolder.newFile(filename);
   }
 }

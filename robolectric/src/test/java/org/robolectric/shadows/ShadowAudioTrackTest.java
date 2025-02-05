@@ -3,23 +3,36 @@ package org.robolectric.shadows;
 import static android.media.AudioTrack.ERROR_BAD_VALUE;
 import static android.media.AudioTrack.WRITE_BLOCKING;
 import static android.media.AudioTrack.WRITE_NON_BLOCKING;
-import static android.os.Build.VERSION_CODES.LOLLIPOP;
+import static android.os.Build.VERSION_CODES.M;
+import static android.os.Build.VERSION_CODES.N;
 import static android.os.Build.VERSION_CODES.Q;
+import static android.os.Build.VERSION_CODES.R;
+import static android.os.Build.VERSION_CODES.S;
+import static android.os.Build.VERSION_CODES.TIRAMISU;
 import static com.google.common.truth.Truth.assertThat;
+import static org.junit.Assert.assertThrows;
 
 import android.media.AudioAttributes;
+import android.media.AudioDeviceInfo;
 import android.media.AudioFormat;
 import android.media.AudioManager;
+import android.media.AudioRouting;
+import android.media.AudioRouting.OnRoutingChangedListener;
+import android.media.AudioSystem;
 import android.media.AudioTrack;
+import android.media.PlaybackParams;
+import android.os.Handler;
+import android.os.Looper;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import java.nio.ByteBuffer;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.robolectric.annotation.Config;
 
 /** Tests for {@link ShadowAudioTrack}. */
 @RunWith(AndroidJUnit4.class)
-@Config(minSdk = LOLLIPOP)
 public class ShadowAudioTrackTest implements ShadowAudioTrack.OnAudioDataWrittenListener {
 
   private static final int SAMPLE_RATE_IN_HZ = 44100;
@@ -172,6 +185,497 @@ public class ShadowAudioTrackTest implements ShadowAudioTrack.OnAudioDataWritten
     assertThat(written).isEqualTo(ERROR_BAD_VALUE);
   }
 
+  @Test
+  @Config(minSdk = M)
+  public void getPlaybackParams_withSetPlaybackParams_returnsSetPlaybackParams() {
+    PlaybackParams playbackParams =
+        new PlaybackParams()
+            .allowDefaults()
+            .setSpeed(1.0f)
+            .setPitch(1.0f)
+            .setAudioFallbackMode(PlaybackParams.AUDIO_FALLBACK_MODE_FAIL);
+    AudioTrack audioTrack = getSampleAudioTrack();
+    audioTrack.setPlaybackParams(playbackParams);
+
+    assertThat(audioTrack.getPlaybackParams()).isEqualTo(playbackParams);
+  }
+
+  @Test
+  public void addDirectPlaybackSupport_forPcmEncoding_throws() {
+    AudioAttributes attributes = new AudioAttributes.Builder().build();
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ShadowAudioTrack.addDirectPlaybackSupport(
+                getAudioFormat(AudioFormat.ENCODING_PCM_8BIT), attributes));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ShadowAudioTrack.addDirectPlaybackSupport(
+                getAudioFormat(AudioFormat.ENCODING_PCM_16BIT), attributes));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ShadowAudioTrack.addDirectPlaybackSupport(
+                getAudioFormat(AudioFormat.ENCODING_PCM_24BIT_PACKED), attributes));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ShadowAudioTrack.addDirectPlaybackSupport(
+                getAudioFormat(AudioFormat.ENCODING_PCM_32BIT), attributes));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ShadowAudioTrack.addDirectPlaybackSupport(
+                getAudioFormat(AudioFormat.ENCODING_PCM_FLOAT), attributes));
+  }
+
+  @Test
+  @Config(minSdk = Q)
+  public void isDirectPlaybackSupported() {
+    AudioFormat ac3Format = getAudioFormat(AudioFormat.ENCODING_AC3);
+    AudioAttributes audioAttributes = new AudioAttributes.Builder().build();
+
+    assertThat(AudioTrack.isDirectPlaybackSupported(ac3Format, audioAttributes)).isFalse();
+
+    ShadowAudioTrack.addDirectPlaybackSupport(ac3Format, audioAttributes);
+
+    assertThat(AudioTrack.isDirectPlaybackSupported(ac3Format, audioAttributes)).isTrue();
+  }
+
+  @Test
+  @Config(minSdk = Q)
+  public void isDirectPlaybackSupported_differentFormatOrAttributeFields() {
+    AudioFormat ac3Format = new AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_AC3).build();
+    AudioAttributes audioAttributes = new AudioAttributes.Builder().build();
+
+    ShadowAudioTrack.addDirectPlaybackSupport(ac3Format, audioAttributes);
+
+    assertThat(
+            AudioTrack.isDirectPlaybackSupported(
+                new AudioFormat.Builder()
+                    .setEncoding(AudioFormat.ENCODING_AC3)
+                    .setSampleRate(65000)
+                    .build(),
+                audioAttributes))
+        .isFalse();
+    assertThat(
+            AudioTrack.isDirectPlaybackSupported(
+                ac3Format,
+                new AudioAttributes.Builder()
+                    .setContentType(AudioAttributes.CONTENT_TYPE_MOVIE)
+                    .build()))
+        .isFalse();
+  }
+
+  @Test
+  @Config(minSdk = Q)
+  public void clearDirectPlaybackSupportedEncodings() {
+    AudioFormat ac3Format = new AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_AC3).build();
+    AudioAttributes audioAttributes = new AudioAttributes.Builder().build();
+    ShadowAudioTrack.addDirectPlaybackSupport(ac3Format, audioAttributes);
+    assertThat(AudioTrack.isDirectPlaybackSupported(ac3Format, audioAttributes)).isTrue();
+
+    ShadowAudioTrack.clearDirectPlaybackSupportedFormats();
+
+    assertThat(AudioTrack.isDirectPlaybackSupported(ac3Format, audioAttributes)).isFalse();
+  }
+
+  @Test
+  public void addAllowedNonPcmEncoding_forPcmEncoding_throws() {
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> ShadowAudioTrack.addAllowedNonPcmEncoding(AudioFormat.ENCODING_PCM_8BIT));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> ShadowAudioTrack.addAllowedNonPcmEncoding(AudioFormat.ENCODING_PCM_16BIT));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> ShadowAudioTrack.addAllowedNonPcmEncoding(AudioFormat.ENCODING_PCM_24BIT_PACKED));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> ShadowAudioTrack.addAllowedNonPcmEncoding(AudioFormat.ENCODING_PCM_32BIT));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> ShadowAudioTrack.addAllowedNonPcmEncoding(AudioFormat.ENCODING_PCM_FLOAT));
+  }
+
+  @Test
+  @Config(minSdk = Q)
+  public void createInstance_withNonPcmEncodingNotAllowed_throws() {
+    assertThrows(
+        UnsupportedOperationException.class,
+        () ->
+            new AudioTrack.Builder()
+                .setAudioFormat(
+                    new AudioFormat.Builder()
+                        .setEncoding(AudioFormat.ENCODING_AC3)
+                        .setSampleRate(48000)
+                        .setChannelMask(AudioFormat.CHANNEL_OUT_5POINT1)
+                        .build())
+                .setBufferSizeInBytes(65536)
+                .build());
+  }
+
+  @Test
+  @Config(minSdk = Q)
+  public void createInstance_withNonPcmEncodingAllowed() {
+    ShadowAudioTrack.addAllowedNonPcmEncoding(AudioFormat.ENCODING_AC3);
+
+    new AudioTrack.Builder()
+        .setAudioFormat(
+            new AudioFormat.Builder()
+                .setEncoding(AudioFormat.ENCODING_AC3)
+                .setSampleRate(48000)
+                .setChannelMask(AudioFormat.CHANNEL_OUT_5POINT1)
+                .build())
+        .setBufferSizeInBytes(65536)
+        .build();
+  }
+
+  @Test
+  @Config(minSdk = Q)
+  public void createInstance_withOffloadAndEncodingNotOffloaded_throws() {
+    assertThrows(
+        UnsupportedOperationException.class,
+        () ->
+            new AudioTrack.Builder()
+                .setAudioFormat(
+                    new AudioFormat.Builder()
+                        .setEncoding(AudioFormat.ENCODING_AC3)
+                        .setSampleRate(48000)
+                        .setChannelMask(AudioFormat.CHANNEL_OUT_5POINT1)
+                        .build())
+                .setBufferSizeInBytes(65536)
+                .setOffloadedPlayback(true)
+                .build());
+  }
+
+  @Test
+  @Config(minSdk = Q, maxSdk = R)
+  public void createInstance_withOffloadAndEncodingIsOffloadSupported() {
+    AudioFormat audioFormat =
+        new AudioFormat.Builder()
+            .setEncoding(AudioFormat.ENCODING_AC3)
+            .setSampleRate(48000)
+            .setChannelMask(AudioFormat.CHANNEL_OUT_5POINT1)
+            .build();
+    AudioAttributes attributes = new AudioAttributes.Builder().build();
+    ShadowAudioSystem.setOffloadSupported(audioFormat, attributes, /* supported= */ true);
+
+    AudioTrack audioTrack =
+        new AudioTrack.Builder()
+            .setAudioFormat(audioFormat)
+            .setAudioAttributes(attributes)
+            .setBufferSizeInBytes(65536)
+            .setOffloadedPlayback(true)
+            .build();
+
+    assertThat(audioTrack.isOffloadedPlayback()).isTrue();
+  }
+
+  @Test
+  @Config(sdk = S)
+  public void createInstance_withOffloadAndGetOffloadSupport() {
+    AudioFormat audioFormat =
+        new AudioFormat.Builder()
+            .setEncoding(AudioFormat.ENCODING_AC3)
+            .setSampleRate(48000)
+            .setChannelMask(AudioFormat.CHANNEL_OUT_5POINT1)
+            .build();
+    AudioAttributes attributes = new AudioAttributes.Builder().build();
+    ShadowAudioSystem.setOffloadPlaybackSupport(
+        audioFormat, attributes, AudioSystem.OFFLOAD_SUPPORTED);
+
+    AudioTrack audioTrack =
+        new AudioTrack.Builder()
+            .setAudioFormat(audioFormat)
+            .setAudioAttributes(attributes)
+            .setBufferSizeInBytes(65536)
+            .setOffloadedPlayback(true)
+            .build();
+
+    assertThat(audioTrack.isOffloadedPlayback()).isTrue();
+  }
+
+  @Test
+  @Config(minSdk = TIRAMISU)
+  public void createInstance_withOffloadAndGetDirectPlaybackSupport() {
+    AudioFormat audioFormat =
+        new AudioFormat.Builder()
+            .setEncoding(AudioFormat.ENCODING_AC3)
+            .setSampleRate(48000)
+            .setChannelMask(AudioFormat.CHANNEL_OUT_5POINT1)
+            .build();
+    AudioAttributes attributes = new AudioAttributes.Builder().build();
+    ShadowAudioSystem.setDirectPlaybackSupport(
+        audioFormat, attributes, AudioSystem.OFFLOAD_SUPPORTED);
+
+    AudioTrack audioTrack =
+        new AudioTrack.Builder()
+            .setAudioFormat(audioFormat)
+            .setAudioAttributes(attributes)
+            .setBufferSizeInBytes(65536)
+            .setOffloadedPlayback(true)
+            .build();
+
+    assertThat(audioTrack.isOffloadedPlayback()).isTrue();
+  }
+
+  @Test
+  @Config(minSdk = Q)
+  public void clearAllowedNonPcmEncodings() {
+    AudioFormat surroundAudioFormat =
+        new AudioFormat.Builder()
+            .setEncoding(AudioFormat.ENCODING_AC3)
+            .setSampleRate(48000)
+            .setChannelMask(AudioFormat.CHANNEL_OUT_5POINT1)
+            .build();
+    ShadowAudioTrack.addAllowedNonPcmEncoding(AudioFormat.ENCODING_AC3);
+    new AudioTrack.Builder()
+        .setAudioFormat(surroundAudioFormat)
+        .setBufferSizeInBytes(65536)
+        .build();
+
+    ShadowAudioTrack.clearAllowedNonPcmEncodings();
+
+    assertThrows(
+        UnsupportedOperationException.class,
+        () ->
+            new AudioTrack.Builder()
+                .setAudioFormat(surroundAudioFormat)
+                .setBufferSizeInBytes(65536)
+                .build());
+  }
+
+  @Test
+  @Config(minSdk = Q)
+  public void write_withNonPcmEncodingSupported_succeeds() {
+    ShadowAudioTrack.addAllowedNonPcmEncoding(AudioFormat.ENCODING_AC3);
+
+    AudioTrack audioTrack =
+        new AudioTrack.Builder()
+            .setAudioFormat(
+                new AudioFormat.Builder()
+                    .setEncoding(AudioFormat.ENCODING_AC3)
+                    .setSampleRate(48000)
+                    .setChannelMask(AudioFormat.CHANNEL_OUT_5POINT1)
+                    .build())
+            .setAudioAttributes(new AudioAttributes.Builder().build())
+            .setBufferSizeInBytes(32 * 1024)
+            .build();
+
+    assertThat(audioTrack.write(new byte[128], 0, 128)).isEqualTo(128);
+    assertThat(audioTrack.write(new byte[128], 0, 128, AudioTrack.WRITE_BLOCKING)).isEqualTo(128);
+    assertThat(audioTrack.write(ByteBuffer.allocate(128), 128, AudioTrack.WRITE_BLOCKING))
+        .isEqualTo(128);
+    assertThat(audioTrack.write(ByteBuffer.allocateDirect(128), 128, AudioTrack.WRITE_BLOCKING))
+        .isEqualTo(128);
+    assertThat(audioTrack.write(ByteBuffer.allocate(128), 128, AudioTrack.WRITE_BLOCKING, 0L))
+        .isEqualTo(128);
+    assertThat(audioTrack.write(ByteBuffer.allocateDirect(128), 128, AudioTrack.WRITE_BLOCKING, 0L))
+        .isEqualTo(128);
+  }
+
+  @Test
+  @Config(minSdk = Q, maxSdk = R)
+  public void write_withOffloadUntilApi30_succeeds() {
+    ShadowAudioTrack.addAllowedNonPcmEncoding(AudioFormat.ENCODING_AC3);
+    AudioFormat ac3Format =
+        new AudioFormat.Builder()
+            .setEncoding(AudioFormat.ENCODING_AC3)
+            .setSampleRate(48000)
+            .setChannelMask(AudioFormat.CHANNEL_OUT_5POINT1)
+            .build();
+    AudioAttributes attributes = new AudioAttributes.Builder().build();
+    ShadowAudioSystem.setOffloadSupported(ac3Format, attributes, /* supported= */ true);
+
+    AudioTrack audioTrack =
+        new AudioTrack.Builder()
+            .setAudioFormat(ac3Format)
+            .setAudioAttributes(new AudioAttributes.Builder().build())
+            .setBufferSizeInBytes(32 * 1024)
+            .setOffloadedPlayback(true)
+            .build();
+
+    assertThat(audioTrack.write(new byte[128], 0, 128)).isEqualTo(128);
+    assertThat(audioTrack.write(new byte[128], 0, 128, AudioTrack.WRITE_BLOCKING)).isEqualTo(128);
+    assertThat(audioTrack.write(ByteBuffer.allocate(128), 128, AudioTrack.WRITE_BLOCKING))
+        .isEqualTo(128);
+    assertThat(audioTrack.write(ByteBuffer.allocateDirect(128), 128, AudioTrack.WRITE_BLOCKING))
+        .isEqualTo(128);
+    assertThat(audioTrack.write(ByteBuffer.allocate(128), 128, AudioTrack.WRITE_BLOCKING, 0L))
+        .isEqualTo(128);
+    assertThat(audioTrack.write(ByteBuffer.allocateDirect(128), 128, AudioTrack.WRITE_BLOCKING, 0L))
+        .isEqualTo(128);
+  }
+
+  @Test
+  @Config(minSdk = Q)
+  public void write_withNonPcmEncodingNoLongerSupported_returnsErrorDeadObject() {
+    ShadowAudioTrack.addAllowedNonPcmEncoding(AudioFormat.ENCODING_AC3);
+    AudioTrack audioTrack =
+        new AudioTrack.Builder()
+            .setAudioFormat(
+                new AudioFormat.Builder()
+                    .setEncoding(AudioFormat.ENCODING_AC3)
+                    .setSampleRate(48000)
+                    .setChannelMask(AudioFormat.CHANNEL_OUT_5POINT1)
+                    .build())
+            .setAudioAttributes(new AudioAttributes.Builder().build())
+            .setBufferSizeInBytes(32 * 1024)
+            .build();
+
+    ShadowAudioTrack.clearAllowedNonPcmEncodings();
+
+    assertThat(audioTrack.write(new byte[128], 0, 128)).isEqualTo(AudioTrack.ERROR_DEAD_OBJECT);
+    assertThat(audioTrack.write(new byte[128], 0, 128, AudioTrack.WRITE_BLOCKING))
+        .isEqualTo(AudioTrack.ERROR_DEAD_OBJECT);
+    assertThat(audioTrack.write(ByteBuffer.allocate(128), 128, AudioTrack.WRITE_BLOCKING))
+        .isEqualTo(AudioTrack.ERROR_DEAD_OBJECT);
+    assertThat(audioTrack.write(ByteBuffer.allocateDirect(128), 128, AudioTrack.WRITE_BLOCKING))
+        .isEqualTo(AudioTrack.ERROR_DEAD_OBJECT);
+    assertThat(audioTrack.write(ByteBuffer.allocateDirect(128), 128, AudioTrack.WRITE_BLOCKING, 0L))
+        .isEqualTo(AudioTrack.ERROR_DEAD_OBJECT);
+  }
+
+  @Test
+  @Config(minSdk = N)
+  public void getRoutedDevice_withoutSetRoutedDevice_returnsNull() {
+    AudioTrack audioTrack = new AudioTrack.Builder().build();
+
+    assertThat(audioTrack.getRoutedDevice()).isNull();
+  }
+
+  @Test
+  @Config(minSdk = N)
+  public void getRoutedDevice_afterSetRoutedDevice_returnsRoutedDevice() {
+    AudioTrack audioTrack = new AudioTrack.Builder().build();
+    AudioDeviceInfo audioDeviceInfo =
+        AudioDeviceInfoBuilder.newBuilder().setType(AudioDeviceInfo.TYPE_HDMI).build();
+
+    ShadowAudioTrack.setRoutedDevice(audioDeviceInfo);
+
+    assertThat(audioTrack.getRoutedDevice()).isEqualTo(audioDeviceInfo);
+  }
+
+  @Test
+  @Config(minSdk = N)
+  public void addOnRoutingChangedListener_beforeSetRoutedDevice_listenerCalledOnceDeviceSet() {
+    AudioTrack audioTrack = new AudioTrack.Builder().build();
+    AudioDeviceInfo audioDeviceInfo =
+        AudioDeviceInfoBuilder.newBuilder().setType(AudioDeviceInfo.TYPE_HDMI).build();
+    AtomicReference<AudioRouting> listenerRouting = new AtomicReference<>();
+
+    audioTrack.addOnRoutingChangedListener(
+        (OnRoutingChangedListener) listenerRouting::set, new Handler(Looper.getMainLooper()));
+    ShadowLooper.idleMainLooper();
+
+    assertThat(listenerRouting.get()).isNull();
+
+    ShadowAudioTrack.setRoutedDevice(audioDeviceInfo);
+    ShadowLooper.idleMainLooper();
+
+    assertThat(listenerRouting.get()).isEqualTo(audioTrack);
+    assertThat(listenerRouting.get().getRoutedDevice()).isEqualTo(audioDeviceInfo);
+  }
+
+  @Test
+  @Config(minSdk = N)
+  public void
+      addOnRoutingChangedListener_afterSetRoutedDevice_listenerCalledImmediatelyAndWhenNewDeviceSet() {
+    AudioTrack audioTrack = new AudioTrack.Builder().build();
+    AudioDeviceInfo audioDeviceInfo1 =
+        AudioDeviceInfoBuilder.newBuilder().setType(AudioDeviceInfo.TYPE_HDMI).build();
+    AudioDeviceInfo audioDeviceInfo2 =
+        AudioDeviceInfoBuilder.newBuilder().setType(AudioDeviceInfo.TYPE_BLUETOOTH_A2DP).build();
+    AtomicReference<AudioRouting> listenerRouting = new AtomicReference<>();
+
+    ShadowAudioTrack.setRoutedDevice(audioDeviceInfo1);
+    audioTrack.addOnRoutingChangedListener(
+        (OnRoutingChangedListener) listenerRouting::set, new Handler(Looper.getMainLooper()));
+    ShadowLooper.idleMainLooper();
+
+    assertThat(listenerRouting.get()).isEqualTo(audioTrack);
+    assertThat(listenerRouting.get().getRoutedDevice()).isEqualTo(audioDeviceInfo1);
+
+    ShadowAudioTrack.setRoutedDevice(audioDeviceInfo2);
+    ShadowLooper.idleMainLooper();
+
+    assertThat(listenerRouting.get()).isEqualTo(audioTrack);
+    assertThat(listenerRouting.get().getRoutedDevice()).isEqualTo(audioDeviceInfo2);
+  }
+
+  @Test
+  @Config(minSdk = N)
+  public void setRoutedDevice_toNull_listenerCalled() {
+    AudioTrack audioTrack = new AudioTrack.Builder().build();
+    AudioDeviceInfo audioDeviceInfo =
+        AudioDeviceInfoBuilder.newBuilder().setType(AudioDeviceInfo.TYPE_HDMI).build();
+    AtomicReference<AudioRouting> listenerRouting = new AtomicReference<>();
+    ShadowAudioTrack.setRoutedDevice(audioDeviceInfo);
+    audioTrack.addOnRoutingChangedListener(
+        (OnRoutingChangedListener) listenerRouting::set, new Handler(Looper.getMainLooper()));
+    ShadowLooper.idleMainLooper();
+
+    ShadowAudioTrack.setRoutedDevice(null);
+    ShadowLooper.idleMainLooper();
+
+    assertThat(listenerRouting.get()).isEqualTo(audioTrack);
+    assertThat(listenerRouting.get().getRoutedDevice()).isEqualTo(null);
+  }
+
+  @Test
+  @Config(minSdk = N)
+  public void removeOnRoutingChangedListener_noFurtherUpdatesSent() {
+    AudioTrack audioTrack = new AudioTrack.Builder().build();
+    AudioDeviceInfo audioDeviceInfo1 =
+        AudioDeviceInfoBuilder.newBuilder().setType(AudioDeviceInfo.TYPE_HDMI).build();
+    AudioDeviceInfo audioDeviceInfo2 =
+        AudioDeviceInfoBuilder.newBuilder().setType(AudioDeviceInfo.TYPE_BUILTIN_SPEAKER).build();
+    ShadowAudioTrack.setRoutedDevice(audioDeviceInfo1);
+    AtomicInteger listenerCounter1 = new AtomicInteger();
+    AtomicInteger listenerCounter2 = new AtomicInteger();
+    OnRoutingChangedListener listener1 = routing -> listenerCounter1.incrementAndGet();
+    OnRoutingChangedListener listener2 = routing -> listenerCounter2.incrementAndGet();
+    audioTrack.addOnRoutingChangedListener(listener1, new Handler(Looper.getMainLooper()));
+    audioTrack.addOnRoutingChangedListener(listener2, new Handler(Looper.getMainLooper()));
+    ShadowLooper.idleMainLooper();
+
+    audioTrack.removeOnRoutingChangedListener(listener1);
+    ShadowAudioTrack.setRoutedDevice(audioDeviceInfo2);
+    ShadowLooper.idleMainLooper();
+
+    assertThat(listenerCounter1.get()).isEqualTo(1);
+    assertThat(listenerCounter2.get()).isEqualTo(2);
+  }
+
+  @Test
+  @Config(minSdk = N)
+  public void play_illegalStateOnPlayEnabled_throws() {
+    ShadowAudioTrack.enableIllegalStateOnPlay(/* enabled= */ true);
+    AudioTrack audioTrack = new AudioTrack.Builder().build();
+    assertThrows(IllegalStateException.class, audioTrack::play);
+  }
+
+  @Test
+  @Config(minSdk = N)
+  public void play_illegalStateOnPlayEnabled_thenDisabled_notThrowing() {
+    ShadowAudioTrack.enableIllegalStateOnPlay(/* enabled= */ true);
+    AudioTrack audioTrack = new AudioTrack.Builder().build();
+    ShadowAudioTrack.enableIllegalStateOnPlay(/* enabled= */ false);
+    audioTrack.play();
+  }
+
+  @Test
+  @Config(minSdk = N)
+  public void play_illegalStateOnPlayEnabled_reset_notThrowing() {
+    ShadowAudioTrack.enableIllegalStateOnPlay(/* enabled= */ true);
+    AudioTrack audioTrack = new AudioTrack.Builder().build();
+    ShadowAudioTrack.resetTest();
+    audioTrack.play();
+  }
+
   @Override
   @Config(minSdk = Q)
   public void onAudioDataWritten(
@@ -194,5 +698,9 @@ public class ShadowAudioTrackTest implements ShadowAudioTrack.OnAudioDataWritten
                 .setChannelMask(CHANNEL_CONFIG)
                 .build())
         .build();
+  }
+
+  private AudioFormat getAudioFormat(int encoding) {
+    return new AudioFormat.Builder().setEncoding(encoding).build();
   }
 }

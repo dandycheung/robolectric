@@ -1,10 +1,9 @@
 package org.robolectric.shadows;
 
 import static com.google.common.truth.Truth.assertThat;
-import static org.robolectric.Robolectric.buildActivity;
 
-import android.app.Activity;
 import android.preference.ListPreference;
+import androidx.test.core.app.ApplicationProvider;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import org.junit.Before;
 import org.junit.Test;
@@ -18,12 +17,12 @@ public class ShadowListPreferenceTest {
 
   @Before
   public void setUp() throws Exception {
-    listPreference = new ListPreference(buildActivity(Activity.class).create().get());
+    listPreference = new ListPreference(ApplicationProvider.getApplicationContext());
   }
 
   @Test
   public void shouldHaveEntries() {
-    CharSequence[] entries = { "this", "is", "only", "a", "test" };
+    CharSequence[] entries = {"this", "is", "only", "a", "test"};
 
     assertThat(listPreference.getEntries()).isNull();
     listPreference.setEntries(entries);
@@ -39,7 +38,7 @@ public class ShadowListPreferenceTest {
 
   @Test
   public void shouldHaveEntryValues() {
-    CharSequence[] entryValues = { "this", "is", "only", "a", "test" };
+    CharSequence[] entryValues = {"this", "is", "only", "a", "test"};
 
     assertThat(listPreference.getEntryValues()).isNull();
     listPreference.setEntryValues(entryValues);

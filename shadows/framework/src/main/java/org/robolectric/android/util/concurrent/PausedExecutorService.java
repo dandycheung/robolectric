@@ -1,6 +1,5 @@
 package org.robolectric.android.util.concurrent;
 
-import androidx.annotation.NonNull;
 import com.google.common.annotations.Beta;
 import com.google.common.collect.ImmutableList;
 import com.google.common.util.concurrent.AbstractFuture;
@@ -15,20 +14,20 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.RunnableFuture;
 import java.util.concurrent.TimeUnit;
+import javax.annotation.Nonnull;
 import org.robolectric.annotation.LooperMode;
 import org.robolectric.util.Logger;
 
 /**
  * Executor service that queues any posted tasks.
  *
- * Users must explicitly call {@link runAll()} to execute all pending tasks.
+ * <p>Users must explicitly call {@link #runAll()} to execute all pending tasks.
  *
- * Intended to be a replacement for {@link RoboExecutorService} when using
- * {@link LooperMode.Mode#PAUSED}.
- * Unlike {@link RoboExecutorService}, will execute tasks on a background thread. This is useful
- * to test Android code that enforces it runs off the main thread.
+ * <p>Intended to be a replacement for {@link RoboExecutorService} when using {@link
+ * LooperMode.Mode#PAUSED}. Unlike {@link RoboExecutorService}, will execute tasks on a background
+ * thread. This is useful to test Android code that enforces it runs off the main thread.
  *
- * NOTE: Beta API, subject to change.
+ * <p>NOTE: Beta API, subject to change.
  */
 @Beta
 public class PausedExecutorService extends AbstractExecutorService {
@@ -105,7 +104,7 @@ public class PausedExecutorService extends AbstractExecutorService {
   /**
    * Executes the next queued task.
    *
-   * Will be ignored if called from the executor service thread to prevent deadlocks.
+   * <p>Will be ignored if called from the executor service thread to prevent deadlocks.
    *
    * @return true if task was run, false if queue was empty
    */
@@ -135,6 +134,7 @@ public class PausedExecutorService extends AbstractExecutorService {
     deferredTasks.clear();
   }
 
+  @Nonnull
   @Override
   public List<Runnable> shutdownNow() {
     realService.shutdownNow();
@@ -154,13 +154,13 @@ public class PausedExecutorService extends AbstractExecutorService {
   }
 
   @Override
-  public boolean awaitTermination(long l, TimeUnit timeUnit) throws InterruptedException {
+  public boolean awaitTermination(long l, @Nonnull TimeUnit timeUnit) throws InterruptedException {
     // If not shut down first, timeout would occur with normal behavior.
     return realService.awaitTermination(l, timeUnit);
   }
 
   @Override
-  public void execute(@NonNull Runnable command) {
+  public void execute(@Nonnull Runnable command) {
     if (command instanceof DeferredTask) {
       deferredTasks.add(command);
     } else {
@@ -175,6 +175,6 @@ public class PausedExecutorService extends AbstractExecutorService {
 
   @Override
   protected <T> RunnableFuture<T> newTaskFor(Callable<T> callable) {
-    return new DeferredTask<T>(callable, realService);
+    return new DeferredTask<>(callable, realService);
   }
 }

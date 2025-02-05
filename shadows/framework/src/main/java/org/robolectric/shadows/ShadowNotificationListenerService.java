@@ -1,7 +1,5 @@
 package org.robolectric.shadows;
 
-import static java.util.stream.Collectors.toCollection;
-
 import android.app.Notification;
 import android.content.ComponentName;
 import android.os.Build.VERSION;
@@ -24,7 +22,7 @@ import org.robolectric.util.ReflectionHelpers;
 import org.robolectric.util.ReflectionHelpers.ClassParameter;
 
 /** Shadow implementation of {@link NotificationListenerService}. */
-@Implements(value = NotificationListenerService.class, minSdk = VERSION_CODES.LOLLIPOP)
+@Implements(value = NotificationListenerService.class)
 public class ShadowNotificationListenerService extends ShadowService {
   private static final AtomicInteger rebindRequestCount = new AtomicInteger(0);
 
@@ -82,12 +80,12 @@ public class ShadowNotificationListenerService extends ShadowService {
   }
 
   @Implementation
-  protected final void cancelAllNotifications() {
+  protected void cancelAllNotifications() {
     activeNotifications.clear();
   }
 
   @Implementation
-  protected final void cancelNotification(String key) {
+  protected void cancelNotification(String key) {
     synchronized (activeNotifications) {
       Iterator<StatusBarNotification> iterator = activeNotifications.iterator();
       while (iterator.hasNext()) {
@@ -116,8 +114,7 @@ public class ShadowNotificationListenerService extends ShadowService {
     ImmutableSet<String> keySet = ImmutableSet.copyOf(keys);
     return activeNotifications.stream()
         .filter(notification -> keySet.contains(notification.getKey()))
-        .collect(toCollection(ArrayList::new))
-        .toArray(new StatusBarNotification[0]);
+        .toArray(StatusBarNotification[]::new);
   }
 
   @Implementation

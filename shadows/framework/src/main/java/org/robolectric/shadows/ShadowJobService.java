@@ -1,13 +1,13 @@
 package org.robolectric.shadows;
 
-import static android.os.Build.VERSION_CODES.LOLLIPOP;
-
+import android.app.Notification;
 import android.app.job.JobParameters;
 import android.app.job.JobService;
 import org.robolectric.annotation.Implementation;
 import org.robolectric.annotation.Implements;
+import org.robolectric.versioning.AndroidVersions.U;
 
-@Implements(value = JobService.class, minSdk = LOLLIPOP)
+@Implements(value = JobService.class)
 public class ShadowJobService extends ShadowService {
 
   private boolean isJobFinished = false;
@@ -18,6 +18,24 @@ public class ShadowJobService extends ShadowService {
     this.isJobFinished = true;
     this.isRescheduleNeeded = needsReschedule;
   }
+
+  /** Stubbed out for now, as the real implementation throws an NPE when executed in Robolectric. */
+  @Implementation(minSdk = U.SDK_INT)
+  protected void setNotification(
+      JobParameters params,
+      int notificationId,
+      Notification notification,
+      int jobEndNotificationPolicy) {}
+
+  /** Stubbed out for now, as the real implementation throws an NPE when executed in Robolectric. */
+  @Implementation(minSdk = U.SDK_INT)
+  protected void updateEstimatedNetworkBytes(
+      JobParameters params, long downloadBytes, long uploadBytes) {}
+
+  /** Stubbed out for now, as the real implementation throws an NPE when executed in Robolectric. */
+  @Implementation(minSdk = U.SDK_INT)
+  protected void updateTransferredNetworkBytes(
+      JobParameters params, long downloadBytes, long uploadBytes) {}
 
   /**
    * Returns whether the job has finished running. When using this shadow this returns true after

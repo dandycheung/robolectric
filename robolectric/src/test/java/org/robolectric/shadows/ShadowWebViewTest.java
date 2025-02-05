@@ -1,5 +1,6 @@
 package org.robolectric.shadows;
 
+import static android.os.Build.VERSION_CODES.M;
 import static android.os.Build.VERSION_CODES.O;
 import static android.os.Looper.getMainLooper;
 import static com.google.common.truth.Truth.assertThat;
@@ -14,8 +15,10 @@ import android.graphics.Color;
 import android.os.Bundle;
 import android.view.ViewGroup.LayoutParams;
 import android.webkit.DownloadListener;
+import android.webkit.ValueCallback;
 import android.webkit.WebBackForwardList;
 import android.webkit.WebChromeClient;
+import android.webkit.WebMessagePort;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebView.HitTestResult;
@@ -449,11 +452,14 @@ public class ShadowWebViewTest {
   }
 
   @Test
-  @Config(minSdk = 19)
+  @SuppressWarnings("unchecked")
   public void evaluateJavascript() {
+    ValueCallback<String> callback = mock(ValueCallback.class);
     assertThat(shadowOf(webView).getLastEvaluatedJavascript()).isNull();
-    webView.evaluateJavascript("myScript", null);
+    assertThat(shadowOf(webView).getLastEvaluatedJavascriptCallback()).isNull();
+    webView.evaluateJavascript("myScript", callback);
     assertThat(shadowOf(webView).getLastEvaluatedJavascript()).isEqualTo("myScript");
+    assertThat(shadowOf(webView).getLastEvaluatedJavascriptCallback()).isSameInstanceAs(callback);
   }
 
   @Test
@@ -653,7 +659,6 @@ public class ShadowWebViewTest {
   }
 
   @Test
-  @Config(minSdk = 19)
   public void canSetWebContentsDebuggingEnabled() {
     WebView.setWebContentsDebuggingEnabled(false);
     WebView.setWebContentsDebuggingEnabled(true);
@@ -705,5 +710,21 @@ public class ShadowWebViewTest {
   public void restoreAndSaveState() {
     webView.restoreState(new Bundle());
     webView.saveState(new Bundle());
+  }
+
+  @Test
+  @Config(minSdk = M)
+  public void shouldCreateWebMessageChannel() {
+    WebMessagePort[] channel = shadowOf(webView).createWebMessageChannel();
+
+    assertThat(channel[0]).isNotNull();
+    assertThat(channel[1]).isNotNull();
+  }
+
+  @Test
+  @Config(minSdk = M)
+  public void getCreatedPorts_returnsCreatedPortsList() {
+    shadowOf(webView).createWebMessageChannel();
+    assertThat(shadowOf(webView).getCreatedPorts()).isNotEmpty();
   }
 }

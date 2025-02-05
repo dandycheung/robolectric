@@ -3,12 +3,10 @@ package org.robolectric.annotation.processing.validator;
 import static org.robolectric.annotation.Implementation.DEFAULT_SDK;
 import static org.robolectric.annotation.processing.validator.ImplementsValidator.CONSTRUCTOR_METHOD_NAME;
 import static org.robolectric.annotation.processing.validator.ImplementsValidator.STATIC_INITIALIZER_METHOD_NAME;
-import static org.robolectric.annotation.processing.validator.ImplementsValidator.getClassFQName;
 
 import com.google.common.collect.ImmutableList;
 import java.io.BufferedReader;
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -16,20 +14,26 @@ import java.io.InputStreamReader;
 import java.net.URI;
 import java.nio.charset.Charset;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Properties;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.function.Supplier;
 import java.util.jar.JarFile;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 import java.util.zip.ZipEntry;
+import javax.lang.model.element.AnnotationMirror;
+import javax.lang.model.element.AnnotationValue;
+import javax.lang.model.element.Element;
 import javax.lang.model.element.ExecutableElement;
 import javax.lang.model.element.Modifier;
-import javax.lang.model.element.TypeElement;
 import javax.lang.model.element.VariableElement;
 import javax.lang.model.type.ArrayType;
 import javax.lang.model.type.TypeMirror;
@@ -37,19 +41,54 @@ import javax.lang.model.type.TypeVariable;
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.Type;
+import org.objectweb.asm.signature.SignatureReader;
 import org.objectweb.asm.tree.ClassNode;
 import org.objectweb.asm.tree.MethodNode;
+import org.objectweb.asm.util.TraceSignatureVisitor;
+import org.robolectric.annotation.ClassName;
 import org.robolectric.annotation.Implementation;
+import org.robolectric.annotation.InDevelopment;
+import org.robolectric.versioning.AndroidVersionInitTools;
+import org.robolectric.versioning.AndroidVersions;
 
 /** Encapsulates a collection of Android framework jars. */
 public class SdkStore {
 
+  private static final String VALID_CLASS_NAME_ANNOTATION_CHARS = "^\\[?[a-zA-Z0-9_$.]+;?$";
+
   private final Set<Sdk> sdks = new TreeSet<>();
   private boolean loaded = false;
+
+  /** Should only ever be needed for android platform development */
+  private final boolean loadFromClasspath;
+
+  private final String overrideSdkLocation;
+  private final int overrideSdkInt;
   private final String sdksFile;
 
-  public SdkStore(String sdksFile) {
+  /** */
+  public SdkStore(
+      String sdksFile, boolean loadFromClasspath, String overrideSdkLocation, int overrideSdkInt) {
     this.sdksFile = sdksFile;
+    this.loadFromClasspath = loadFromClasspath;
+    this.overrideSdkLocation = overrideSdkLocation;
+    this.overrideSdkInt = overrideSdkInt;
+  }
+
+  /**
+   * Used to look up matching sdks for a declared shadow class. Needed to then find the class from
+   * the underlying sdks for comparison in the ImplementsValidator.
+   */
+  List<Sdk> sdksMatching(int classMinSdk, int classMaxSdk) {
+    loadSdksOnce();
+    List<Sdk> matchingSdks = new ArrayList<>();
+    for (Sdk sdk : sdks) {
+      int sdkInt = sdk.sdkRelease.getSdkInt();
+      if (sdkInt >= classMinSdk && (sdkInt <= classMaxSdk || classMaxSdk == -1)) {
+        matchingSdks.add(sdk);
+      }
+    }
+    return matchingSdks;
   }
 
   List<Sdk> sdksMatching(Implementation implementation, int classMinSdk, int classMaxSdk) {
@@ -73,7 +112,7 @@ public class SdkStore {
 
     List<Sdk> matchingSdks = new ArrayList<>();
     for (Sdk sdk : sdks) {
-      Integer sdkInt = sdk.sdkInt;
+      int sdkInt = sdk.sdkRelease.getSdkInt();
       if (sdkInt >= minSdk && sdkInt <= maxSdk) {
         matchingSdks.add(sdk);
       }
@@ -83,21 +122,94 @@ public class SdkStore {
 
   private synchronized void loadSdksOnce() {
     if (!loaded) {
-      sdks.addAll(loadFromSdksFile(sdksFile));
+      sdks.addAll(
+          loadFromSources(loadFromClasspath, sdksFile, overrideSdkLocation, overrideSdkInt));
       loaded = true;
     }
   }
 
-  private static ImmutableList<Sdk> loadFromSdksFile(String fileName) {
-    if (fileName == null || Files.notExists(Paths.get(fileName))) {
+  /**
+   * @return a list of sdk_int's to jar locations as a string, one tuple per line.
+   */
+  @Override
+  @SuppressWarnings("JdkCollectors")
+  public String toString() {
+    loadSdksOnce();
+    StringBuilder builder = new StringBuilder();
+    builder.append("SdkStore [");
+    for (Sdk sdk : sdks.stream().sorted().collect(Collectors.toList())) {
+      builder
+          .append("    ")
+          .append(sdk.sdkRelease.getSdkInt())
+          .append(" : ")
+          .append(sdk.path)
+          .append("\n");
+    }
+    builder.append("]");
+    return builder.toString();
+  }
+
+  /**
+   * Scans the jvm properties for the command that executed it, in this command will be the
+   * classpath. <br>
+   * <br>
+   * Scans all jars on the classpath for the first one with a /build.prop on resource. This is
+   * assumed to be the sdk that the processor is running with.
+   *
+   * @return the detected sdk location.
+   */
+  private static String compilationSdkTarget() {
+    String cmd = System.getProperty("sun.java.command");
+    Pattern pattern = Pattern.compile("((-cp)|(-classpath))\\s(?<cp>[a-zA-Z-_0-9\\-:/.]*)");
+    Matcher matcher = pattern.matcher(cmd);
+    if (matcher.find()) {
+      String classpathString = matcher.group("cp");
+      String[] cp = classpathString.split(":");
+      for (String fileStr : cp) {
+        try (JarFile jarFile = new JarFile(fileStr)) {
+          ZipEntry entry = jarFile.getEntry("build.prop");
+          if (entry != null) {
+            return fileStr;
+          }
+        } catch (IOException ioe) {
+          System.out.println("Error detecting compilation SDK: " + ioe.getMessage());
+          ioe.printStackTrace();
+        }
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Returns a list of sdks to process, either the compilation's classpaths sdk in a list of size
+   * one, or the list of sdks in a sdkFile. This should not be needed unless building in the android
+   * codebase. Otherwise, should prefer using the sdks.txt and the released jars.
+   *
+   * @param localSdk validate sdk found in compile time classpath, takes precedence over sdkFile
+   * @param sdkFileName the sdkFile name, may be null, or empty
+   * @param overrideSdkLocation if provided overrides the default lookup of the localSdk, iff
+   *     localSdk is on.
+   * @return a list of sdks to check with annotation processing validators.
+   */
+  private static ImmutableList<Sdk> loadFromSources(
+      boolean localSdk, String sdkFileName, String overrideSdkLocation, int overrideSdkInt) {
+    if (localSdk) {
+      if (overrideSdkLocation != null) {
+        Sdk sdk = new Sdk(overrideSdkLocation, overrideSdkInt);
+        return ImmutableList.of(sdk);
+      } else {
+        String target = compilationSdkTarget();
+        if (target != null) {
+          Sdk sdk = new Sdk(target);
+          // We don't want to test released versions in Android source tree.
+          return sdk.sdkRelease.isReleased() ? ImmutableList.of() : ImmutableList.of(sdk);
+        }
+      }
+    }
+    if (sdkFileName == null || Files.notExists(Paths.get(sdkFileName))) {
       return ImmutableList.of();
     }
-
-    try (InputStream resIn = new FileInputStream(fileName)) {
-      if (resIn == null) {
-        throw new RuntimeException("no such file " + fileName);
-      }
-
+    try (InputStream resIn = Files.newInputStream(Paths.get(sdkFileName))) {
       BufferedReader in =
           new BufferedReader(new InputStreamReader(resIn, Charset.defaultCharset()));
       List<Sdk> sdks = new ArrayList<>();
@@ -109,7 +221,7 @@ public class SdkStore {
       }
       return ImmutableList.copyOf(sdks);
     } catch (IOException e) {
-      throw new RuntimeException("failed reading " + fileName, e);
+      throw new RuntimeException("failed reading " + sdkFileName, e);
     }
   }
 
@@ -132,58 +244,81 @@ public class SdkStore {
 
     private final String path;
     private final JarFile jarFile;
+    final AndroidVersions.AndroidRelease sdkRelease;
     final int sdkInt;
     private final Map<String, ClassInfo> classInfos = new HashMap<>();
     private static File tempDir;
 
     Sdk(String path) {
+      this(path, null);
+    }
+
+    Sdk(String path, Integer sdkInt) {
       this.path = path;
-      this.jarFile = ensureJar();
-      this.sdkInt = readSdkInt();
+      if (path.startsWith("classpath:") || path.endsWith(".jar")) {
+        this.jarFile = ensureJar();
+      } else {
+        this.jarFile = null;
+      }
+      if (sdkInt == null) {
+        this.sdkRelease = readSdkVersion();
+      } else {
+        this.sdkRelease = AndroidVersions.getReleaseForSdkInt(sdkInt);
+      }
+      this.sdkInt = sdkRelease.getSdkInt();
     }
 
     /**
      * Matches an {@code @Implementation} method against the framework method for this SDK.
      *
-     * @param sdkClassElem the framework class being shadowed
+     * @param sdkClassName the framework class being shadowed
      * @param methodElement the {@code @Implementation} method declaration to check
      * @param looseSignatures if true, also match any framework method with the same class, name,
      *     return type, and arity of parameters.
      * @return a string describing any problems with this method, or null if it checks out.
      */
     public String verifyMethod(
-        TypeElement sdkClassElem, ExecutableElement methodElement, boolean looseSignatures) {
-      String className = getClassFQName(sdkClassElem);
-      ClassInfo classInfo = getClassInfo(className);
+        String sdkClassName,
+        ExecutableElement methodElement,
+        boolean looseSignatures,
+        boolean allowInDev) {
+      ClassInfo classInfo = getClassInfo(sdkClassName);
 
-      if (classInfo == null) {
-        return "No such class " + className;
+      // Probably should not be reachable
+      if (classInfo == null
+          && !suppressWarnings(methodElement.getEnclosingElement(), null, allowInDev)) {
+        return null;
       }
 
       MethodExtraInfo sdkMethod = classInfo.findMethod(methodElement, looseSignatures);
-      if (sdkMethod == null) {
-        return "No such method in " + className;
+      if (sdkMethod == null && !suppressWarnings(methodElement, null, allowInDev)) {
+        return "No method " + methodElement + " in " + sdkClassName;
       }
-
-      MethodExtraInfo implMethod = new MethodExtraInfo(methodElement);
-      if (!sdkMethod.equals(implMethod)
-          && !suppressWarnings(methodElement, "robolectric.ShadowReturnTypeMismatch")) {
-        if (implMethod.isStatic != sdkMethod.isStatic) {
-          return "@Implementation for " + methodElement.getSimpleName()
-              + " is " + (implMethod.isStatic ? "static" : "not static")
-              + " unlike the SDK method";
-        }
-        if (!implMethod.returnType.equals(sdkMethod.returnType)) {
-          if (
-              (looseSignatures && typeIsOkForLooseSignatures(implMethod, sdkMethod))
-                  || (looseSignatures && implMethod.returnType.equals("java.lang.Object[]"))
-                  // Number is allowed for int or long return types
-                  || typeIsNumeric(sdkMethod, implMethod)) {
-            return null;
-          } else {
-            return "@Implementation for " + methodElement.getSimpleName()
-                + " has a return type of " + implMethod.returnType
-                + ", not " + sdkMethod.returnType + " as in the SDK method";
+      if (sdkMethod != null) {
+        MethodExtraInfo implMethod = new MethodExtraInfo(methodElement);
+        if (!sdkMethod.equals(implMethod)
+            && !suppressWarnings(
+                methodElement, "robolectric.ShadowReturnTypeMismatch", allowInDev)) {
+          if (implMethod.isStatic != sdkMethod.isStatic) {
+            return "@Implementation for "
+                + methodElement.getSimpleName()
+                + " is "
+                + (implMethod.isStatic ? "static" : "not static")
+                + " unlike the SDK method";
+          }
+          if (!implMethod.returnType.equals(sdkMethod.returnType)) {
+            if ((looseSignatures && typeIsOkForLooseSignatures(implMethod, sdkMethod))
+                || (looseSignatures && implMethod.returnType.equals("java.lang.Object[]"))) {
+              return null;
+            } else {
+              return "@Implementation for "
+                  + methodElement.getSimpleName()
+                  + " has a return type of "
+                  + implMethod.returnType
+                  + ", not "
+                  + sdkMethod.returnType
+                  + " as in the SDK method";
+            }
           }
         }
       }
@@ -191,36 +326,45 @@ public class SdkStore {
       return null;
     }
 
-    private static boolean suppressWarnings(ExecutableElement methodElement, String warningName) {
+    /**
+     * Warnings (or potentially Errors, depending on processing flags) can be suppressed in one of
+     * two ways, either with @SuppressWarnings("robolectric.<warningName>"), or with
+     * the @InDevelopment annotation, if and only the target Sdk is in development.
+     *
+     * @param annotatedElement element to inspect for annotations
+     * @param warningName the name of the warning, if null, @InDevelopment will still be honored.
+     * @return true if the warning should be suppressed, else false
+     */
+    boolean suppressWarnings(Element annotatedElement, String warningName, boolean allowInDev) {
       SuppressWarnings[] suppressWarnings =
-          methodElement.getAnnotationsByType(SuppressWarnings.class);
+          annotatedElement.getAnnotationsByType(SuppressWarnings.class);
       for (SuppressWarnings suppression : suppressWarnings) {
         for (String name : suppression.value()) {
-          if (warningName.equals(name)) {
+          if (warningName != null && warningName.equals(name)) {
             return true;
           }
         }
       }
-      return false;
-    }
-
-    private static boolean typeIsNumeric(MethodExtraInfo sdkMethod, MethodExtraInfo implMethod) {
-      return implMethod.returnType.equals("java.lang.Number")
-      && isNumericType(sdkMethod.returnType);
+      InDevelopment[] inDev = annotatedElement.getAnnotationsByType(InDevelopment.class);
+      // Marked in development, sdk is not released, or is the last release (which may still be
+      // marked unreleased in g/main aosp/main.
+      return allowInDev
+          && inDev.length > 0
+          && (!sdkRelease.isReleased()
+              || sdkRelease
+                  == AndroidVersions.getReleases().stream()
+                      .max(AndroidVersions.AndroidRelease::compareTo)
+                      .get());
     }
 
     private static boolean typeIsOkForLooseSignatures(
         MethodExtraInfo implMethod, MethodExtraInfo sdkMethod) {
       return
-          // loose signatures allow a return type of Object...
-          implMethod.returnType.equals("java.lang.Object")
-              // or Object[] for arrays...
-              || (implMethod.returnType.equals("java.lang.Object[]")
-                  && sdkMethod.returnType.endsWith("[]"));
-    }
-
-    private static boolean isNumericType(String type) {
-      return type.equals("int") || type.equals("long");
+      // loose signatures allow a return type of Object...
+      implMethod.returnType.equals("java.lang.Object")
+          // or Object[] for arrays...
+          || (implMethod.returnType.equals("java.lang.Object[]")
+              && sdkMethod.returnType.endsWith("[]"));
     }
 
     /**
@@ -229,7 +373,7 @@ public class SdkStore {
      * @param name the name of the class to analyze
      * @return information about the methods in the specified class
      */
-    private synchronized ClassInfo getClassInfo(String name) {
+    synchronized ClassInfo getClassInfo(String name) {
       ClassInfo classInfo = classInfos.get(name);
       if (classInfo == null) {
         ClassNode classNode = loadClassNode(name);
@@ -248,26 +392,14 @@ public class SdkStore {
     /**
      * Determine the API level for this SDK jar by inspecting its {@code build.prop} file.
      *
-     * <p>If the {@code ro.build.version.codename} value isn't {@code REL}, this is an unreleased
-     * SDK, which is represented as 10000 (see {@link
-     * android.os.Build.VERSION_CODES#CUR_DEVELOPMENT}.
-     *
-     * @return the API level, or 10000
+     * @return the API level
      */
-    private int readSdkInt() {
-      Properties properties = new Properties();
-      try (InputStream inputStream = jarFile.getInputStream(jarFile.getJarEntry("build.prop"))) {
-        properties.load(inputStream);
+    private AndroidVersions.AndroidRelease readSdkVersion() {
+      try {
+        return AndroidVersionInitTools.computeReleaseVersion(jarFile);
       } catch (IOException e) {
         throw new RuntimeException("failed to read build.prop from " + path);
       }
-      int sdkInt = Integer.parseInt(properties.getProperty("ro.build.version.sdk"));
-      String codename = properties.getProperty("ro.build.version.codename");
-      if (!"REL".equals(codename)) {
-        sdkInt = 10000;
-      }
-
-      return sdkInt;
     }
 
     private JarFile ensureJar() {
@@ -279,44 +411,76 @@ public class SdkStore {
         }
 
       } catch (IOException e) {
-        throw new RuntimeException("failed to open SDK " + sdkInt + " at " + path, e);
+        throw new RuntimeException(
+            "failed to open SDK " + sdkRelease.getSdkInt() + " at " + path, e);
       }
     }
 
     private static File copyResourceToFile(String resourcePath) throws IOException {
-      if (tempDir == null){
+      if (tempDir == null) {
         File tempFile = File.createTempFile("prefix", "suffix");
         tempFile.deleteOnExit();
         tempDir = tempFile.getParentFile();
       }
-      InputStream jarIn = SdkStore.class.getClassLoader().getResourceAsStream(resourcePath);
-      if (jarIn == null) {
-        throw new RuntimeException("SDK " + resourcePath + " not found");
-      }
-      File outFile = new File(tempDir, new File(resourcePath).getName());
-      outFile.deleteOnExit();
-      try (FileOutputStream jarOut = new FileOutputStream(outFile)) {
-        byte[] buffer = new byte[4096];
-        int len;
-        while ((len = jarIn.read(buffer)) != -1) {
-          jarOut.write(buffer, 0, len);
+      try (InputStream jarIn = SdkStore.class.getClassLoader().getResourceAsStream(resourcePath)) {
+        if (jarIn == null) {
+          throw new RuntimeException("SDK " + resourcePath + " not found");
         }
-      }
+        File outFile = new File(tempDir, new File(resourcePath).getName());
+        outFile.deleteOnExit();
+        try (FileOutputStream jarOut = new FileOutputStream(outFile)) {
+          byte[] buffer = new byte[4096];
+          int len;
+          while ((len = jarIn.read(buffer)) != -1) {
+            jarOut.write(buffer, 0, len);
+          }
+        }
 
-      return outFile;
+        return outFile;
+      }
     }
 
     private ClassNode loadClassNode(String name) {
       String classFileName = name.replace('.', '/') + ".class";
-      ZipEntry entry = jarFile.getEntry(classFileName);
-      if (entry == null) {
+      Supplier<InputStream> inputStreamSupplier = null;
+
+      if (jarFile != null) {
+        // working with a jar file.
+        ZipEntry entry = jarFile.getEntry(classFileName);
+        if (entry == null) {
+          return null;
+        }
+        inputStreamSupplier =
+            () -> {
+              try {
+                return jarFile.getInputStream(entry);
+              } catch (IOException ioe) {
+                throw new RuntimeException("could not read zip entry", ioe);
+              }
+            };
+      } else {
+        // working with an exploded path location.
+        Path working = Path.of(path, classFileName);
+        File classFile = working.toFile();
+        if (classFile.isFile()) {
+          inputStreamSupplier =
+              () -> {
+                try {
+                  return Files.newInputStream(classFile.toPath());
+                } catch (IOException ioe) {
+                  throw new RuntimeException("could not read file in path " + working, ioe);
+                }
+              };
+        }
+      }
+      if (inputStreamSupplier == null) {
         return null;
       }
-      try (InputStream inputStream = jarFile.getInputStream(entry)) {
+      try (InputStream inputStream = inputStreamSupplier.get()) {
         ClassReader classReader = new ClassReader(inputStream);
         ClassNode classNode = new ClassNode();
-        classReader.accept(classNode,
-            ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
+        classReader.accept(
+            classNode, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
         return classNode;
       } catch (IOException e) {
         throw new RuntimeException("failed to analyze " + classFileName + " in " + path, e);
@@ -325,20 +489,28 @@ public class SdkStore {
 
     @Override
     public int compareTo(Sdk sdk) {
-      return sdk.sdkInt - sdkInt;
+      return sdk.sdkRelease.getSdkInt() - sdkRelease.getSdkInt();
     }
   }
 
   static class ClassInfo {
     private final Map<MethodInfo, MethodExtraInfo> methods = new HashMap<>();
     private final Map<MethodInfo, MethodExtraInfo> erasedParamTypesMethods = new HashMap<>();
+    private final String signature;
 
     private ClassInfo() {
+      signature = "";
     }
 
     public ClassInfo(ClassNode classNode) {
-      for (Object aMethod : classNode.methods) {
-        MethodNode method = ((MethodNode) aMethod);
+      if (classNode.signature != null) {
+        TraceSignatureVisitor signatureVisitor = new TraceSignatureVisitor(0);
+        new SignatureReader(classNode.signature).accept(signatureVisitor);
+        signature = stripExtends(signatureVisitor.getDeclaration());
+      } else {
+        signature = "";
+      }
+      for (MethodNode method : classNode.methods) {
         MethodInfo methodInfo = new MethodInfo(method);
         MethodExtraInfo methodExtraInfo = new MethodExtraInfo(method);
         methods.put(methodInfo, methodExtraInfo);
@@ -346,14 +518,43 @@ public class SdkStore {
       }
     }
 
+    /**
+     * In order to compare typeMirror derived strings of Type parameters, ie `{@code Clazz<X extends
+     * Y>}` from a class definition, with a asm bytecode read string of the same, any extends info
+     * is not supplied by type parameters, but is by asm class readers `{@code Clazz<X extends Y>
+     * extends Clazz1}`.
+     *
+     * <p>This method can strip any extra information `{@code extends Clazz1}`, from a Generics type
+     * parameter string provided by asm byte code readers.
+     */
+    private static String stripExtends(String asmTypeSuffix) {
+      int count = 0;
+      for (int loc = 0; loc < asmTypeSuffix.length(); loc++) {
+        char c = asmTypeSuffix.charAt(loc);
+        if (c == '<') {
+          count += 1;
+        } else if (c == '>') {
+          count -= 1;
+        }
+        if (count == 0) {
+          return asmTypeSuffix.substring(0, loc + 1).trim();
+        }
+      }
+      return "";
+    }
+
     MethodExtraInfo findMethod(ExecutableElement methodElement, boolean looseSignatures) {
       MethodInfo methodInfo = new MethodInfo(methodElement);
 
       MethodExtraInfo methodExtraInfo = methods.get(methodInfo);
       if (looseSignatures && methodExtraInfo == null) {
-        methodExtraInfo = erasedParamTypesMethods.get(methodInfo.erase());
+        methodExtraInfo = erasedParamTypesMethods.get(methodInfo);
       }
       return methodExtraInfo;
+    }
+
+    String getSignature() {
+      return signature;
     }
   }
 
@@ -384,6 +585,28 @@ public class SdkStore {
       for (VariableElement variableElement : methodElement.getParameters()) {
         TypeMirror varTypeMirror = variableElement.asType();
         String paramType = canonicalize(varTypeMirror);
+
+        // If parameter is annotated with @ClassName, then use the indicated type instead.
+        ClassName className = variableElement.getAnnotation(ClassName.class);
+        if (className != null) {
+          if (!className.value().matches(VALID_CLASS_NAME_ANNOTATION_CHARS)) {
+            throw new RuntimeException(
+                "Invalid @ClassName annotation '"
+                    + paramType
+                    + "' in "
+                    + methodElement.getEnclosingElement().getSimpleName()
+                    + "."
+                    + methodElement.getSimpleName());
+          }
+          paramType = className.value();
+          if (paramType.startsWith("[")) {
+            // Convert an array type descriptor to a Java class name.
+            // e.g. '[java.lang.String;'-> 'java.lang.String[]'
+            paramType = Type.getType(paramType).getClassName();
+          }
+          paramType = paramType.replace('$', '.');
+        }
+
         String paramTypeWithoutGenerics = typeWithoutGenerics(paramType);
         paramTypes.add(paramTypeWithoutGenerics);
       }
@@ -396,7 +619,14 @@ public class SdkStore {
       } else if (STATIC_INITIALIZER_METHOD_NAME.equals(name)) {
         return "<clinit>";
       } else {
-        return name;
+        Implementation implementation = methodElement.getAnnotation(Implementation.class);
+        String methodName = implementation == null ? "" : implementation.methodName();
+        methodName = methodName == null ? "" : methodName.trim();
+        if (methodName.isEmpty()) {
+          return name;
+        } else {
+          return methodName;
+        }
       }
     }
 
@@ -409,24 +639,21 @@ public class SdkStore {
       if (this == o) {
         return true;
       }
-      if (o == null || getClass() != o.getClass()) {
+      if (!(o instanceof MethodInfo)) {
         return false;
       }
       MethodInfo that = (MethodInfo) o;
-      return Objects.equals(name, that.name)
-          && Objects.equals(paramTypes, that.paramTypes);
+      return Objects.equals(name, that.name) && Objects.equals(paramTypes, that.paramTypes);
     }
 
     @Override
     public int hashCode() {
       return Objects.hash(name, paramTypes);
     }
+
     @Override
     public String toString() {
-      return "MethodInfo{"
-          + "name='" + name + '\''
-          + ", paramTypes=" + paramTypes
-          + '}';
+      return "MethodInfo{" + "name='" + name + '\'' + ", paramTypes=" + paramTypes + '}';
     }
   }
 
@@ -438,14 +665,36 @@ public class SdkStore {
     private final boolean isStatic;
     private final String returnType;
 
+    /** Create a MethodExtraInfo from ASM in-memory representation (an Android framework method). */
     public MethodExtraInfo(MethodNode method) {
       this.isStatic = (method.access & Opcodes.ACC_STATIC) != 0;
       this.returnType = typeWithoutGenerics(normalize(Type.getReturnType(method.desc)));
     }
 
+    /** Create a MethodExtraInfo from AST (an @Implementation method in a shadow class). */
     public MethodExtraInfo(ExecutableElement methodElement) {
       this.isStatic = methodElement.getModifiers().contains(Modifier.STATIC);
-      this.returnType = typeWithoutGenerics(canonicalize(methodElement.getReturnType()));
+
+      TypeMirror rtType = methodElement.getReturnType();
+      String rt = canonicalize(rtType);
+      // If return type is annotated with @ClassName, then use the indicated type instead.
+      List<? extends AnnotationMirror> annotationMirrors = rtType.getAnnotationMirrors();
+      for (AnnotationMirror am : annotationMirrors) {
+        if (am.getAnnotationType().toString().equals(ClassName.class.getName())) {
+          Map<? extends ExecutableElement, ? extends AnnotationValue> annotationEntries =
+              am.getElementValues();
+          Set<? extends ExecutableElement> keys = annotationEntries.keySet();
+          for (ExecutableElement key : keys) {
+            if ("value()".equals(key.toString())) {
+              AnnotationValue annotationValue = annotationEntries.get(key);
+              rt = annotationValue.getValue().toString().replace('$', '.');
+              break;
+            }
+          }
+          break;
+        }
+      }
+      this.returnType = typeWithoutGenerics(rt);
     }
 
     @Override
@@ -453,7 +702,7 @@ public class SdkStore {
       if (this == o) {
         return true;
       }
-      if (o == null || getClass() != o.getClass()) {
+      if (!(o instanceof MethodExtraInfo)) {
         return false;
       }
       MethodExtraInfo that = (MethodExtraInfo) o;

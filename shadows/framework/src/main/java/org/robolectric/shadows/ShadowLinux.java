@@ -1,6 +1,7 @@
 package org.robolectric.shadows;
 
 import static android.os.Build.VERSION_CODES.N_MR1;
+import static android.os.Build.VERSION_CODES.R;
 
 import android.os.Build;
 import android.system.ErrnoException;
@@ -9,8 +10,13 @@ import android.system.StructStat;
 import android.util.Log;
 import java.io.File;
 import java.io.FileDescriptor;
+import java.io.FileInputStream;
 import java.io.IOException;
+import java.io.InterruptedIOException;
 import java.io.RandomAccessFile;
+import java.nio.ByteBuffer;
+import java.nio.channels.AsynchronousCloseException;
+import java.nio.channels.FileChannel;
 import java.time.Duration;
 import libcore.io.Linux;
 import org.robolectric.annotation.Implementation;
@@ -18,6 +24,7 @@ import org.robolectric.annotation.Implements;
 
 @Implements(value = Linux.class, minSdk = Build.VERSION_CODES.O, isInAndroidSdk = false)
 public class ShadowLinux {
+
   @Implementation
   public void mkdir(String path, int mode) throws ErrnoException {
     new File(path).mkdirs();
@@ -25,7 +32,7 @@ public class ShadowLinux {
 
   @Implementation
   public StructStat stat(String path) throws ErrnoException {
-    int mode = OsConstantsValues.getMode(path);
+    int mode = ShadowOsConstants.getMode(path);
     long size = 0;
     long modifiedTime = 0;
     if (path != null) {
@@ -73,6 +80,36 @@ public class ShadowLinux {
     } catch (IOException e) {
       Log.e("ShadowLinux", "open failed for " + path, e);
       throw new ErrnoException("open", OsConstants.EIO);
+    }
+  }
+
+  @Implementation(minSdk = R)
+  protected FileDescriptor memfd_create(String name, int flags) throws ErrnoException {
+    try {
+      File tempFile = File.createTempFile(name, /* suffix= */ "robo_memfd");
+      tempFile.deleteOnExit();
+      RandomAccessFile randomAccessFile = new RandomAccessFile(tempFile, /* mode= */ "rw");
+      return randomAccessFile.getFD();
+    } catch (IOException e) {
+      throw new ErrnoException("memfd_create", OsConstants.EIO, e);
+    }
+  }
+
+  @Implementation
+  protected int pread(FileDescriptor fd, byte[] bytes, int byteOffset, int byteCount, long offset)
+      throws ErrnoException, InterruptedIOException {
+    // explicitly do not close the opened InputStream here, as java's FileDescriptor will close
+    // and become invalid
+    try {
+      FileInputStream is = new FileInputStream(fd);
+      FileChannel channel = is.getChannel();
+      ByteBuffer buf = ByteBuffer.wrap(bytes, byteOffset, byteCount);
+      return channel.read(buf, offset);
+    } catch (AsynchronousCloseException e) {
+      throw new InterruptedIOException(e.getMessage());
+    } catch (IOException e) {
+      // Most likely EIO
+      throw new ErrnoException("pread", OsConstants.EIO, e);
     }
   }
 

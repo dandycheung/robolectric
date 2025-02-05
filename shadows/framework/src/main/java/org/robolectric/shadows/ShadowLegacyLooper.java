@@ -1,6 +1,5 @@
 package org.robolectric.shadows;
 
-import static android.os.Build.VERSION_CODES.JELLY_BEAN_MR2;
 import static org.robolectric.RuntimeEnvironment.isMainThread;
 import static org.robolectric.shadow.api.Shadow.invokeConstructor;
 import static org.robolectric.util.ReflectionHelpers.ClassParameter.from;
@@ -27,7 +26,7 @@ import org.robolectric.shadow.api.Shadow;
 import org.robolectric.util.Scheduler;
 
 /**
- * The shadow Looper implementation for {@link LooperMode.Mode.LEGACY}.
+ * The shadow Looper implementation for {@link LooperMode.Mode#LEGACY}.
  *
  * <p>Robolectric enqueues posted {@link Runnable}s to be run (on this thread) later. {@code
  * Runnable}s that are scheduled to run immediately can be triggered by calling {@link #idle()}.
@@ -44,8 +43,8 @@ public class ShadowLegacyLooper extends ShadowLooper {
   // is called. This also allows us to implement the useful getLooperForThread() method.
   // Note that the main looper is handled differently and is not put in this hash, because we need
   // to be able to "switch" the thread that the main looper is associated with.
-  private static Map<Thread, Looper> loopingLoopers =
-      Collections.synchronizedMap(new WeakHashMap<Thread, Looper>());
+  private static final Map<Thread, Looper> loopingLoopers =
+      Collections.synchronizedMap(new WeakHashMap<>());
 
   private static Looper mainLooper;
 
@@ -58,15 +57,9 @@ public class ShadowLegacyLooper extends ShadowLooper {
   @Resetter
   public static synchronized void resetThreadLoopers() {
     // do not use looperMode() here, because its cached value might already have been reset
-    if (ConfigurationRegistry.get(LooperMode.Mode.class) == LooperMode.Mode.PAUSED) {
+    if (ConfigurationRegistry.get(LooperMode.Mode.class) != LooperMode.Mode.LEGACY) {
       // ignore if realistic looper
       return;
-    }
-    // Blech. We need to keep the main looper because somebody might refer to it in a static
-    // field. The other loopers need to be wrapped in WeakReferences so that they are not prevented
-    // from being garbage collected.
-    if (!isMainThread()) {
-      throw new IllegalStateException("you should only be calling this from the main thread!");
     }
     synchronized (loopingLoopers) {
       for (Looper looper : loopingLoopers.values()) {
@@ -148,7 +141,7 @@ public class ShadowLegacyLooper extends ShadowLooper {
     quitUnchecked();
   }
 
-  @Implementation(minSdk = JELLY_BEAN_MR2)
+  @Implementation
   protected void quitSafely() {
     quit();
   }

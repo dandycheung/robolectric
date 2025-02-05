@@ -19,6 +19,7 @@ import java.util.ArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.After;
@@ -56,7 +57,7 @@ public class ShadowLegacyLooperTest {
   private class QuitThread extends Thread {
     private boolean hasContinued = false;
     private Looper looper;
-    private CountDownLatch started = new CountDownLatch(1);
+    private final CountDownLatch started = new CountDownLatch(1);
 
     public QuitThread() {
       super(testName.getMethodName());
@@ -124,20 +125,12 @@ public class ShadowLegacyLooperTest {
   @Test
   public void idleMainLooper_executesScheduledTasks() {
     final boolean[] wasRun = new boolean[] {false};
-    new Handler()
-        .postDelayed(
-            new Runnable() {
-              @Override
-              public void run() {
-                wasRun[0] = true;
-              }
-            },
-            2000);
+    new Handler().postDelayed(() -> wasRun[0] = true, 2000);
 
     assertWithMessage("first").that(wasRun[0]).isFalse();
-    ShadowLooper.idleMainLooper(1999);
+    ShadowLooper.idleMainLooper(1999, TimeUnit.MILLISECONDS);
     assertWithMessage("second").that(wasRun[0]).isFalse();
-    ShadowLooper.idleMainLooper(1);
+    ShadowLooper.idleMainLooper(1, TimeUnit.MILLISECONDS);
     assertWithMessage("last").that(wasRun[0]).isTrue();
   }
 
@@ -145,15 +138,7 @@ public class ShadowLegacyLooperTest {
   public void idleConstantly_runsPostDelayedTasksImmediately() {
     ShadowLooper.idleMainLooperConstantly(true);
     final boolean[] wasRun = new boolean[] {false};
-    new Handler()
-        .postDelayed(
-            new Runnable() {
-              @Override
-              public void run() {
-                wasRun[0] = true;
-              }
-            },
-            2000);
+    new Handler().postDelayed(() -> wasRun[0] = true, 2000);
 
     assertThat(wasRun[0]).isTrue();
   }
@@ -169,25 +154,10 @@ public class ShadowLegacyLooperTest {
     Looper looper = ht.getLooper();
     looper.quit();
     assertWithMessage("hasQuit").that(shadowOf(looper).hasQuit()).isTrue();
-    assertWithMessage("post")
-        .that(
-            shadowOf(looper)
-                .post(
-                    new Runnable() {
-                      @Override
-                      public void run() {}
-                    },
-                    0))
-        .isFalse();
+    assertWithMessage("post").that(shadowOf(looper).post(() -> {}, 0)).isFalse();
 
     assertWithMessage("postAtFrontOfQueue")
-        .that(
-            shadowOf(looper)
-                .postAtFrontOfQueue(
-                    new Runnable() {
-                      @Override
-                      public void run() {}
-                    }))
+        .that(shadowOf(looper).postAtFrontOfQueue(() -> {}))
         .isFalse();
     assertWithMessage("areAnyRunnable")
         .that(shadowOf(looper).getScheduler().areAnyRunnable())
@@ -199,13 +169,7 @@ public class ShadowLegacyLooperTest {
     HandlerThread ht = getHandlerThread();
     Looper looper = ht.getLooper();
     shadowOf(looper).pause();
-    shadowOf(looper)
-        .post(
-            new Runnable() {
-              @Override
-              public void run() {}
-            },
-            0);
+    shadowOf(looper).post(() -> {}, 0);
     looper.quit();
     assertWithMessage("hasQuit").that(shadowOf(looper).hasQuit()).isTrue();
     assertWithMessage("areAnyRunnable")
@@ -230,11 +194,7 @@ public class ShadowLegacyLooperTest {
     Handler h = new Handler(looper);
     ShadowLooper sLooper = shadowOf(looper);
     sLooper.pause();
-    h.post(
-        new Runnable() {
-          @Override
-          public void run() {}
-        });
+    h.post(() -> {});
     assertWithMessage("queue").that(shadowOf(looper.getQueue()).getHead()).isNotNull();
     sLooper.reset();
     assertWithMessage("areAnyRunnable").that(sLooper.getScheduler().areAnyRunnable()).isFalse();
@@ -266,22 +226,20 @@ public class ShadowLegacyLooperTest {
   }
 
   @Test
-  public void resetThreadLoopers_fromNonMainThread_shouldThrowISE() throws InterruptedException {
+  public void resetThreadLoopers_fromNonMainThread_doesNotThrow() throws InterruptedException {
     final AtomicReference<Throwable> ex = new AtomicReference<>();
     Thread t =
-        new Thread() {
-          @Override
-          public void run() {
-            try {
-              ShadowLooper.resetThreadLoopers();
-            } catch (Throwable t) {
-              ex.set(t);
-            }
-          }
-        };
+        new Thread(
+            () -> {
+              try {
+                ShadowLooper.resetThreadLoopers();
+              } catch (Throwable t1) {
+                ex.set(t1);
+              }
+            });
     t.start();
     t.join();
-    assertThat(ex.get()).isInstanceOf(IllegalStateException.class);
+    assertThat(ex.get()).isNull();
   }
 
   @Test
@@ -374,11 +332,7 @@ public class ShadowLegacyLooperTest {
     backgroundThread.start();
     Looper backgroundLooper = backgroundThread.getLooper();
     Handler handler = new Handler(backgroundLooper);
-    Runnable empty =
-        new Runnable() {
-          @Override
-          public void run() {}
-        };
+    Runnable empty = () -> {};
     // There should be at least two iterations of this loop because resetThreadLoopers calls
     // 'quit' on background loopers once, which also resets the scheduler.
     for (int i = 0; i < 5; i++) {
@@ -422,12 +376,9 @@ public class ShadowLegacyLooperTest {
 
     Thread backgroundThread =
         new Thread(
-            new Runnable() {
-              @Override
-              public void run() {
-                Looper mainLooper = Looper.getMainLooper();
-                mainLooperAtomicReference.set(mainLooper);
-              }
+            () -> {
+              Looper mainLooper = Looper.getMainLooper();
+              mainLooperAtomicReference.set(mainLooper);
             },
             testName.getMethodName());
     backgroundThread.start();
@@ -462,22 +413,8 @@ public class ShadowLegacyLooperTest {
     Handler handler1 = new Handler(ht.getLooper());
     Handler handler2 = new Handler();
     final ArrayList<String> events = new ArrayList<>();
-    handler1.postDelayed(
-        new Runnable() {
-          @Override
-          public void run() {
-            events.add("handler1");
-          }
-        },
-        100);
-    handler2.postDelayed(
-        new Runnable() {
-          @Override
-          public void run() {
-            events.add("handler2");
-          }
-        },
-        200);
+    handler1.postDelayed(() -> events.add("handler1"), 100);
+    handler2.postDelayed(() -> events.add("handler2"), 200);
     assertWithMessage("start").that(events).isEmpty();
     Scheduler s = ShadowLooper.getShadowMainLooper().getScheduler();
     assertThat(s).isSameInstanceAs(RuntimeEnvironment.getMasterScheduler());

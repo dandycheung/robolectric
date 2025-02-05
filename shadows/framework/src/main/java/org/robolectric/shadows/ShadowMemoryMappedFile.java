@@ -1,8 +1,5 @@
 package org.robolectric.shadows;
 
-import static android.os.Build.VERSION_CODES.LOLLIPOP;
-import static org.robolectric.RuntimeEnvironment.getApiLevel;
-
 import android.system.ErrnoException;
 import java.io.IOException;
 import java.io.InputStream;
@@ -32,8 +29,7 @@ public class ShadowMemoryMappedFile {
     if (path.endsWith(TZ_DATA_1) || path.endsWith(TZ_DATA_2) || path.endsWith(TZ_DATA_3)) {
       InputStream is = MemoryMappedFile.class.getResourceAsStream(TZ_DATA_2);
       if (is == null) {
-        throw (Throwable)
-            exceptionClass().getConstructor(String.class, int.class).newInstance("open", -1);
+        throw ErrnoException.class.getConstructor(String.class, int.class).newInstance("open", -1);
       }
       try {
         MemoryMappedFile memoryMappedFile = new MemoryMappedFile(0L, 0L);
@@ -41,25 +37,12 @@ public class ShadowMemoryMappedFile {
         shadowMemoryMappedFile.bytes = Streams.readFully(is);
         return memoryMappedFile;
       } catch (IOException e) {
-        throw (Throwable)
-            exceptionClass()
-                .getConstructor(String.class, int.class, Throwable.class)
-                .newInstance("mmap", -1, e);
+        throw ErrnoException.class
+            .getConstructor(String.class, int.class, Throwable.class)
+            .newInstance("mmap", -1, e);
       }
     } else {
       throw new IllegalArgumentException("Unknown file for mmap: '" + path);
-    }
-  }
-
-  private static Class exceptionClass() {
-    if (getApiLevel() >= LOLLIPOP) {
-      return ErrnoException.class;
-    } else {
-      try {
-        return MemoryMappedFile.class.getClassLoader().loadClass("libcore.io.ErrnoException");
-      } catch (ClassNotFoundException e) {
-        throw new RuntimeException(e);
-      }
     }
   }
 

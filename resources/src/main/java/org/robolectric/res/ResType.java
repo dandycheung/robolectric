@@ -40,9 +40,7 @@ public enum ResType {
     return itemResType;
   }
 
-  /**
-   * Parses a resource value to infer the type
-   */
+  /** Parses a resource value to infer the type */
   public static ResType inferFromValue(String value) {
     if (value.startsWith("#")) {
       return COLOR;
@@ -50,19 +48,30 @@ public enum ResType {
       return BOOLEAN;
     } else if (DIMEN_RE.matcher(value).find()) {
       return DIMEN;
+    } else if (isInteger(value)) {
+      return INTEGER;
+    } else if (isFloat(value)) {
+      return FRACTION;
     } else {
-      try {
-        Integer.parseInt(value);
-        return INTEGER;
-      } catch (NumberFormatException nfe) {}
-
-      try {
-        Float.parseFloat(value);
-        return FRACTION;
-      } catch (NumberFormatException nfe) {}
-
-
       return CHAR_SEQUENCE;
+    }
+  }
+
+  private static boolean isInteger(String value) {
+    try {
+      Integer.parseInt(value);
+      return true;
+    } catch (NumberFormatException nfe) {
+      return false;
+    }
+  }
+
+  private static boolean isFloat(String value) {
+    try {
+      Float.parseFloat(value);
+      return true;
+    } catch (NumberFormatException nfe) {
+      return false;
     }
   }
 }

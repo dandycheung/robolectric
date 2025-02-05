@@ -7,14 +7,20 @@ import android.os.Build;
 import android.os.Environment;
 import android.util.Pair;
 import com.android.internal.util.ArrayUtils;
+import com.google.common.base.Preconditions;
+import com.google.common.base.Strings;
 import java.io.File;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.TreeMap;
+import javax.annotation.Nullable;
 import org.robolectric.annotation.Implementation;
 import org.robolectric.annotation.Implements;
 import org.robolectric.annotation.RealObject;
+import org.robolectric.annotation.Resetter;
 import org.robolectric.fakes.BaseCursor;
 import org.robolectric.shadow.api.Shadow;
 import org.robolectric.util.ReflectionHelpers;
@@ -22,52 +28,140 @@ import org.robolectric.util.ReflectionHelpers;
 @Implements(DownloadManager.class)
 public class ShadowDownloadManager {
 
-  private long queueCounter = -1; // First request starts at 0 just like in the real DownloadManager
-  private Map<Long, DownloadManager.Request> requestMap = new TreeMap<>();
+  private static long queueCounter =
+      -1; // First request starts at 0 just like in the real DownloadManager
+  private static final Map<Long, DownloadManager.Request> requestMap = new TreeMap<>();
+
+  private static long completedCounter = -1;
+  private static final Map<Long, CompletedDownload> completedDownloadsMap = new HashMap<>();
+
+  @Resetter
+  public static void reset() {
+    synchronized (ShadowDownloadManager.class) {
+      queueCounter = -1;
+      requestMap.clear();
+      completedCounter = -1;
+      completedDownloadsMap.clear();
+    }
+  }
 
   @Implementation
   protected long enqueue(DownloadManager.Request request) {
-    queueCounter++;
-    requestMap.put(queueCounter, request);
-    return queueCounter;
+    synchronized (ShadowDownloadManager.class) {
+      queueCounter++;
+      requestMap.put(queueCounter, request);
+      ShadowRequest shadowRequest = Shadow.extract(request);
+      shadowRequest.setId(queueCounter);
+      return queueCounter;
+    }
   }
 
   @Implementation
   protected int remove(long... ids) {
-    int removeCount = 0;
-    for (long id : ids) {
-      if (requestMap.remove(id) != null) {
-        removeCount++;
+    synchronized (ShadowDownloadManager.class) {
+      int removeCount = 0;
+      for (long id : ids) {
+        if (requestMap.remove(id) != null) {
+          removeCount++;
+        }
       }
+      return removeCount;
     }
-    return removeCount;
   }
 
   @Implementation
   protected Cursor query(DownloadManager.Query query) {
-    ResultCursor result = new ResultCursor();
-    ShadowQuery shadow = Shadow.extract(query);
-    long[] ids = shadow.getIds();
+    synchronized (ShadowDownloadManager.class) {
+      ResultCursor result = new ResultCursor();
+      ShadowQuery shadow = Shadow.extract(query);
+      long[] ids = shadow.getIds();
 
-    if (ids != null) {
-      for (long id : ids) {
-        DownloadManager.Request request = requestMap.get(id);
-        if (request != null) {
-          result.requests.add(request);
+      if (ids != null) {
+        for (long id : ids) {
+          DownloadManager.Request request = requestMap.get(id);
+          if (request != null) {
+            result.requests.add(request);
+          }
         }
+      } else {
+        result.requests.addAll(requestMap.values());
       }
-    } else {
-      result.requests.addAll(requestMap.values());
+      return result;
     }
-    return result;
+  }
+
+  @Implementation
+  protected long addCompletedDownload(
+      String title,
+      String description,
+      boolean isMediaScannerScannable,
+      String mimeType,
+      String path,
+      long length,
+      boolean showNotification) {
+    return addCompletedDownload(
+        title,
+        description,
+        isMediaScannerScannable,
+        mimeType,
+        path,
+        length,
+        showNotification,
+        /* uri= */ null,
+        /* referrer= */ null);
+  }
+
+  @Implementation(minSdk = Build.VERSION_CODES.N)
+  protected long addCompletedDownload(
+      String title,
+      String description,
+      boolean isMediaScannerScannable,
+      String mimeType,
+      String path,
+      long length,
+      boolean showNotification,
+      Uri uri,
+      Uri referrer) {
+    synchronized (ShadowDownloadManager.class) {
+      completedCounter++;
+      completedDownloadsMap.put(
+          completedCounter,
+          new CompletedDownload(
+              title,
+              description,
+              isMediaScannerScannable,
+              mimeType,
+              path,
+              length,
+              showNotification,
+              uri,
+              referrer));
+      return completedCounter;
+    }
   }
 
   public DownloadManager.Request getRequest(long id) {
-    return requestMap.get(id);
+    synchronized (ShadowDownloadManager.class) {
+      return requestMap.get(id);
+    }
   }
 
   public int getRequestCount() {
-    return requestMap.size();
+    synchronized (ShadowDownloadManager.class) {
+      return requestMap.size();
+    }
+  }
+
+  public CompletedDownload getCompletedDownload(long id) {
+    synchronized (ShadowDownloadManager.class) {
+      return completedDownloadsMap.get(id);
+    }
+  }
+
+  public int getCompletedDownloadsCount() {
+    synchronized (ShadowDownloadManager.class) {
+      return completedDownloadsMap.size();
+    }
   }
 
   @Implements(DownloadManager.Request.class)
@@ -75,6 +169,9 @@ public class ShadowDownloadManager {
     @RealObject DownloadManager.Request realObject;
 
     private int status;
+    private long totalSize;
+    private long bytesSoFar;
+    private long id;
 
     public int getStatus() {
       return this.status;
@@ -82,6 +179,30 @@ public class ShadowDownloadManager {
 
     public void setStatus(int status) {
       this.status = status;
+    }
+
+    public long getTotalSize() {
+      return this.totalSize;
+    }
+
+    public void setTotalSize(long totalSize) {
+      this.totalSize = totalSize;
+    }
+
+    public long getBytesSoFar() {
+      return this.bytesSoFar;
+    }
+
+    public void setBytesSoFar(long bytesSoFar) {
+      this.bytesSoFar = bytesSoFar;
+    }
+
+    public long getId() {
+      return this.id;
+    }
+
+    public void setId(long id) {
+      this.id = id;
     }
 
     public Uri getUri() {
@@ -153,7 +274,8 @@ public class ShadowDownloadManager {
       return realObject;
     }
 
-    private void setDestinationFromBase(File base, String subPath) {
+    @Implementation
+    protected void setDestinationFromBase(File base, String subPath) {
       if (subPath == null) {
         throw new NullPointerException("subPath cannot be null");
       }
@@ -179,6 +301,9 @@ public class ShadowDownloadManager {
     private static final int COLUMN_INDEX_URI = 4;
     private static final int COLUMN_INDEX_LOCAL_URI = 5;
     private static final int COLUMN_INDEX_TITLE = 6;
+    private static final int COLUMN_INDEX_TOTAL_SIZE = 7;
+    private static final int COLUMN_INDEX_BYTES_SO_FAR = 8;
+    private static final int COLUMN_INDEX_ID = 9;
 
     public List<DownloadManager.Request> requests = new ArrayList<>();
     private int positionIndex = -1;
@@ -233,6 +358,12 @@ public class ShadowDownloadManager {
 
       } else if (DownloadManager.COLUMN_TITLE.equals(columnName)) {
         return COLUMN_INDEX_TITLE;
+      } else if (DownloadManager.COLUMN_TOTAL_SIZE_BYTES.equals(columnName)) {
+        return COLUMN_INDEX_TOTAL_SIZE;
+      } else if (DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR.equals(columnName)) {
+        return COLUMN_INDEX_BYTES_SO_FAR;
+      } else if (DownloadManager.COLUMN_ID.equals(columnName)) {
+        return COLUMN_INDEX_ID;
       }
 
       return -1;
@@ -296,10 +427,149 @@ public class ShadowDownloadManager {
       return 0;
     }
 
+    @Override
+    public long getLong(int columnIndex) {
+      checkClosed();
+      ShadowRequest request = Shadow.extract(requests.get(positionIndex));
+      if (columnIndex == COLUMN_INDEX_TOTAL_SIZE) {
+        return request.getTotalSize();
+      } else if (columnIndex == COLUMN_INDEX_BYTES_SO_FAR) {
+        return request.getBytesSoFar();
+      } else if (columnIndex == COLUMN_INDEX_ID) {
+        return request.getId();
+      }
+      return 0;
+    }
+
     private void checkClosed() {
       if (closed) {
         throw new IllegalStateException("Cursor is already closed.");
       }
+    }
+  }
+
+  /**
+   * Value class to represent a "completed download" sent to {@link DownloadManager} using the
+   * addCompletedDownload APIs.
+   */
+  public static class CompletedDownload {
+    private final String title;
+    private final String description;
+    private final boolean isMediaScannerScannable;
+    private final String mimeType;
+    private final String path;
+    private final long length;
+    private final boolean showNotification;
+    private final Uri uri;
+    private final Uri referrer;
+
+    public CompletedDownload(
+        String title,
+        String description,
+        boolean isMediaScannerScannable,
+        String mimeType,
+        String path,
+        long length,
+        boolean showNotification) {
+      this(
+          title,
+          description,
+          isMediaScannerScannable,
+          mimeType,
+          path,
+          length,
+          showNotification,
+          /* uri= */ null,
+          /* referrer= */ null);
+    }
+
+    public CompletedDownload(
+        String title,
+        String description,
+        boolean isMediaScannerScannable,
+        String mimeType,
+        String path,
+        long length,
+        boolean showNotification,
+        @Nullable Uri uri,
+        @Nullable Uri referrer) {
+      Preconditions.checkArgument(!Strings.isNullOrEmpty(title), "title can't be null");
+      Preconditions.checkArgument(!Strings.isNullOrEmpty(description), "description can't be null");
+      Preconditions.checkArgument(!Strings.isNullOrEmpty(path), "path can't be null");
+      Preconditions.checkArgument(!Strings.isNullOrEmpty(mimeType), "mimeType can't be null");
+      if (length < 0) {
+        throw new IllegalArgumentException("invalid value for param: length");
+      }
+      this.title = title;
+      this.description = description;
+      this.isMediaScannerScannable = isMediaScannerScannable;
+      this.mimeType = mimeType;
+      this.path = path;
+      this.length = length;
+      this.showNotification = showNotification;
+      this.uri = uri;
+      this.referrer = referrer;
+    }
+
+    public String getTitle() {
+      return title;
+    }
+
+    public String getDescription() {
+      return description;
+    }
+
+    public boolean isMediaScannerScannable() {
+      return isMediaScannerScannable;
+    }
+
+    public String getMimeType() {
+      return mimeType;
+    }
+
+    public String getPath() {
+      return path;
+    }
+
+    public long getLength() {
+      return length;
+    }
+
+    public boolean showNotification() {
+      return showNotification;
+    }
+
+    @Nullable
+    public Uri getUri() {
+      return uri;
+    }
+
+    @Nullable
+    public Uri getReferrer() {
+      return referrer;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+      if (!(o instanceof CompletedDownload)) {
+        return false;
+      }
+      CompletedDownload other = (CompletedDownload) o;
+      return this.title.equals(other.getTitle())
+          && this.description.equals(other.getDescription())
+          && this.isMediaScannerScannable == other.isMediaScannerScannable()
+          && this.mimeType.equals(other.getMimeType())
+          && this.path.equals(other.getPath())
+          && this.length == other.getLength()
+          && this.showNotification == other.showNotification()
+          && Objects.equals(this.uri, other.getUri())
+          && Objects.equals(this.referrer, other.getReferrer());
+    }
+
+    @Override
+    public int hashCode() {
+      return Objects.hash(
+          title, description, mimeType, path, length, showNotification, uri, referrer);
     }
   }
 

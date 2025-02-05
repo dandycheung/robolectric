@@ -6,13 +6,17 @@ import org.robolectric.Robolectric;
 
 /**
  * Builder of {@link AttributeSet}s.
+ *
+ * @deprecated use Xml.asAttributeSet instead. Not supported in {@link
+ *     org.robolectric.annotation.ResourcesMode.Mode#NATIVE}
  */
+@Deprecated
 public interface AttributeSetBuilder extends Robolectric.AttributeSetBuilder {
 
   /**
    * Set an attribute to the given value.
    *
-   * The value will be interpreted according to the attribute's format.
+   * <p>The value will be interpreted according to the attribute's format.
    *
    * @param resId The attribute resource id to set.
    * @param value The value to set.
@@ -24,7 +28,7 @@ public interface AttributeSetBuilder extends Robolectric.AttributeSetBuilder {
   /**
    * Set the style attribute to the given value.
    *
-   * The value will be interpreted as a resource reference.
+   * <p>The value will be interpreted as a resource reference.
    *
    * @param value The value for the specified attribute in this {@link AttributeSet}.
    * @return This {@link AttributeSetBuilder}.
@@ -35,7 +39,7 @@ public interface AttributeSetBuilder extends Robolectric.AttributeSetBuilder {
   /**
    * Set the class attribute to the given value.
    *
-   * The value will be interpreted as a class name.
+   * <p>The value will be interpreted as a class name.
    *
    * @param value The value for this {@link AttributeSet}'s {@code class} attribute.
    * @return This {@link AttributeSetBuilder}.
@@ -45,7 +49,7 @@ public interface AttributeSetBuilder extends Robolectric.AttributeSetBuilder {
   /**
    * Set the id attribute to the given value.
    *
-   * The value will be interpreted as an element id name.
+   * <p>The value will be interpreted as an element id name.
    *
    * @param value The value for this {@link AttributeSet}'s {@code id} attribute.
    * @return This {@link AttributeSetBuilder}.
@@ -59,5 +63,4 @@ public interface AttributeSetBuilder extends Robolectric.AttributeSetBuilder {
    */
   @Override
   AttributeSet build();
-
 }

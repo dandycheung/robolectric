@@ -2,6 +2,7 @@ package org.robolectric.shadows;
 
 import static android.os.Build.VERSION_CODES.Q;
 import static android.os.Build.VERSION_CODES.R;
+import static android.os.Build.VERSION_CODES.UPSIDE_DOWN_CAKE;
 
 import android.os.BugreportManager;
 import android.os.BugreportManager.BugreportCallback;
@@ -9,6 +10,7 @@ import android.os.BugreportParams;
 import android.os.ParcelFileDescriptor;
 import java.io.IOException;
 import java.util.concurrent.Executor;
+import javax.annotation.Nullable;
 import org.robolectric.annotation.Implementation;
 import org.robolectric.annotation.Implements;
 
@@ -22,11 +24,13 @@ public class ShadowBugreportManager {
 
   private boolean hasPermission = true;
 
-  private ParcelFileDescriptor bugreportFd;
-  private ParcelFileDescriptor screenshotFd;
-  private Executor executor;
-  private BugreportCallback callback;
+  @Nullable private ParcelFileDescriptor bugreportFd;
+  @Nullable private ParcelFileDescriptor screenshotFd;
+  @Nullable private Executor executor;
+  @Nullable private BugreportCallback callback;
   private boolean bugreportRequested;
+  @Nullable private CharSequence shareTitle;
+  @Nullable private CharSequence shareDescription;
 
   /**
    * Starts a bugreport with which can execute callback methods on the provided executor.
@@ -56,12 +60,32 @@ public class ShadowBugreportManager {
    * Normally requests the platform/system to take a bugreport and make the final bugreport
    * available to the user.
    *
-   * <p>This implementation just sets a boolean recording that the method was invoked.
+   * <p>This implementation just sets a boolean recording that the method was invoked, and the share
+   * title and description.
    */
   @Implementation(minSdk = R)
   protected void requestBugreport(
       BugreportParams params, CharSequence shareTitle, CharSequence shareDescription) {
     this.bugreportRequested = true;
+    this.shareTitle = shareTitle;
+    this.shareDescription = shareDescription;
+  }
+
+  @Implementation(minSdk = UPSIDE_DOWN_CAKE)
+  protected void retrieveBugreport(
+      String bugreportFile,
+      ParcelFileDescriptor bugreportFd,
+      Executor executor,
+      BugreportCallback callback) {
+    enforcePermission("retrieveBugreport");
+    if (isBugreportInProgress()) {
+      executor.execute(
+          () -> callback.onError(BugreportCallback.BUGREPORT_ERROR_ANOTHER_REPORT_IN_PROGRESS));
+    } else {
+      this.bugreportFd = bugreportFd;
+      this.executor = executor;
+      this.callback = callback;
+    }
   }
 
   /** Cancels bugreport in progress and executes {@link BugreportCallback#onError}. */
@@ -97,6 +121,15 @@ public class ShadowBugreportManager {
     resetParams();
   }
 
+  /** Executes {@link BugreportCallback#onFinished(String)} on the provided Executor. */
+  public void executeOnFinished(String bugreportFile) {
+    if (isBugreportInProgress()) {
+      BugreportCallback callback = this.callback;
+      executor.execute(() -> callback.onFinished(bugreportFile));
+    }
+    resetParams();
+  }
+
   public boolean isBugreportInProgress() {
     return executor != null && callback != null;
   }
@@ -122,9 +155,38 @@ public class ShadowBugreportManager {
     }
   }
 
+  /** Returns the title of the bugreport if set with {@code requestBugreport}, else null. */
+  @Nullable
+  public CharSequence getShareTitle() {
+    return shareTitle;
+  }
+
+  /** Returns the description of the bugreport if set with {@code requestBugreport}, else null. */
+  @Nullable
+  public CharSequence getShareDescription() {
+    return shareDescription;
+  }
+
+  /**
+   * Returns the bug report file descriptor if set with {@code startBugreport} or {@code
+   * retrieveBugreport}, else null.
+   */
+  @Nullable
+  public ParcelFileDescriptor getBugreportFd() {
+    return bugreportFd;
+  }
+
+  /** Returns the screenshot file descriptor if set with {@code startBugreport}, else null. */
+  @Nullable
+  public ParcelFileDescriptor getScreenshotFd() {
+    return screenshotFd;
+  }
+
   private void resetParams() {
     try {
-      bugreportFd.close();
+      if (bugreportFd != null) {
+        bugreportFd.close();
+      }
       if (screenshotFd != null) {
         screenshotFd.close();
       }
@@ -136,5 +198,7 @@ public class ShadowBugreportManager {
     executor = null;
     callback = null;
     bugreportRequested = false;
+    shareTitle = null;
+    shareDescription = null;
   }
 }

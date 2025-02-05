@@ -206,7 +206,7 @@ public class CachedPathIteratorFactory {
    * PathIterator#SEG_LINETO} this method will fail.
    */
   private static float getFlatPathLength(PathIterator iterator) {
-    float segment[] = new float[6];
+    float[] segment = new float[6];
     float totalLength = 0;
     float[] previousPoint = new float[2];
     boolean isFirstPoint = true;
@@ -279,7 +279,7 @@ public class CachedPathIteratorFactory {
      *
      * @see PathIterator
      */
-    private float[] mCurrentCoords = new float[6];
+    private final float[] mCurrentCoords = new float[6];
 
     private float mCurrentSegmentLength;
 
@@ -293,7 +293,7 @@ public class CachedPathIteratorFactory {
     private float mOffsetLength;
 
     /** Point where the current segment started */
-    private float[] mLastPoint = new float[2];
+    private final float[] mLastPoint = new float[2];
 
     private boolean isIteratorDone;
 
@@ -388,7 +388,7 @@ public class CachedPathIteratorFactory {
       }
 
       float accLength = 0;
-      float lastPoint[] = new float[2];
+      float[] lastPoint = new float[2];
       for (mNextIndex = 0; mNextIndex < mTypes.length; mNextIndex++) {
         float segmentLength = mSegmentsLength[mNextIndex];
         if (accLength + segmentLength >= length && mTypes[mNextIndex] != SEG_MOVETO) {

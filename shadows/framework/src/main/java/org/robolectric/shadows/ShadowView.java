@@ -1,9 +1,9 @@
 package org.robolectric.shadows;
 
-import static android.os.Build.VERSION_CODES.JELLY_BEAN_MR2;
-import static android.os.Build.VERSION_CODES.KITKAT;
 import static android.os.Build.VERSION_CODES.N;
-import static org.robolectric.shadow.api.Shadow.invokeConstructor;
+import static android.os.Build.VERSION_CODES.O;
+import static android.os.Build.VERSION_CODES.Q;
+import static android.os.Build.VERSION_CODES.R;
 import static org.robolectric.shadows.ShadowLooper.shadowMainLooper;
 import static org.robolectric.util.ReflectionHelpers.getField;
 import static org.robolectric.util.reflector.Reflector.reflector;
@@ -15,6 +15,7 @@ import android.graphics.Paint;
 import android.graphics.Point;
 import android.graphics.Rect;
 import android.graphics.drawable.Drawable;
+import android.os.Build;
 import android.os.Looper;
 import android.os.RemoteException;
 import android.os.SystemClock;
@@ -29,22 +30,27 @@ import android.view.ViewParent;
 import android.view.WindowId;
 import android.view.animation.Animation;
 import android.view.animation.Transformation;
-import android.widget.ImageView;
+import com.google.common.annotations.Beta;
+import com.google.common.collect.ImmutableList;
 import java.io.PrintStream;
-import java.lang.reflect.Method;
+import java.time.Duration;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
+import org.robolectric.RuntimeEnvironment;
+import org.robolectric.annotation.GraphicsMode;
+import org.robolectric.annotation.GraphicsMode.Mode;
 import org.robolectric.annotation.Implementation;
 import org.robolectric.annotation.Implements;
 import org.robolectric.annotation.LooperMode;
 import org.robolectric.annotation.RealObject;
+import org.robolectric.annotation.ReflectorObject;
 import org.robolectric.annotation.Resetter;
+import org.robolectric.config.ConfigurationRegistry;
 import org.robolectric.shadow.api.Shadow;
-import org.robolectric.util.ReflectionHelpers;
-import org.robolectric.util.ReflectionHelpers.ClassParameter;
-import org.robolectric.util.TimeUtils;
+import org.robolectric.shadows.ShadowViewRootImpl.ViewRootImplReflector;
 import org.robolectric.util.reflector.Accessor;
 import org.robolectric.util.reflector.Direct;
 import org.robolectric.util.reflector.ForType;
@@ -54,6 +60,7 @@ import org.robolectric.util.reflector.ForType;
 public class ShadowView {
 
   @RealObject protected View realView;
+  @ReflectorObject protected _View_ viewReflector;
   private static final List<View.OnClickListener> globalClickListeners =
       new CopyOnWriteArrayList<>();
   private static final List<View.OnLongClickListener> globalLongClickListeners =
@@ -64,6 +71,7 @@ public class ShadowView {
   private View.OnSystemUiVisibilityChangeListener onSystemUiVisibilityChangeListener;
   private final HashSet<View.OnAttachStateChangeListener> onAttachStateChangeListeners =
       new HashSet<>();
+  private final HashSet<View.OnLayoutChangeListener> onLayoutChangeListeners = new HashSet<>();
   private boolean wasInvalidated;
   private View.OnTouchListener onTouchListener;
   protected AttributeSet attributeSet;
@@ -75,11 +83,12 @@ public class ShadowView {
   private View.OnCreateContextMenuListener onCreateContextMenuListener;
   private Rect globalVisibleRect;
   private int layerType;
+  private final ArrayList<Animation> animations = new ArrayList<>();
   private AnimationRunner animationRunner;
 
   /**
-   * Calls {@code performClick()} on a {@code View} after ensuring that it and its ancestors are visible and that it
-   * is enabled.
+   * Calls {@code performClick()} on a {@code View} after ensuring that it and its ancestors are
+   * visible and that it is enabled.
    *
    * @param view the view to click on
    * @return true if {@code View.OnClickListener}s were found and fired, false otherwise.
@@ -101,8 +110,12 @@ public class ShadowView {
   public static String visualize(View view) {
     Canvas canvas = new Canvas();
     view.draw(canvas);
-    ShadowCanvas shadowCanvas = Shadow.extract(canvas);
-    return shadowCanvas.getDescription();
+    if (!useRealGraphics()) {
+      ShadowCanvas shadowCanvas = Shadow.extract(canvas);
+      return shadowCanvas.getDescription();
+    } else {
+      return "";
+    }
   }
 
   /**
@@ -130,21 +143,35 @@ public class ShadowView {
     return shadowView.innerText();
   }
 
-  @Implementation
-  protected void __constructor__(Context context, AttributeSet attributeSet, int defStyle) {
-    if (context == null) throw new NullPointerException("no context");
+  static int[] getLocationInSurfaceCompat(View view) {
+    int[] locationInSurface = new int[2];
+    if (RuntimeEnvironment.getApiLevel() >= Build.VERSION_CODES.Q) {
+      view.getLocationInSurface(locationInSurface);
+    } else {
+      view.getLocationInWindow(locationInSurface);
+      Rect surfaceInsets =
+          reflector(ViewRootImplReflector.class, view.getViewRootImpl())
+              .getWindowAttributes()
+              .surfaceInsets;
+      locationInSurface[0] += surfaceInsets.left;
+      locationInSurface[1] += surfaceInsets.top;
+    }
+    return locationInSurface;
+  }
+
+  /* Note: maxSdk is R because capturing `attributeSet` is not needed any more after R. */
+  @Implementation(maxSdk = R)
+  protected void __constructor__(
+      Context context, AttributeSet attributeSet, int defStyleAttr, int defStyleRes) {
     this.attributeSet = attributeSet;
-    invokeConstructor(
-        View.class,
-        realView,
-        ClassParameter.from(Context.class, context),
-        ClassParameter.from(AttributeSet.class, attributeSet),
-        ClassParameter.from(int.class, defStyle));
+    reflector(_View_.class, realView)
+        .__constructor__(context, attributeSet, defStyleAttr, defStyleRes);
   }
 
   @Implementation
   protected void setLayerType(int layerType, Paint paint) {
     this.layerType = layerType;
+    reflector(_View_.class, realView).setLayerType(layerType, paint);
   }
 
   @Implementation
@@ -196,22 +223,28 @@ public class ShadowView {
   }
 
   @Implementation
+  protected void addOnLayoutChangeListener(View.OnLayoutChangeListener onLayoutChangeListener) {
+    onLayoutChangeListeners.add(onLayoutChangeListener);
+    reflector(_View_.class, realView).addOnLayoutChangeListener(onLayoutChangeListener);
+  }
+
+  @Implementation
+  protected void removeOnLayoutChangeListener(View.OnLayoutChangeListener onLayoutChangeListener) {
+    onLayoutChangeListeners.remove(onLayoutChangeListener);
+    reflector(_View_.class, realView).removeOnLayoutChangeListener(onLayoutChangeListener);
+  }
+
+  @Implementation
   protected void draw(Canvas canvas) {
     Drawable background = realView.getBackground();
-    if (background != null) {
-      ShadowCanvas shadowCanvas = Shadow.extract(canvas);
-      shadowCanvas.appendDescription("background:");
-      background.draw(canvas);
-    }
-    // Because ImageView does not override the draw(Canvas) method, this logic has to
-    // be here, otherwise there will be a ClassCastException if there is a custom View shadow,
-    // which is one of the more commonly occurring shadows.
-    if (realView instanceof ImageView) {
-      Drawable drawable = ((ImageView) realView).getDrawable();
-      if (drawable != null) {
-        drawable.draw(canvas);
+    if (background != null && !useRealGraphics()) {
+      Object shadowCanvas = Shadow.extract(canvas);
+      // Check that Canvas is not a Mockito mock
+      if (shadowCanvas instanceof ShadowCanvas) {
+        ((ShadowCanvas) shadowCanvas).appendDescription("background:");
       }
     }
+    reflector(_View_.class, realView).draw(canvas);
   }
 
   @Implementation
@@ -325,9 +358,11 @@ public class ShadowView {
   }
 
   /**
-   * Returns a string representation of this {@code View}. Unless overridden, it will be an empty string.
+   * Returns a string representation of this {@code View}. Unless overridden, it will be an empty
+   * string.
    *
-   * Robolectric extension.
+   * <p>Robolectric extension.
+   *
    * @return String representation of this view.
    */
   public String innerText() {
@@ -336,6 +371,7 @@ public class ShadowView {
 
   /**
    * Dumps the status of this {@code View} to {@code System.out}
+   *
    * @deprecated - Please use {@link androidx.test.espresso.util.HumanReadables#describe(View)}
    */
   @Deprecated
@@ -345,6 +381,7 @@ public class ShadowView {
 
   /**
    * Dumps the status of this {@code View} to {@code System.out} at the given indentation level
+   *
    * @param out Output stream.
    * @param indent Indentation level.
    * @deprecated - Please use {@link androidx.test.espresso.util.HumanReadables#describe(View)}
@@ -399,19 +436,19 @@ public class ShadowView {
     return wasInvalidated;
   }
 
-  /**
-   * Clears the wasInvalidated flag
-   */
+  /** Clears the wasInvalidated flag */
   public void clearWasInvalidated() {
     wasInvalidated = false;
   }
 
   /**
-   * Utility method for clicking on views exposing testing scenarios that are not possible when using the actual app.
+   * Utility method for clicking on views exposing testing scenarios that are not possible when
+   * using the actual app.
    *
-   * If running with LooperMode PAUSED will also idle the main Looper.
+   * <p>If running with LooperMode PAUSED will also idle the main Looper.
    *
-   * @throws RuntimeException if the view is disabled or if the view or any of its parents are not visible.
+   * @throws RuntimeException if the view is disabled or if the view or any of its parents are not
+   *     visible.
    * @return Return value of the underlying click operation.
    * @deprecated - Please use Espresso for View interactions.
    */
@@ -445,8 +482,13 @@ public class ShadowView {
   /**
    * @return Returns long click listener, if set.
    */
+  @Implementation(minSdk = R)
   public View.OnLongClickListener getOnLongClickListener() {
-    return onLongClickListener;
+    if (RuntimeEnvironment.getApiLevel() >= R) {
+      return reflector(_View_.class, realView).getOnLongClickListener();
+    } else {
+      return onLongClickListener;
+    }
   }
 
   /**
@@ -463,106 +505,120 @@ public class ShadowView {
     return onCreateContextMenuListener;
   }
 
-  /** @return Returns the attached listeners, or the empty set if none are present. */
+  /**
+   * @return Returns the attached listeners, or the empty set if none are present.
+   */
   public Set<View.OnAttachStateChangeListener> getOnAttachStateChangeListeners() {
     return onAttachStateChangeListeners;
   }
 
-  // @Implementation
-  // protected Bitmap getDrawingCache() {
-  //   return ReflectionHelpers.callConstructor(Bitmap.class);
-  // }
+  /**
+   * @return Returns the layout change listeners, or the empty set if none are present.
+   */
+  public Set<View.OnLayoutChangeListener> getOnLayoutChangeListeners() {
+    return onLayoutChangeListeners;
+  }
 
   @Implementation
   protected boolean post(Runnable action) {
-    if (ShadowLooper.looperMode() == LooperMode.Mode.PAUSED) {
-      return reflector(_View_.class, realView).post(action);
-    } else {
+    if (ShadowLooper.looperMode() == LooperMode.Mode.LEGACY) {
       ShadowApplication.getInstance().getForegroundThreadScheduler().post(action);
       return true;
+    } else {
+      return reflector(_View_.class, realView).post(action);
     }
   }
 
   @Implementation
   protected boolean postDelayed(Runnable action, long delayMills) {
-    if (ShadowLooper.looperMode() == LooperMode.Mode.PAUSED) {
-      return reflector(_View_.class, realView).postDelayed(action, delayMills);
-    } else {
+    if (ShadowLooper.looperMode() == LooperMode.Mode.LEGACY) {
       ShadowApplication.getInstance()
           .getForegroundThreadScheduler()
           .postDelayed(action, delayMills);
       return true;
+    } else {
+      return reflector(_View_.class, realView).postDelayed(action, delayMills);
     }
   }
 
   @Implementation
   protected void postInvalidateDelayed(long delayMilliseconds) {
-    if (ShadowLooper.looperMode() == LooperMode.Mode.PAUSED) {
-      reflector(_View_.class, realView).postInvalidateDelayed(delayMilliseconds);
-    } else {
+    if (ShadowLooper.looperMode() == LooperMode.Mode.LEGACY) {
       ShadowApplication.getInstance()
           .getForegroundThreadScheduler()
-          .postDelayed(
-              new Runnable() {
-                @Override
-                public void run() {
-                  realView.invalidate();
-                }
-              },
-              delayMilliseconds);
+          .postDelayed(() -> realView.invalidate(), delayMilliseconds);
+    } else {
+      reflector(_View_.class, realView).postInvalidateDelayed(delayMilliseconds);
     }
   }
 
   @Implementation
   protected boolean removeCallbacks(Runnable callback) {
-    if (ShadowLooper.looperMode() == LooperMode.Mode.PAUSED) {
-      return reflector(_View_.class, realView).removeCallbacks(callback);
-    } else {
+    if (ShadowLooper.looperMode() == LooperMode.Mode.LEGACY) {
       ShadowLegacyLooper shadowLooper = Shadow.extract(Looper.getMainLooper());
       shadowLooper.getScheduler().remove(callback);
       return true;
+    } else {
+      return reflector(_View_.class, realView).removeCallbacks(callback);
     }
   }
 
   @Implementation
   protected void scrollTo(int x, int y) {
-    try {
-      Method method =
-          View.class.getDeclaredMethod(
-              "onScrollChanged", int.class, int.class, int.class, int.class);
-      method.setAccessible(true);
-      method.invoke(realView, x, y, scrollToCoordinates.x, scrollToCoordinates.y);
-    } catch (Exception e) {
-      throw new RuntimeException(e);
+    if (useRealScrolling()) {
+      reflector(_View_.class, realView).scrollTo(x, y);
+    } else {
+      reflector(_View_.class, realView)
+          .onScrollChanged(x, y, scrollToCoordinates.x, scrollToCoordinates.y);
+      scrollToCoordinates = new Point(x, y);
+      reflector(_View_.class, realView).setMemberScrollX(x);
+      reflector(_View_.class, realView).setMemberScrollY(y);
     }
-    scrollToCoordinates = new Point(x, y);
-    ReflectionHelpers.setField(realView, "mScrollX", x);
-    ReflectionHelpers.setField(realView, "mScrollY", y);
   }
 
   @Implementation
   protected void scrollBy(int x, int y) {
-    scrollTo(getScrollX() + x, getScrollY() + y);
+    if (useRealScrolling()) {
+      reflector(_View_.class, realView).scrollBy(x, y);
+    } else {
+      scrollTo(getScrollX() + x, getScrollY() + y);
+    }
   }
 
   @Implementation
   protected int getScrollX() {
-    return scrollToCoordinates != null ? scrollToCoordinates.x : 0;
+    if (useRealScrolling()) {
+      return reflector(_View_.class, realView).getScrollX();
+    } else {
+      return scrollToCoordinates != null ? scrollToCoordinates.x : 0;
+    }
   }
 
   @Implementation
   protected int getScrollY() {
-    return scrollToCoordinates != null ? scrollToCoordinates.y : 0;
+    if (useRealScrolling()) {
+      return reflector(_View_.class, realView).getScrollY();
+    } else {
+      return scrollToCoordinates != null ? scrollToCoordinates.y : 0;
+    }
   }
 
   @Implementation
   protected void setScrollX(int scrollX) {
-    scrollTo(scrollX, scrollToCoordinates.y);
+    if (useRealScrolling()) {
+      reflector(_View_.class, realView).setScrollX(scrollX);
+    } else {
+      scrollTo(scrollX, scrollToCoordinates.y);
+    }
   }
 
   @Implementation
   protected void setScrollY(int scrollY) {
-    scrollTo(scrollToCoordinates.x, scrollY);
+    if (useRealScrolling()) {
+      reflector(_View_.class, realView).setScrollY(scrollY);
+    } else {
+      scrollTo(scrollToCoordinates.x, scrollY);
+    }
   }
 
   @Implementation
@@ -570,12 +626,27 @@ public class ShadowView {
     return this.layerType;
   }
 
+  /** Returns a list of all animations that have been set on this view. */
+  public ImmutableList<Animation> getAnimations() {
+    return ImmutableList.copyOf(animations);
+  }
+
+  /** Resets the list returned by {@link #getAnimations()} to an empty list. */
+  public void clearAnimations() {
+    animations.clear();
+  }
+
   @Implementation
   protected void setAnimation(final Animation animation) {
     reflector(_View_.class, realView).setAnimation(animation);
 
     if (animation != null) {
-      new AnimationRunner(animation);
+      animations.add(animation);
+      if (animationRunner != null) {
+        animationRunner.cancel();
+      }
+      animationRunner = new AnimationRunner(animation);
+      animationRunner.start();
     }
   }
 
@@ -589,65 +660,92 @@ public class ShadowView {
     }
   }
 
+  @Implementation
+  protected boolean initialAwakenScrollBars() {
+    // Temporarily allow disabling initial awaken of scroll bars to aid in migration of tests to
+    // default to window's being marked visible, this will be removed once migration is complete.
+    if (Boolean.getBoolean("robolectric.disableInitialAwakenScrollBars")) {
+      return false;
+    } else {
+      return viewReflector.initialAwakenScrollBars();
+    }
+  }
+
   private class AnimationRunner implements Runnable {
     private final Animation animation;
-    private long startTime, startOffset, elapsedTime;
+    private final Transformation transformation = new Transformation();
+    private long startTime;
+    private long elapsedTime;
     private boolean canceled;
 
     AnimationRunner(Animation animation) {
       this.animation = animation;
-      start();
     }
 
     private void start() {
       startTime = animation.getStartTime();
-      startOffset = animation.getStartOffset();
-      Choreographer choreographer = Choreographer.getInstance();
-      if (animationRunner != null) {
-        choreographer.removeCallbacks(Choreographer.CALLBACK_ANIMATION, animationRunner, null);
+      long startOffset = animation.getStartOffset();
+      long startDelay =
+          startTime == Animation.START_ON_FIRST_FRAME
+              ? startOffset
+              : (startTime + startOffset) - SystemClock.uptimeMillis();
+      Choreographer.getInstance()
+          .postCallbackDelayed(Choreographer.CALLBACK_ANIMATION, this, null, startDelay);
+    }
+
+    private boolean step() {
+      long animationTime =
+          animation.getStartTime() == Animation.START_ON_FIRST_FRAME
+              ? SystemClock.uptimeMillis()
+              : (animation.getStartTime() + animation.getStartOffset() + elapsedTime);
+      // Note in real android the parent is non-nullable, retain legacy robolectric behavior which
+      // allows detached views to animate.
+      if (!animation.isInitialized() && realView.getParent() != null) {
+        View parent = (View) realView.getParent();
+        animation.initialize(
+            realView.getWidth(), realView.getHeight(), parent.getWidth(), parent.getHeight());
       }
-      animationRunner = this;
-      int startDelay;
-      if (startTime == Animation.START_ON_FIRST_FRAME) {
-        startDelay = (int) startOffset;
-      } else {
-        startDelay = (int) ((startTime + startOffset) - SystemClock.uptimeMillis());
+      boolean next = animation.getTransformation(animationTime, transformation);
+      // Note in real view implementation it doesn't check the animation equality before clearing,
+      // but in the real implementation the animation listeners are posted so it doesn't race with
+      // chained animations.
+      if (realView.getAnimation() == animation && !next) {
+        if (!animation.getFillAfter()) {
+          realView.clearAnimation();
+        }
       }
-      choreographer.postCallbackDelayed(Choreographer.CALLBACK_ANIMATION, this, null, startDelay);
+      // We can't handle infinitely repeating animations in the current scheduling model, so abort
+      // after one iteration.
+      return next
+          && (animation.getRepeatCount() != Animation.INFINITE
+              || elapsedTime < animation.getDuration());
     }
 
     @Override
     public void run() {
       // Abort if start time has been messed with, as this simulation is only designed to handle
       // standard situations.
-      if (!canceled
-          && (animation.getStartTime() == startTime && animation.getStartOffset() == startOffset)
-          && animation.getTransformation(
-              startTime == Animation.START_ON_FIRST_FRAME
-                  ? SystemClock.uptimeMillis()
-                  : (startTime + startOffset + elapsedTime),
-              new Transformation())
-          &&
-          // We can't handle infinitely repeating animations in the current scheduling model,
-          // so abort after one iteration.
-          !(animation.getRepeatCount() == Animation.INFINITE
-              && elapsedTime >= animation.getDuration())) {
-        // Update startTime if it had a value of Animation.START_ON_FIRST_FRAME
+      if (!canceled && animation.getStartTime() == startTime && step()) {
+        // Start time updates for repeating animations and if START_ON_FIRST_FRAME.
         startTime = animation.getStartTime();
-        // TODO: get the correct value for ShadowPausedLooper mode
-        elapsedTime += ShadowChoreographer.getFrameInterval() / TimeUtils.NANOS_PER_MS;
+        elapsedTime +=
+            ShadowLooper.looperMode().equals(LooperMode.Mode.LEGACY)
+                ? Duration.ofNanos(ShadowChoreographer.getFrameInterval()).toMillis()
+                : ShadowChoreographer.getFrameDelay().toMillis();
         Choreographer.getInstance().postCallback(Choreographer.CALLBACK_ANIMATION, this, null);
-      } else {
+      } else if (animationRunner == this) {
         animationRunner = null;
       }
     }
 
     public void cancel() {
       this.canceled = true;
+      Choreographer.getInstance()
+          .removeCallbacks(Choreographer.CALLBACK_ANIMATION, animationRunner, null);
     }
   }
 
-  @Implementation(minSdk = KITKAT)
+  @Implementation
   protected boolean isAttachedToWindow() {
     return getAttachInfo() != null;
   }
@@ -661,19 +759,27 @@ public class ShadowView {
   private interface _View_ {
 
     @Direct
-    void onLayout(boolean changed, int left, int top, int right, int bottom);
+    void draw(Canvas canvas);
 
     @Direct
+    void onLayout(boolean changed, int left, int top, int right, int bottom);
+
     void assignParent(ViewParent viewParent);
 
     @Direct
     void setOnFocusChangeListener(View.OnFocusChangeListener l);
 
     @Direct
+    void setLayerType(int layerType, Paint paint);
+
+    @Direct
     void setOnClickListener(View.OnClickListener onClickListener);
 
     @Direct
     void setOnLongClickListener(View.OnLongClickListener onLongClickListener);
+
+    @Direct
+    View.OnLongClickListener getOnLongClickListener();
 
     @Direct
     void setOnSystemUiVisibilityChangeListener(
@@ -690,6 +796,12 @@ public class ShadowView {
     @Direct
     void removeOnAttachStateChangeListener(
         View.OnAttachStateChangeListener onAttachStateChangeListener);
+
+    @Direct
+    void addOnLayoutChangeListener(View.OnLayoutChangeListener onLayoutChangeListener);
+
+    @Direct
+    void removeOnLayoutChangeListener(View.OnLayoutChangeListener onLayoutChangeListener);
 
     @Direct
     void requestLayout();
@@ -739,6 +851,45 @@ public class ShadowView {
     void onAttachedToWindow();
 
     void onDetachedFromWindow();
+
+    void onScrollChanged(int l, int t, int oldl, int oldt);
+
+    @Direct
+    int getSourceLayoutResId();
+
+    @Direct
+    boolean initialAwakenScrollBars();
+
+    @Accessor("mScrollX")
+    void setMemberScrollX(int value);
+
+    @Accessor("mScrollY")
+    void setMemberScrollY(int value);
+
+    @Direct
+    void scrollTo(int x, int y);
+
+    @Direct
+    void scrollBy(int x, int y);
+
+    @Direct
+    int getScrollX();
+
+    @Direct
+    int getScrollY();
+
+    @Direct
+    void setScrollX(int value);
+
+    @Direct
+    void setScrollY(int value);
+
+    @Direct
+    void __constructor__(Context context, AttributeSet attributeSet, int defStyle);
+
+    @Direct
+    void __constructor__(
+        Context context, AttributeSet attributeSet, int defStyleAttr, int defStyleRes);
   }
 
   public void callOnAttachedToWindow() {
@@ -749,7 +900,7 @@ public class ShadowView {
     reflector(_View_.class, realView).onDetachedFromWindow();
   }
 
-  @Implementation(minSdk = JELLY_BEAN_MR2)
+  @Implementation
   protected WindowId getWindowId() {
     return WindowIdHelper.getWindowId(this);
   }
@@ -812,6 +963,20 @@ public class ShadowView {
     ShadowDisplay.getDefaultDisplay().getRectSize(outRect);
   }
 
+  /**
+   * Returns the layout resource id this view was inflated from. Backwards compatible version of
+   * {@link View#getSourceLayoutResId()}, passes through to the underlying implementation on API
+   * levels where it is supported.
+   */
+  @Implementation(minSdk = Q)
+  public int getSourceLayoutResId() {
+    if (RuntimeEnvironment.getApiLevel() >= Q) {
+      return reflector(_View_.class, realView).getSourceLayoutResId();
+    } else {
+      return ShadowResources.getAttributeSetSourceResId(attributeSet);
+    }
+  }
+
   public static class WindowIdHelper {
     public static WindowId getWindowId(ShadowView shadowView) {
       if (shadowView.isAttachedToWindow()) {
@@ -828,12 +993,12 @@ public class ShadowView {
 
     private static class MyIWindowIdStub extends IWindowId.Stub {
       @Override
-      public void registerFocusObserver(IWindowFocusObserver iWindowFocusObserver) throws RemoteException {
-      }
+      public void registerFocusObserver(IWindowFocusObserver iWindowFocusObserver)
+          throws RemoteException {}
 
       @Override
-      public void unregisterFocusObserver(IWindowFocusObserver iWindowFocusObserver) throws RemoteException {
-      }
+      public void unregisterFocusObserver(IWindowFocusObserver iWindowFocusObserver)
+          throws RemoteException {}
 
       @Override
       public boolean isFocused() throws RemoteException {
@@ -851,5 +1016,29 @@ public class ShadowView {
 
     @Accessor("mWindowId")
     void setWindowId(WindowId windowId);
+  }
+
+  /**
+   * Internal API to determine if native graphics is enabled.
+   *
+   * <p>This is currently public because it has to be accessed from multiple packages, but it is not
+   * recommended to depend on this API.
+   */
+  @Beta
+  public static boolean useRealGraphics() {
+    GraphicsMode.Mode graphicsMode = ConfigurationRegistry.get(GraphicsMode.Mode.class);
+    return graphicsMode == Mode.NATIVE && RuntimeEnvironment.getApiLevel() >= O;
+  }
+
+  /**
+   * Currently the default View scrolling implementation is broken and low-fidelity. For instance,
+   * even if a View has no children, Robolectric will still happily set the scroll position of a
+   * View. Long-term we want to eliminate this broken behavior, but in the mean time the real
+   * scrolling behavior is enabled when native graphics are enabled, or when a system property is
+   * set.
+   */
+  static boolean useRealScrolling() {
+    return useRealGraphics()
+        || Boolean.parseBoolean(System.getProperty("robolectric.useRealScrolling", "true"));
   }
 }

@@ -1,8 +1,8 @@
 package org.robolectric.res;
 
+import com.google.errorprone.annotations.InlineMe;
 import java.io.BufferedInputStream;
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.MalformedURLException;
@@ -24,23 +24,30 @@ import java.util.Map;
 import java.util.Set;
 import java.util.function.Predicate;
 import java.util.stream.Stream;
+import javax.annotation.Nonnull;
 import javax.annotation.concurrent.GuardedBy;
 import org.robolectric.util.Util;
 
 @SuppressWarnings({"NewApi", "AndroidJdkLibsChecker"})
-abstract public class Fs {
+public abstract class Fs {
 
   @GuardedBy("ZIP_FILESYSTEMS")
   private static final Map<Path, FsWrapper> ZIP_FILESYSTEMS = new HashMap<>();
 
-  /** @deprecated Use {@link File#toPath()} instead. */
+  /**
+   * @deprecated Use {@link File#toPath()} instead.
+   */
   @Deprecated
+  @InlineMe(replacement = "file.toPath()")
   public static Path newFile(File file) {
     return file.toPath();
   }
 
-  /** @deprecated Use {@link #fromUrl(String)} instead. */
+  /**
+   * @deprecated Use {@link #fromUrl(String)} instead.
+   */
   @Deprecated
+  @InlineMe(replacement = "Fs.fromUrl(path)", imports = "org.robolectric.res.Fs")
   public static Path fileFromPath(String path) {
     return Fs.fromUrl(path);
   }
@@ -112,10 +119,6 @@ abstract public class Fs {
   }
 
   public static InputStream getInputStream(Path path) throws IOException {
-    // otherwise we get ClosedByInterruptException, meh
-    if (path.toUri().getScheme().equals("file")) {
-      return new BufferedInputStream(new FileInputStream(path.toFile()));
-    }
     return new BufferedInputStream(Files.newInputStream(path));
   }
 
@@ -245,8 +248,9 @@ abstract public class Fs {
       return delegate.supportedFileAttributeViews();
     }
 
+    @Nonnull
     @Override
-    public Path getPath(String first, String... more) {
+    public Path getPath(@Nonnull String first, @Nonnull String... more) {
       return delegate.getPath(first, more);
     }
 

@@ -191,7 +191,7 @@ public class ShadowListViewTest {
   @Test(expected = IllegalArgumentException.class)
   public void clickItemContainingText_shouldThrowExceptionIfNotFound() {
     ShadowListView shadowListView = prepareListWithThreeItems();
-    shadowListView.clickFirstItemContainingText("Non-existant item");
+    shadowListView.clickFirstItemContainingText("Non-existent item");
   }
 
   @Test(expected = UnsupportedOperationException.class)
@@ -220,12 +220,15 @@ public class ShadowListViewTest {
   public void getPositionForView_shouldReturnInvalidPositionForViewThatIsNotFound() {
     prepareWithListAdapter();
     View view = new View(context);
-    shadowOf(view).setMyParent(ReflectionHelpers.createNullProxy(ViewParent.class)); // Android implementation requires the item have a parent
+    shadowOf(view)
+        .setMyParent(
+            ReflectionHelpers.createNullProxy(
+                ViewParent.class)); // Android implementation requires the item have a parent
     assertThat(listView.getPositionForView(view)).isEqualTo(AdapterView.INVALID_POSITION);
   }
 
   @Test
-  public void shouldRecordLatestCallToSmoothScrollToPostion() {
+  public void shouldRecordLatestCallToSmoothScrollToPosition() {
     listView.smoothScrollToPosition(10);
     assertThat(shadowOf(listView).getSmoothScrolledPosition()).isEqualTo(10);
   }
@@ -252,14 +255,15 @@ public class ShadowListViewTest {
   }
 
   @Test
-  public void givenNoItemsChecked_whenGettingCheckedItemOisition_thenReturnInvalidPosition() {
+  public void givenNoItemsChecked_whenGettingCheckedItemPosition_thenReturnInvalidPosition() {
     prepareListAdapter().withChoiceMode(ListView.CHOICE_MODE_SINGLE);
 
     assertThat(listView.getCheckedItemPosition()).isEqualTo(ListView.INVALID_POSITION);
   }
 
   @Test
-  public void givenChoiceModeIsSingleAndAnItemIsChecked_whenSettingChoiceModeToNone_thenGetCheckedItemPositionShouldReturnInvalidPosition() {
+  public void
+      givenChoiceModeIsSingleAndAnItemIsChecked_whenSettingChoiceModeToNone_thenGetCheckedItemPositionShouldReturnInvalidPosition() {
     prepareListAdapter().withChoiceMode(ListView.CHOICE_MODE_SINGLE).withAnyItemChecked();
 
     listView.setChoiceMode(ListView.CHOICE_MODE_NONE);
@@ -268,7 +272,8 @@ public class ShadowListViewTest {
   }
 
   @Test
-  public void givenChoiceModeIsMultipleAndMultipleItemsAreChecked_whenGettingCheckedItemPositions_thenReturnCheckedPositions() {
+  public void
+      givenChoiceModeIsMultipleAndMultipleItemsAreChecked_whenGettingCheckedItemPositions_thenReturnCheckedPositions() {
     prepareListAdapter().withChoiceMode(ListView.CHOICE_MODE_MULTIPLE).withAnyItemsChecked();
 
     assertThat(listView.getCheckedItemCount()).isEqualTo(checkedItemPositions.size());
@@ -278,7 +283,8 @@ public class ShadowListViewTest {
   }
 
   @Test
-  public void givenChoiceModeIsSingleAndMultipleItemsAreChecked_whenGettingCheckedItemPositions_thenReturnOnlyTheLastCheckedPosition() {
+  public void
+      givenChoiceModeIsSingleAndMultipleItemsAreChecked_whenGettingCheckedItemPositions_thenReturnOnlyTheLastCheckedPosition() {
     prepareListAdapter().withChoiceMode(ListView.CHOICE_MODE_SINGLE).withAnyItemsChecked();
 
     assertThat(listView.getCheckedItemPositions().get(lastCheckedPosition)).isTrue();
@@ -286,14 +292,16 @@ public class ShadowListViewTest {
   }
 
   @Test
-  public void givenChoiceModeIsNoneAndMultipleItemsAreChecked_whenGettingCheckedItemPositions_thenReturnNull() {
+  public void
+      givenChoiceModeIsNoneAndMultipleItemsAreChecked_whenGettingCheckedItemPositions_thenReturnNull() {
     prepareListAdapter().withChoiceMode(ListView.CHOICE_MODE_NONE).withAnyItemsChecked();
 
     assertNull(listView.getCheckedItemPositions());
   }
 
   @Test
-  public void givenItemIsNotCheckedAndChoiceModeIsSingle_whenPerformingItemClick_thenItemShouldBeChecked() {
+  public void
+      givenItemIsNotCheckedAndChoiceModeIsSingle_whenPerformingItemClick_thenItemShouldBeChecked() {
     prepareListAdapter().withChoiceMode(ListView.CHOICE_MODE_SINGLE);
     int positionToClick = anyListIndex();
 
@@ -303,7 +311,8 @@ public class ShadowListViewTest {
   }
 
   @Test
-  public void givenItemIsCheckedAndChoiceModeIsSingle_whenPerformingItemClick_thenItemShouldBeChecked() {
+  public void
+      givenItemIsCheckedAndChoiceModeIsSingle_whenPerformingItemClick_thenItemShouldBeChecked() {
     prepareListAdapter().withChoiceMode(ListView.CHOICE_MODE_SINGLE).withAnyItemChecked();
 
     listView.performItemClick(null, checkedItemPosition, 0);
@@ -312,7 +321,8 @@ public class ShadowListViewTest {
   }
 
   @Test
-  public void givenItemIsNotCheckedAndChoiceModeIsMultiple_whenPerformingItemClick_thenItemShouldBeChecked() {
+  public void
+      givenItemIsNotCheckedAndChoiceModeIsMultiple_whenPerformingItemClick_thenItemShouldBeChecked() {
     prepareListAdapter().withChoiceMode(ListView.CHOICE_MODE_MULTIPLE);
     int positionToClick = anyListIndex();
 
@@ -323,7 +333,8 @@ public class ShadowListViewTest {
   }
 
   @Test
-  public void givenItemIsCheckedAndChoiceModeIsMultiple_whenPerformingItemClick_thenItemShouldNotBeChecked() {
+  public void
+      givenItemIsCheckedAndChoiceModeIsMultiple_whenPerformingItemClick_thenItemShouldNotBeChecked() {
     prepareListAdapter().withChoiceMode(ListView.CHOICE_MODE_MULTIPLE).withAnyItemChecked();
 
     listView.performItemClick(null, checkedItemPosition, 0);
@@ -335,11 +346,10 @@ public class ShadowListViewTest {
     return new ListAdapterBuilder();
   }
 
-  private ListAdapter prepareWithListAdapter() {
+  private void prepareWithListAdapter() {
     ListAdapter adapter = new ListAdapter("a", "b", "c");
     listView.setAdapter(adapter);
     shadowOf(listView).populateItems();
-    return adapter;
   }
 
   private ShadowListView prepareListWithThreeItems() {
@@ -408,7 +418,6 @@ public class ShadowListViewTest {
         listView.setItemChecked(i, true);
         lastCheckedPosition = i;
       }
-
     }
   }
 }

@@ -1,22 +1,29 @@
 package org.robolectric;
 
-import static org.robolectric.shadows.ShadowAssetManager.useLegacy;
+import static android.os.Build.VERSION_CODES.P;
+import static com.google.common.base.Preconditions.checkState;
 
 import android.annotation.IdRes;
+import android.annotation.RequiresApi;
 import android.app.Activity;
+import android.app.ActivityThread;
+import android.app.AppComponentFactory;
 import android.app.Fragment;
 import android.app.IntentService;
+import android.app.LoadedApk;
 import android.app.Service;
 import android.app.backup.BackupAgent;
 import android.content.ContentProvider;
+import android.content.Context;
 import android.content.Intent;
 import android.os.Bundle;
+import android.os.Looper;
 import android.util.AttributeSet;
 import android.view.View;
+import java.lang.reflect.Modifier;
 import javax.annotation.Nullable;
 import org.robolectric.android.AttributeSetBuilderImpl;
 import org.robolectric.android.AttributeSetBuilderImpl.ArscResourceResolver;
-import org.robolectric.android.AttributeSetBuilderImpl.LegacyResourceResolver;
 import org.robolectric.android.controller.ActivityController;
 import org.robolectric.android.controller.BackupAgentController;
 import org.robolectric.android.controller.ContentProviderController;
@@ -24,6 +31,7 @@ import org.robolectric.android.controller.FragmentController;
 import org.robolectric.android.controller.IntentServiceController;
 import org.robolectric.android.controller.ServiceController;
 import org.robolectric.shadows.ShadowApplication;
+import org.robolectric.util.Logger;
 import org.robolectric.util.ReflectionHelpers;
 import org.robolectric.util.Scheduler;
 
@@ -33,35 +41,40 @@ public class Robolectric {
     return buildService(serviceClass, null);
   }
 
-  public static <T extends Service> ServiceController<T> buildService(Class<T> serviceClass, Intent intent) {
-    return ServiceController.of(ReflectionHelpers.callConstructor(serviceClass), intent);
+  public static <T extends Service> ServiceController<T> buildService(
+      Class<T> serviceClass, Intent intent) {
+    return ServiceController.of(instantiateService(serviceClass, intent), intent);
   }
 
   public static <T extends Service> T setupService(Class<T> serviceClass) {
     return buildService(serviceClass).create().get();
   }
 
-  public static <T extends IntentService> IntentServiceController<T> buildIntentService(Class<T> serviceClass) {
+  public static <T extends IntentService> IntentServiceController<T> buildIntentService(
+      Class<T> serviceClass) {
     return buildIntentService(serviceClass, null);
   }
 
-  public static <T extends IntentService> IntentServiceController<T> buildIntentService(Class<T> serviceClass, Intent intent) {
-    return IntentServiceController.of(ReflectionHelpers.callConstructor(serviceClass), intent);
+  public static <T extends IntentService> IntentServiceController<T> buildIntentService(
+      Class<T> serviceClass, Intent intent) {
+    return IntentServiceController.of(instantiateService(serviceClass, intent), intent);
   }
 
   public static <T extends IntentService> T setupIntentService(Class<T> serviceClass) {
     return buildIntentService(serviceClass).create().get();
   }
 
-  public static <T extends ContentProvider> ContentProviderController<T> buildContentProvider(Class<T> contentProviderClass) {
-    return ContentProviderController.of(ReflectionHelpers.callConstructor(contentProviderClass));
+  public static <T extends ContentProvider> ContentProviderController<T> buildContentProvider(
+      Class<T> contentProviderClass) {
+    return ContentProviderController.of(instantiateContentProvider(contentProviderClass));
   }
 
   public static <T extends ContentProvider> T setupContentProvider(Class<T> contentProviderClass) {
     return buildContentProvider(contentProviderClass).create().get();
   }
 
-  public static <T extends ContentProvider> T setupContentProvider(Class<T> contentProviderClass, String authority) {
+  public static <T extends ContentProvider> T setupContentProvider(
+      Class<T> contentProviderClass, String authority) {
     return buildContentProvider(contentProviderClass).create(authority).get();
   }
 
@@ -104,8 +117,14 @@ public class Robolectric {
    */
   public static <T extends Activity> ActivityController<T> buildActivity(
       Class<T> activityClass, Intent intent, @Nullable Bundle activityOptions) {
+    checkState(
+        Thread.currentThread() == Looper.getMainLooper().getThread(),
+        "buildActivity must be called on main Looper thread");
+    if (Modifier.isAbstract(activityClass.getModifiers())) {
+      throw new RuntimeException("buildActivity must be called with non-abstract class");
+    }
     return ActivityController.of(
-        ReflectionHelpers.callConstructor(activityClass), intent, activityOptions);
+        instantiateActivity(activityClass, intent), intent, activityOptions);
   }
 
   /**
@@ -117,6 +136,7 @@ public class Robolectric {
    * @deprecated use {@link androidx.test.core.app.ActivityScenario}
    */
   @Deprecated
+  @SuppressWarnings("InlineMeSuggester")
   public static <T extends Activity> T setupActivity(Class<T> activityClass) {
     return buildActivity(activityClass).setup().get();
   }
@@ -207,7 +227,8 @@ public class Robolectric {
   @Deprecated
   public static <T extends Fragment> FragmentController<T> buildFragment(
       Class<T> fragmentClass, Intent intent, Bundle arguments) {
-    return FragmentController.of(ReflectionHelpers.callConstructor(fragmentClass), intent, arguments);
+    return FragmentController.of(
+        ReflectionHelpers.callConstructor(fragmentClass), intent, arguments);
   }
 
   /**
@@ -230,7 +251,8 @@ public class Robolectric {
   @Deprecated
   public static <T extends Fragment> FragmentController<T> buildFragment(
       Class<T> fragmentClass, Class<? extends Activity> activityClass, Intent intent) {
-    return FragmentController.of(ReflectionHelpers.callConstructor(fragmentClass), activityClass, intent);
+    return FragmentController.of(
+        ReflectionHelpers.callConstructor(fragmentClass), activityClass, intent);
   }
 
   /**
@@ -251,7 +273,8 @@ public class Robolectric {
   @Deprecated
   public static <T extends Fragment> FragmentController<T> buildFragment(
       Class<T> fragmentClass, Class<? extends Activity> activityClass, Bundle arguments) {
-    return FragmentController.of(ReflectionHelpers.callConstructor(fragmentClass), activityClass, arguments);
+    return FragmentController.of(
+        ReflectionHelpers.callConstructor(fragmentClass), activityClass, arguments);
   }
 
   /**
@@ -277,10 +300,12 @@ public class Robolectric {
       Class<? extends Activity> activityClass,
       Intent intent,
       Bundle arguments) {
-    return FragmentController.of(ReflectionHelpers.callConstructor(fragmentClass), activityClass, intent, arguments);
+    return FragmentController.of(
+        ReflectionHelpers.callConstructor(fragmentClass), activityClass, intent, arguments);
   }
 
-  public static <T extends BackupAgent> BackupAgentController<T> buildBackupAgent(Class<T> backupAgentClass) {
+  public static <T extends BackupAgent> BackupAgentController<T> buildBackupAgent(
+      Class<T> backupAgentClass) {
     return BackupAgentController.of(ReflectionHelpers.callConstructor(backupAgentClass));
   }
 
@@ -291,18 +316,12 @@ public class Robolectric {
   /**
    * Allows for the programmatic creation of an {@link AttributeSet}.
    *
-   * Useful for testing {@link View} classes without the need for creating XML snippets.
+   * <p>Useful for testing {@link View} classes without the need for creating XML snippets.
    */
   public static org.robolectric.android.AttributeSetBuilder buildAttributeSet() {
-    if (useLegacy()) {
-      return new AttributeSetBuilderImpl(
-          new LegacyResourceResolver(
-              RuntimeEnvironment.getApplication(),
-              RuntimeEnvironment.getCompileTimeResourceTable())) {};
-    } else {
-      return new AttributeSetBuilderImpl(
-          new ArscResourceResolver(RuntimeEnvironment.getApplication())) {};
-    }
+
+    return new AttributeSetBuilderImpl(
+        new ArscResourceResolver(RuntimeEnvironment.getApplication())) {};
   }
 
   /**
@@ -315,7 +334,7 @@ public class Robolectric {
     /**
      * Set an attribute to the given value.
      *
-     * The value will be interpreted according to the attribute's format.
+     * <p>The value will be interpreted according to the attribute's format.
      *
      * @param resId The attribute resource id to set.
      * @param value The value to set.
@@ -326,7 +345,7 @@ public class Robolectric {
     /**
      * Set the style attribute to the given value.
      *
-     * The value will be interpreted as a resource reference.
+     * <p>The value will be interpreted as a resource reference.
      *
      * @param value The value for the specified attribute in this {@link AttributeSet}.
      * @return This {@link org.robolectric.android.AttributeSetBuilder}.
@@ -350,9 +369,7 @@ public class Robolectric {
     return RuntimeEnvironment.getMasterScheduler();
   }
 
-  /**
-   * Execute all runnables that have been enqueued on the foreground scheduler.
-   */
+  /** Execute all runnables that have been enqueued on the foreground scheduler. */
   public static void flushForegroundThreadScheduler() {
     getForegroundThreadScheduler().advanceToLastPostedRunnable();
   }
@@ -366,10 +383,88 @@ public class Robolectric {
     return ShadowApplication.getInstance().getBackgroundThreadScheduler();
   }
 
-  /**
-   * Execute all runnables that have been enqueued on the background scheduler.
-   */
+  /** Execute all runnables that have been enqueued on the background scheduler. */
   public static void flushBackgroundThreadScheduler() {
     getBackgroundThreadScheduler().advanceToLastPostedRunnable();
+  }
+
+  @SuppressWarnings({"NewApi", "unchecked"})
+  private static <T extends Service> T instantiateService(Class<T> serviceClass, Intent intent) {
+    if (RuntimeEnvironment.getApiLevel() >= P) {
+      final LoadedApk loadedApk = getLoadedApk();
+      AppComponentFactory factory = getAppComponentFactory(loadedApk);
+      if (factory != null) {
+        try {
+          Service instance =
+              factory.instantiateService(
+                  loadedApk.getClassLoader(), serviceClass.getName(), intent);
+          if (serviceClass.isAssignableFrom(instance.getClass())) {
+            return (T) instance;
+          }
+        } catch (ReflectiveOperationException e) {
+          Logger.debug("Failed to instantiate Service using AppComponentFactory", e);
+        }
+      }
+    }
+    return ReflectionHelpers.callConstructor(serviceClass);
+  }
+
+  @SuppressWarnings({"NewApi", "unchecked"})
+  private static <T extends ContentProvider> T instantiateContentProvider(Class<T> providerClass) {
+    if (RuntimeEnvironment.getApiLevel() >= P) {
+      final LoadedApk loadedApk = getLoadedApk();
+      AppComponentFactory factory = getAppComponentFactory(loadedApk);
+      if (factory != null) {
+        try {
+          ContentProvider instance =
+              factory.instantiateProvider(loadedApk.getClassLoader(), providerClass.getName());
+          if (providerClass.isAssignableFrom(instance.getClass())) {
+            return (T) instance;
+          }
+        } catch (ReflectiveOperationException e) {
+          Logger.debug("Failed to instantiate ContentProvider using AppComponentFactory", e);
+        }
+      }
+    }
+    return ReflectionHelpers.callConstructor(providerClass);
+  }
+
+  @SuppressWarnings({"NewApi", "unchecked"})
+  private static <T extends Activity> T instantiateActivity(Class<T> activityClass, Intent intent) {
+    if (RuntimeEnvironment.getApiLevel() >= P) {
+      final LoadedApk loadedApk = getLoadedApk();
+      AppComponentFactory factory = getAppComponentFactory(loadedApk);
+      if (factory != null) {
+        try {
+          Activity instance =
+              factory.instantiateActivity(
+                  loadedApk.getClassLoader(), activityClass.getName(), intent);
+          if (activityClass.isAssignableFrom(instance.getClass())) {
+            return (T) instance;
+          }
+        } catch (ReflectiveOperationException e) {
+          Logger.debug("Failed to instantiate Activity using AppComponentFactory", e);
+        }
+      }
+    }
+    return ReflectionHelpers.callConstructor(activityClass);
+  }
+
+  @Nullable
+  @RequiresApi(api = P)
+  private static AppComponentFactory getAppComponentFactory(final LoadedApk loadedApk) {
+    if (RuntimeEnvironment.getApiLevel() < P) {
+      return null;
+    }
+    if (loadedApk == null || loadedApk.getApplicationInfo().appComponentFactory == null) {
+      return null;
+    }
+    return loadedApk.getAppFactory();
+  }
+
+  private static LoadedApk getLoadedApk() {
+    final ActivityThread activityThread = (ActivityThread) RuntimeEnvironment.getActivityThread();
+    return activityThread.getPackageInfo(
+        activityThread.getApplication().getApplicationInfo(), null, Context.CONTEXT_INCLUDE_CODE);
   }
 }

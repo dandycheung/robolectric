@@ -2,19 +2,18 @@ package android.view;
 
 import static com.google.common.truth.Truth.assertThat;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertThrows;
 
-import androidx.test.runner.AndroidJUnit4;
+import androidx.test.ext.junit.runners.AndroidJUnit4;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
-import org.robolectric.annotation.internal.DoNotInstrument;
 
 /**
  * Test {@link android.view.KeyCharacterMap}.
  *
  * <p>Inspired from Android cts/tests/tests/view/src/android/view/cts/KeyCharacterMap.java
  */
-@DoNotInstrument
 @RunWith(AndroidJUnit4.class)
 public final class KeyCharacterMapTest {
 
@@ -32,21 +31,17 @@ public final class KeyCharacterMapTest {
     assertNotNull(keyCharacterMap);
   }
 
-  @Test(expected = IllegalArgumentException.class)
+  @Test
   public void testGetMatchNull() {
-    keyCharacterMap.getMatch(KeyEvent.KEYCODE_0, null);
+    assertThrows(
+        IllegalArgumentException.class, () -> keyCharacterMap.getMatch(KeyEvent.KEYCODE_0, null));
   }
 
-  private int getCharacterKeyCode(char oneChar) {
-    // Lowercase the character to avoid getting modifiers in the KeyEvent array.
-    char[] chars = new char[] {Character.toLowerCase(oneChar)};
-    KeyEvent[] events = keyCharacterMap.getEvents(chars);
-    return events[0].getKeyCode();
-  }
-
-  @Test(expected = IllegalArgumentException.class)
+  @Test
   public void testGetMatchMetaStateNull() {
-    keyCharacterMap.getMatch(KeyEvent.KEYCODE_0, null, 1);
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> keyCharacterMap.getMatch(KeyEvent.KEYCODE_0, null, 1));
   }
 
   @Test
@@ -54,9 +49,9 @@ public final class KeyCharacterMapTest {
     assertThat(keyCharacterMap.getKeyboardType()).isEqualTo(KeyCharacterMap.FULL);
   }
 
-  @Test(expected = IllegalArgumentException.class)
+  @Test
   public void testGetEventsNull() {
-    keyCharacterMap.getEvents(null);
+    assertThrows(IllegalArgumentException.class, () -> keyCharacterMap.getEvents(null));
   }
 
   @Test
@@ -89,6 +84,9 @@ public final class KeyCharacterMapTest {
     // Just assert that we got something back, there are many ways to return correct KeyEvents for
     // this sequence.
     assertThat(keyCharacterMap.getEvents("Test".toCharArray())).isNotEmpty();
+
+    char c = 'a';
+    keyCharacterMap.getEvents(new char[] {c});
   }
 
   @Test
@@ -100,5 +98,16 @@ public final class KeyCharacterMapTest {
   @Test
   public void testGetNumber() {
     assertThat(keyCharacterMap.getNumber(KeyEvent.KEYCODE_1)).isEqualTo('1');
+  }
+
+  @Test
+  public void testGetDisplayLabel() {
+    assertThat(keyCharacterMap.getDisplayLabel(KeyEvent.KEYCODE_W)).isEqualTo('W');
+  }
+
+  @Test
+  public void testIsPrintingKey() {
+    assertThat(keyCharacterMap.isPrintingKey(KeyEvent.KEYCODE_W)).isTrue();
+    assertThat(keyCharacterMap.isPrintingKey(KeyEvent.KEYCODE_ALT_LEFT)).isFalse();
   }
 }

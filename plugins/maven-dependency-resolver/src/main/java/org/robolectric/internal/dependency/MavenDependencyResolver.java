@@ -35,29 +35,40 @@ import org.xml.sax.SAXException;
  * client library here could create conflicts with the ones in the Android system.
  *
  * @see <a href="https://maven.apache.org/ant-tasks/">maven-ant-tasks</a>
- * @see <a href="https://maven.apache.org/resolver/index.html">Maven Resolver</a></a>
+ * @see <a href="https://maven.apache.org/resolver/index.html">Maven Resolver</a>
  */
 public class MavenDependencyResolver implements DependencyResolver {
 
-  private final ExecutorService executorService;
   private final MavenArtifactFetcher mavenArtifactFetcher;
   private final File localRepositoryDir;
 
   public MavenDependencyResolver() {
-    this(MavenRoboSettings.getMavenRepositoryUrl(), MavenRoboSettings.getMavenRepositoryId(), MavenRoboSettings
-        .getMavenRepositoryUserName(), MavenRoboSettings.getMavenRepositoryPassword());
+    this(
+        MavenRoboSettings.getMavenRepositoryUrl(),
+        MavenRoboSettings.getMavenRepositoryId(),
+        MavenRoboSettings.getMavenRepositoryUserName(),
+        MavenRoboSettings.getMavenRepositoryPassword(),
+        MavenRoboSettings.getMavenProxyHost(),
+        MavenRoboSettings.getMavenProxyPort());
   }
 
-  public MavenDependencyResolver(String repositoryUrl, String repositoryId, String repositoryUserName, String repositoryPassword) {
-    this.executorService = createExecutorService();
+  public MavenDependencyResolver(
+      String repositoryUrl,
+      String repositoryId,
+      String repositoryUserName,
+      String repositoryPassword,
+      String proxyHost,
+      int proxyPort) {
     this.localRepositoryDir = getLocalRepositoryDir();
     this.mavenArtifactFetcher =
         createMavenFetcher(
             repositoryUrl,
             repositoryUserName,
             repositoryPassword,
+            proxyHost,
+            proxyPort,
             localRepositoryDir,
-            this.executorService);
+            createExecutorService());
   }
 
   @Override
@@ -66,8 +77,9 @@ public class MavenDependencyResolver implements DependencyResolver {
   }
 
   /**
-   * Get an array of local artifact URLs for the given dependencies. The order of the URLs is guaranteed to be the
-   * same as the input order of dependencies, i.e., urls[i] is the local artifact URL for dependencies[i].
+   * Get an array of local artifact URLs for the given dependencies. The order of the URLs is
+   * guaranteed to be the same as the input order of dependencies, i.e., urls[i] is the local
+   * artifact URL for dependencies[i].
    */
   @SuppressWarnings("NewApi")
   public URL[] getLocalArtifactUrls(DependencyJar... dependencies) {
@@ -163,10 +175,18 @@ public class MavenDependencyResolver implements DependencyResolver {
       String repositoryUrl,
       String repositoryUserName,
       String repositoryPassword,
+      String proxyHost,
+      int proxyPort,
       File localRepositoryDir,
       ExecutorService executorService) {
     return new MavenArtifactFetcher(
-        repositoryUrl, repositoryUserName, repositoryPassword, localRepositoryDir, executorService);
+        repositoryUrl,
+        repositoryUserName,
+        repositoryPassword,
+        proxyHost,
+        proxyPort,
+        localRepositoryDir,
+        executorService);
   }
 
   protected ExecutorService createExecutorService() {

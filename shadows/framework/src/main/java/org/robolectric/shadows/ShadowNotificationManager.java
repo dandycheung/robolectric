@@ -4,19 +4,20 @@ import static android.app.NotificationManager.INTERRUPTION_FILTER_ALL;
 import static android.os.Build.VERSION_CODES.M;
 import static android.os.Build.VERSION_CODES.N;
 import static android.os.Build.VERSION_CODES.O_MR1;
+import static android.os.Build.VERSION_CODES.P;
 import static android.os.Build.VERSION_CODES.Q;
 import static android.os.Build.VERSION_CODES.R;
 
 import android.app.AutomaticZenRule;
 import android.app.Notification;
 import android.app.NotificationChannel;
+import android.app.NotificationChannelGroup;
 import android.app.NotificationManager;
 import android.app.NotificationManager.Policy;
 import android.content.ComponentName;
 import android.os.Build;
 import android.os.Parcel;
 import android.service.notification.StatusBarNotification;
-import androidx.annotation.NonNull;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableList;
@@ -28,30 +29,57 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import javax.annotation.Nonnull;
 import org.robolectric.RuntimeEnvironment;
 import org.robolectric.annotation.Implementation;
 import org.robolectric.annotation.Implements;
+import org.robolectric.annotation.Resetter;
 import org.robolectric.util.ReflectionHelpers;
 
-@SuppressWarnings({"UnusedDeclaration"})
-@Implements(value = NotificationManager.class, looseSignatures = true)
+/** Shadows for NotificationManager. */
+@SuppressWarnings({"UnusedDeclaration", "AndroidConcurrentHashMap"})
+@Implements(value = NotificationManager.class)
 public class ShadowNotificationManager {
   private static final int MAX_NOTIFICATION_LIMIT = 25;
-  private boolean mAreNotificationsEnabled = true;
-  private boolean isNotificationPolicyAccessGranted = false;
-  private boolean enforceMaxNotificationLimit = false;
-  private final Map<Key, PostedNotification> notifications = new ConcurrentHashMap<>();
-  private final Map<String, Object> notificationChannels = new ConcurrentHashMap<>();
-  private final Map<String, Object> notificationChannelGroups = new ConcurrentHashMap<>();
-  private final Map<String, Object> deletedNotificationChannels = new ConcurrentHashMap<>();
-  private final Map<String, AutomaticZenRule> automaticZenRules = new ConcurrentHashMap<>();
-  private final Map<String, Boolean> listenerAccessGrantedComponents = new ConcurrentHashMap<>();
-  private final Set<String> canNotifyOnBehalfPackages = Sets.newConcurrentHashSet();
+  private static boolean mAreNotificationsEnabled = true;
+  private static boolean isNotificationPolicyAccessGranted = false;
+  private static boolean enforceMaxNotificationLimit = false;
+  private static final Map<Key, PostedNotification> notifications = new ConcurrentHashMap<>();
+  private static final Map<String, NotificationChannel> notificationChannels =
+      new ConcurrentHashMap<>();
+  private static final Map<String, NotificationChannelGroup> notificationChannelGroups =
+      new ConcurrentHashMap<>();
+  private static final Map<String, NotificationChannel> deletedNotificationChannels =
+      new ConcurrentHashMap<>();
+  private static final Map<String, AutomaticZenRule> automaticZenRules = new ConcurrentHashMap<>();
+  private static final Map<String, Boolean> listenerAccessGrantedComponents =
+      new ConcurrentHashMap<>();
+  private static final Set<String> canNotifyOnBehalfPackages = Sets.newConcurrentHashSet();
 
-  private int currentInteruptionFilter = INTERRUPTION_FILTER_ALL;
-  private Policy notificationPolicy;
-  private String notificationDelegate;
-  private int importance;
+  private static int currentInterruptionFilter = INTERRUPTION_FILTER_ALL;
+  private static Policy notificationPolicy;
+  private static Policy consolidatedNotificationPolicy;
+  private static String notificationDelegate;
+  private static int importance = NotificationManager.IMPORTANCE_NONE;
+
+  @Resetter
+  public static void reset() {
+    mAreNotificationsEnabled = true;
+    isNotificationPolicyAccessGranted = false;
+    enforceMaxNotificationLimit = false;
+    notifications.clear();
+    notificationChannels.clear();
+    notificationChannelGroups.clear();
+    deletedNotificationChannels.clear();
+    automaticZenRules.clear();
+    listenerAccessGrantedComponents.clear();
+    canNotifyOnBehalfPackages.clear();
+    currentInterruptionFilter = INTERRUPTION_FILTER_ALL;
+    notificationPolicy = null;
+    notificationDelegate = null;
+    consolidatedNotificationPolicy = null;
+    importance = NotificationManager.IMPORTANCE_NONE;
+  }
 
   @Implementation
   protected void notify(int id, Notification notification) {
@@ -74,9 +102,7 @@ public class ShadowNotificationManager {
   @Implementation
   protected void cancel(String tag, int id) {
     Key key = new Key(tag, id);
-    if (notifications.containsKey(key)) {
-      notifications.remove(key);
-    }
+    notifications.remove(key);
   }
 
   @Implementation
@@ -99,7 +125,7 @@ public class ShadowNotificationManager {
   }
 
   public void setImportance(int importance) {
-    this.importance = importance;
+    ShadowNotificationManager.importance = importance;
   }
 
   @Implementation(minSdk = M)
@@ -127,15 +153,14 @@ public class ShadowNotificationManager {
   }
 
   @Implementation(minSdk = Build.VERSION_CODES.O)
-  protected Object /*NotificationChannel*/ getNotificationChannel(String channelId) {
+  protected NotificationChannel getNotificationChannel(String channelId) {
     return notificationChannels.get(channelId);
   }
 
   /** Returns a NotificationChannel that has the given parent and conversation ID. */
   @Implementation(minSdk = R)
   protected NotificationChannel getNotificationChannel(String channelId, String conversationId) {
-    for (Object object : getNotificationChannels()) {
-      NotificationChannel notificationChannel = (NotificationChannel) object;
+    for (NotificationChannel notificationChannel : getNotificationChannels()) {
       if (conversationId.equals(notificationChannel.getConversationId())
           && channelId.equals(notificationChannel.getParentChannelId())) {
         return notificationChannel;
@@ -145,26 +170,25 @@ public class ShadowNotificationManager {
   }
 
   @Implementation(minSdk = Build.VERSION_CODES.O)
-  protected void createNotificationChannelGroup(Object /*NotificationChannelGroup*/ group) {
+  protected void createNotificationChannelGroup(NotificationChannelGroup group) {
     String id = ReflectionHelpers.callInstanceMethod(group, "getId");
     notificationChannelGroups.put(id, group);
   }
 
   @Implementation(minSdk = Build.VERSION_CODES.O)
-  protected void createNotificationChannelGroups(
-      List<Object /*NotificationChannelGroup*/> groupList) {
-    for (Object group : groupList) {
+  protected void createNotificationChannelGroups(List<NotificationChannelGroup> groupList) {
+    for (NotificationChannelGroup group : groupList) {
       createNotificationChannelGroup(group);
     }
   }
 
   @Implementation(minSdk = Build.VERSION_CODES.O)
-  protected List<Object /*NotificationChannelGroup*/> getNotificationChannelGroups() {
+  protected List<NotificationChannelGroup> getNotificationChannelGroups() {
     return ImmutableList.copyOf(notificationChannelGroups.values());
   }
 
   @Implementation(minSdk = Build.VERSION_CODES.O)
-  protected void createNotificationChannel(Object /*NotificationChannel*/ channel) {
+  protected void createNotificationChannel(NotificationChannel channel) {
     String id = ReflectionHelpers.callInstanceMethod(channel, "getId");
     // Per documentation, recreating a deleted channel should have the same settings as the old
     // deleted channel. See
@@ -173,20 +197,19 @@ public class ShadowNotificationManager {
     if (deletedNotificationChannels.containsKey(id)) {
       notificationChannels.put(id, deletedNotificationChannels.remove(id));
     }
-    NotificationChannel existingChannel = (NotificationChannel) notificationChannels.get(id);
+    NotificationChannel existingChannel = notificationChannels.get(id);
     // Per documentation, recreating a channel can change name and description, lower importance or
     // set a group if no group set. Other settings remain unchanged. See
     // https://developer.android.com/reference/android/app/NotificationManager#createNotificationChannel%28android.app.NotificationChannel@29
     // for more info.
     if (existingChannel != null) {
-      NotificationChannel newChannel = (NotificationChannel) channel;
-      existingChannel.setName(newChannel.getName());
-      existingChannel.setDescription(newChannel.getDescription());
-      if (newChannel.getImportance() < existingChannel.getImportance()) {
-        existingChannel.setImportance(newChannel.getImportance());
+      existingChannel.setName(channel.getName());
+      existingChannel.setDescription(channel.getDescription());
+      if (channel.getImportance() < existingChannel.getImportance()) {
+        existingChannel.setImportance(channel.getImportance());
       }
       if (Strings.isNullOrEmpty(existingChannel.getGroup())) {
-        existingChannel.setGroup(newChannel.getGroup());
+        existingChannel.setGroup(channel.getGroup());
       }
       return;
     }
@@ -194,21 +217,21 @@ public class ShadowNotificationManager {
   }
 
   @Implementation(minSdk = Build.VERSION_CODES.O)
-  protected void createNotificationChannels(List<Object /*NotificationChannel*/> channelList) {
-    for (Object channel : channelList) {
+  protected void createNotificationChannels(List<NotificationChannel> channelList) {
+    for (NotificationChannel channel : channelList) {
       createNotificationChannel(channel);
     }
   }
 
   @Implementation(minSdk = Build.VERSION_CODES.O)
-  public List<Object /*NotificationChannel*/> getNotificationChannels() {
+  public List<NotificationChannel> getNotificationChannels() {
     return ImmutableList.copyOf(notificationChannels.values());
   }
 
   @Implementation(minSdk = Build.VERSION_CODES.O)
   protected void deleteNotificationChannel(String channelId) {
     if (getNotificationChannel(channelId) != null) {
-      Object /*NotificationChannel*/ channel = notificationChannels.remove(channelId);
+      NotificationChannel channel = notificationChannels.remove(channelId);
       deletedNotificationChannels.put(channelId, channel);
     }
   }
@@ -224,7 +247,7 @@ public class ShadowNotificationManager {
       // Deleting a channel group also deleted all associated channels. See
       // https://developer.android.com/reference/android/app/NotificationManager.html#deleteNotificationChannelGroup%28java.lang.String%29
       // for more info.
-      for (/* NotificationChannel */ Object channel : getNotificationChannels()) {
+      for (NotificationChannel channel : getNotificationChannels()) {
         String groupId = ReflectionHelpers.callInstanceMethod(channel, "getGroup");
         if (channelGroupId.equals(groupId)) {
           String channelId = ReflectionHelpers.callInstanceMethod(channel, "getId");
@@ -240,8 +263,8 @@ public class ShadowNotificationManager {
    *     via {@link #setInterruptionFilter(int)}
    */
   @Implementation(minSdk = M)
-  protected final int getCurrentInterruptionFilter() {
-    return currentInteruptionFilter;
+  protected int getCurrentInterruptionFilter() {
+    return currentInterruptionFilter;
   }
 
   /**
@@ -250,19 +273,40 @@ public class ShadowNotificationManager {
    * @see NotificationManager#getCurrentInterruptionFilter()
    */
   @Implementation(minSdk = M)
-  protected final void setInterruptionFilter(int interruptionFilter) {
-    currentInteruptionFilter = interruptionFilter;
+  protected void setInterruptionFilter(int interruptionFilter) {
+    currentInterruptionFilter = interruptionFilter;
   }
 
-  /** @return the value specified via {@link #setNotificationPolicy(Policy)} */
+  /**
+   * @return the value specified via {@link #setNotificationPolicy(Policy)}
+   */
   @Implementation(minSdk = M)
-  protected final Policy getNotificationPolicy() {
+  protected Policy getNotificationPolicy() {
     return notificationPolicy;
   }
 
-  /** @return the value specified via {@link #setNotificationPolicyAccessGranted(boolean)} */
+  /**
+   * Specifies the consolidated notification policy to return
+   *
+   * @see #getConsolidatedNotificationPolicy()
+   */
+  public void setConsolidatedNotificationPolicy(Policy policy) {
+    consolidatedNotificationPolicy = policy;
+  }
+
+  /**
+   * @return the value specified via {@link #setConsolidatedNotificationPolicy(Policy)}
+   */
+  @Implementation(minSdk = R)
+  protected Policy getConsolidatedNotificationPolicy() {
+    return consolidatedNotificationPolicy;
+  }
+
+  /**
+   * @return the value specified via {@link #setNotificationPolicyAccessGranted(boolean)}
+   */
   @Implementation(minSdk = M)
-  protected final boolean isNotificationPolicyAccessGranted() {
+  protected boolean isNotificationPolicyAccessGranted() {
     return isNotificationPolicyAccessGranted;
   }
 
@@ -271,7 +315,7 @@ public class ShadowNotificationManager {
    *     #setNotificationListenerAccessGranted(ComponentName, boolean)} or false if unset.
    */
   @Implementation(minSdk = O_MR1)
-  protected final boolean isNotificationListenerAccessGranted(ComponentName componentName) {
+  protected boolean isNotificationListenerAccessGranted(ComponentName componentName) {
     return listenerAccessGrantedComponents.getOrDefault(componentName.flattenToString(), false);
   }
 
@@ -281,7 +325,7 @@ public class ShadowNotificationManager {
    * @see NotificationManager#getNotificationPolicy()
    */
   @Implementation(minSdk = M)
-  protected final void setNotificationPolicy(Policy policy) {
+  protected void setNotificationPolicy(Policy policy) {
     notificationPolicy = policy;
   }
 
@@ -303,6 +347,7 @@ public class ShadowNotificationManager {
    * NotificationManager#isNotificationListenerAccessGranted(ComponentName)} for the provided {@link
    * ComponentName}.
    */
+  @Implementation(minSdk = O_MR1)
   public void setNotificationListenerAccessGranted(ComponentName componentName, boolean granted) {
     listenerAccessGrantedComponents.put(componentName.flattenToString(), granted);
   }
@@ -330,7 +375,10 @@ public class ShadowNotificationManager {
   protected String addAutomaticZenRule(AutomaticZenRule automaticZenRule) {
     Preconditions.checkNotNull(automaticZenRule);
     Preconditions.checkNotNull(automaticZenRule.getName());
-    Preconditions.checkNotNull(automaticZenRule.getOwner());
+    Preconditions.checkState(
+        automaticZenRule.getOwner() != null || automaticZenRule.getConfigurationActivity() != null,
+        "owner/configurationActivity cannot be null at the same time");
+
     Preconditions.checkNotNull(automaticZenRule.getConditionId());
     enforcePolicyAccess();
 
@@ -344,7 +392,9 @@ public class ShadowNotificationManager {
     // NotificationManagerService doesn't check that id is non-null.
     Preconditions.checkNotNull(automaticZenRule);
     Preconditions.checkNotNull(automaticZenRule.getName());
-    Preconditions.checkNotNull(automaticZenRule.getOwner());
+    Preconditions.checkState(
+        automaticZenRule.getOwner() != null || automaticZenRule.getConfigurationActivity() != null,
+        "owner/configurationActivity cannot be null at the same time");
     Preconditions.checkNotNull(automaticZenRule.getConditionId());
     enforcePolicyAccess();
 
@@ -372,7 +422,7 @@ public class ShadowNotificationManager {
   }
 
   @Implementation(minSdk = Q)
-  protected boolean canNotifyAsPackage(@NonNull String pkg) {
+  protected boolean canNotifyAsPackage(@Nonnull String pkg) {
     // TODO: This doesn't work correctly with notification delegates because
     // ShadowNotificationManager doesn't respect the associated context, it just uses the global
     // RuntimeEnvironment.getApplication() context.
@@ -390,7 +440,7 @@ public class ShadowNotificationManager {
    * @param otherPackage the package for which the current package can notify on behalf
    * @param canNotify whether the current package is set as notification delegate for 'otherPackage'
    */
-  public void setCanNotifyAsPackage(@NonNull String otherPackage, boolean canNotify) {
+  public void setCanNotifyAsPackage(@Nonnull String otherPackage, boolean canNotify) {
     if (canNotify) {
       canNotifyOnBehalfPackages.add(otherPackage);
     } else {
@@ -413,7 +463,7 @@ public class ShadowNotificationManager {
    * the default behavior.
    */
   public void setEnforceMaxNotificationLimit(boolean enforceMaxNotificationLimit) {
-    this.enforceMaxNotificationLimit = enforceMaxNotificationLimit;
+    ShadowNotificationManager.enforceMaxNotificationLimit = enforceMaxNotificationLimit;
   }
 
   /**
@@ -449,7 +499,8 @@ public class ShadowNotificationManager {
     return deletedNotificationChannels.containsKey(channelId);
   }
 
-  public Object /*NotificationChannelGroup*/ getNotificationChannelGroup(String id) {
+  @Implementation(minSdk = P)
+  public NotificationChannelGroup getNotificationChannelGroup(String id) {
     return notificationChannelGroups.get(id);
   }
 

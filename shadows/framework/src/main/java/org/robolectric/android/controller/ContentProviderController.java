@@ -12,8 +12,8 @@ import org.robolectric.RuntimeEnvironment;
 import org.robolectric.shadows.ShadowContentResolver;
 import org.robolectric.util.Logger;
 
-public class ContentProviderController<T extends ContentProvider>  {
-  private T contentProvider;
+public class ContentProviderController<T extends ContentProvider> {
+  private final T contentProvider;
 
   private ContentProviderController(T contentProvider) {
     this.contentProvider = contentProvider;
@@ -23,13 +23,12 @@ public class ContentProviderController<T extends ContentProvider>  {
     return new ContentProviderController<>(contentProvider);
   }
 
-  /**
-   * Create and register {@link ContentProvider} using {@link ProviderInfo} found from manifest.
-   */
+  /** Create and register {@link ContentProvider} using {@link ProviderInfo} found from manifest. */
   public ContentProviderController<T> create() {
     Context baseContext = RuntimeEnvironment.getApplication().getBaseContext();
 
-    ComponentName componentName = createRelative(baseContext.getPackageName(), contentProvider.getClass().getName());
+    ComponentName componentName =
+        createRelative(baseContext.getPackageName(), contentProvider.getClass().getName());
 
     ProviderInfo providerInfo = null;
     try {

@@ -1,21 +1,22 @@
 package org.robolectric.shadows;
 
-import static android.os.Build.VERSION_CODES.JELLY_BEAN;
-import static android.os.Build.VERSION_CODES.LOLLIPOP;
 import static android.os.Build.VERSION_CODES.N_MR1;
 import static android.os.Build.VERSION_CODES.O;
+import static android.os.Build.VERSION_CODES.O_MR1;
+import static android.os.Build.VERSION_CODES.TIRAMISU;
 import static com.google.common.base.Preconditions.checkState;
 import static java.util.concurrent.TimeUnit.MICROSECONDS;
 import static org.robolectric.shadow.api.Shadow.invokeConstructor;
 import static org.robolectric.util.ReflectionHelpers.callConstructor;
 
-import android.annotation.NonNull;
-import android.annotation.Nullable;
 import android.media.MediaCodec;
 import android.media.MediaCodec.BufferInfo;
 import android.media.MediaCodec.CodecException;
+import android.media.MediaCodecInfo;
+import android.media.MediaCodecList;
 import android.media.MediaCrypto;
 import android.media.MediaFormat;
+import android.os.IBinder;
 import android.view.Surface;
 import com.google.common.annotations.VisibleForTesting;
 import java.nio.Buffer;
@@ -28,11 +29,16 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingDeque;
+import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
+import org.robolectric.annotation.ClassName;
 import org.robolectric.annotation.Implementation;
 import org.robolectric.annotation.Implements;
 import org.robolectric.annotation.RealObject;
+import org.robolectric.annotation.Resetter;
 import org.robolectric.util.ReflectionHelpers;
 import org.robolectric.util.ReflectionHelpers.ClassParameter;
+import org.robolectric.versioning.AndroidVersions.U;
 
 /**
  * Implementation of {@link android.media.MediaCodec} which supports both asynchronous and
@@ -49,7 +55,7 @@ import org.robolectric.util.ReflectionHelpers.ClassParameter;
  * implementation will present an input buffer, which will be copied to an output buffer once
  * queued, which will be subsequently presented to the callback handler.
  */
-@Implements(value = MediaCodec.class, minSdk = JELLY_BEAN, looseSignatures = true)
+@Implements(value = MediaCodec.class)
 public class ShadowMediaCodec {
   private static final int DEFAULT_BUFFER_SIZE = 512;
   @VisibleForTesting static final int BUFFER_COUNT = 10;
@@ -81,6 +87,7 @@ public class ShadowMediaCodec {
   }
 
   /** Clears any previously added encoders and decoders. */
+  @Resetter
   public static void clearCodecs() {
     encoders.clear();
     decoders.clear();
@@ -93,6 +100,9 @@ public class ShadowMediaCodec {
 
   @Nullable private MediaFormat pendingOutputFormat;
   @Nullable private MediaFormat outputFormat;
+  @Nullable private MediaFormat inputFormat;
+  @Nullable private String[] initialPendingOutputFormatKeys;
+  @Nullable private Object[] initialPendingOutputFormatValues;
 
   private final BlockingQueue<Integer> inputBuffersPendingDequeue = new LinkedBlockingDeque<>();
   private final BlockingQueue<Integer> outputBuffersPendingDequeue = new LinkedBlockingDeque<>();
@@ -120,6 +130,16 @@ public class ShadowMediaCodec {
         ClassParameter.from(boolean.class, nameIsType),
         ClassParameter.from(boolean.class, encoder));
 
+    if (!nameIsType) {
+      for (MediaCodecInfo codecInfo :
+          new MediaCodecList(MediaCodecList.ALL_CODECS).getCodecInfos()) {
+        if (codecInfo.getName().equals(name)) {
+          encoder = codecInfo.isEncoder();
+          break;
+        }
+      }
+    }
+
     CodecConfig codecConfig =
         encoder
             ? encoders.getOrDefault(name, DEFAULT_CODEC)
@@ -136,37 +156,50 @@ public class ShadowMediaCodec {
   }
 
   /** Saves the callback to allow use inside the shadow. */
-  @Implementation(minSdk = LOLLIPOP)
+  @Implementation
   protected void native_setCallback(MediaCodec.Callback callback) {
     this.callback = callback;
   }
 
-  @Implementation(minSdk = LOLLIPOP, maxSdk = N_MR1)
+  @Implementation(maxSdk = N_MR1)
   protected void native_configure(
       String[] keys, Object[] values, Surface surface, MediaCrypto crypto, int flags) {
-    configure(keys, values, surface, crypto, flags);
+    innerConfigure(keys, values, surface, crypto, flags);
   }
 
-  @Implementation(minSdk = O)
+  @Implementation(minSdk = O, maxSdk = O)
   protected void native_configure(
-      Object keys,
-      Object values,
-      Object surface,
-      Object crypto,
-      Object descramblerBinder,
-      Object flags) {
-    configure(
-        (String[]) keys, (Object[]) values, (Surface) surface, (MediaCrypto) crypto, (int) flags);
-  }
-
-  private void configure(
       String[] keys,
       Object[] values,
+      Surface surface,
+      MediaCrypto crypto,
+      IBinder descramblerBinder,
+      int flags) {
+    innerConfigure(keys, values, surface, crypto, flags);
+  }
+
+  @Implementation(minSdk = O_MR1)
+  protected void native_configure(
+      String[] keys,
+      Object[] values,
+      Surface surface,
+      MediaCrypto crypto,
+      @ClassName("android.os.IHwBinder") Object descramblerBinder,
+      int flags) {
+    innerConfigure(keys, values, surface, crypto, flags);
+  }
+
+  private void innerConfigure(
+      @Nullable String[] keys,
+      @Nullable Object[] values,
       @Nullable Surface surface,
       @Nullable MediaCrypto mediaCrypto,
       int flags) {
     isAsync = callback != null;
     pendingOutputFormat = recreateMediaFormatFromKeysValues(keys, values);
+    inputFormat = recreateMediaFormatFromKeysValues(keys, values);
+    initialPendingOutputFormatKeys = keys;
+    initialPendingOutputFormatValues = values;
     fakeCodec.onConfigured(pendingOutputFormat, surface, mediaCrypto, flags);
   }
 
@@ -174,7 +207,7 @@ public class ShadowMediaCodec {
    * Starts the async encoding process, by first reporting a format change event, and then
    * presenting an input buffer to the callback.
    */
-  @Implementation(minSdk = LOLLIPOP)
+  @Implementation
   protected void native_start() {
     // Reset state
     inputBuffersPendingDequeue.clear();
@@ -187,10 +220,21 @@ public class ShadowMediaCodec {
       // Report the format as changed, to simulate adding codec specific info before making input
       // buffers available.
       HashMap<String, Object> format = new HashMap<>();
+      if (pendingOutputFormat != null) {
+        pendingOutputFormat.setByteBuffer("csd-0", ByteBuffer.wrap(new byte[] {0x13, 0x10}));
+        pendingOutputFormat.setByteBuffer("csd-1", ByteBuffer.wrap(new byte[0]));
+        if (initialPendingOutputFormatKeys != null
+            && initialPendingOutputFormatValues != null
+            && initialPendingOutputFormatKeys.length == initialPendingOutputFormatValues.length) {
+          for (int i = 0; i < initialPendingOutputFormatKeys.length; i++) {
+            format.put(initialPendingOutputFormatKeys[i], initialPendingOutputFormatValues[i]);
+          }
+        }
+      }
       format.put("csd-0", ByteBuffer.wrap(new byte[] {0x13, 0x10}));
       format.put("csd-1", ByteBuffer.wrap(new byte[0]));
-      postFakeNativeEvent(EVENT_CALLBACK, CB_OUTPUT_FORMAT_CHANGE, 0, format);
 
+      postFakeNativeEvent(EVENT_CALLBACK, CB_OUTPUT_FORMAT_CHANGE, 0, format);
       try {
         makeInputBufferAvailable(inputBuffersPendingDequeue.take());
       } catch (InterruptedException e) {
@@ -200,7 +244,7 @@ public class ShadowMediaCodec {
   }
 
   /** Flushes the available output buffers. */
-  @Implementation(minSdk = LOLLIPOP)
+  @Implementation
   protected void native_flush() {
     // Reset input buffers only if the MediaCodec is in synchronous mode. If it is in asynchronous
     // mode, the client needs to call start().
@@ -222,7 +266,7 @@ public class ShadowMediaCodec {
   }
 
   /** Returns the input or output buffer corresponding to the given index, or null if invalid. */
-  @Implementation(minSdk = LOLLIPOP)
+  @Implementation
   protected ByteBuffer getBuffer(boolean input, int index) {
     ByteBuffer[] buffers = input ? inputBuffers : outputBuffers;
     return index >= 0 && index < buffers.length && !(input && codecOwnsInputBuffer(index))
@@ -230,6 +274,7 @@ public class ShadowMediaCodec {
         : null;
   }
 
+  @Implementation
   protected int native_dequeueInputBuffer(long timeoutUs) {
     checkState(!isAsync, "Attempting to deque buffer in Async mode.");
     try {
@@ -257,7 +302,7 @@ public class ShadowMediaCodec {
    * Triggers presentation of the corresponding output buffer for the given input buffer, and passes
    * the given metadata as buffer info.
    */
-  @Implementation(minSdk = LOLLIPOP)
+  @Implementation
   protected void native_queueInputBuffer(
       int index, int offset, int size, long presentationTimeUs, int flags) {
     if (index < 0
@@ -275,7 +320,7 @@ public class ShadowMediaCodec {
     inputBuffersPendingQueuing.remove(Integer.valueOf(index));
   }
 
-  @Implementation(minSdk = LOLLIPOP)
+  @Implementation
   protected int native_dequeueOutputBuffer(BufferInfo info, long timeoutUs) {
     checkState(!isAsync, "Attempting to deque buffer in Async mode.");
     try {
@@ -331,9 +376,9 @@ public class ShadowMediaCodec {
     ((Buffer) inputBuffers[index]).clear();
 
     if (isAsync) {
+      inputBuffersPendingQueuing.add(index);
       // Signal input buffer availability.
       postFakeNativeEvent(EVENT_CALLBACK, CB_INPUT_AVAILABLE, index, null);
-      inputBuffersPendingQueuing.add(index);
     } else {
       inputBuffersPendingDequeue.add(index);
     }
@@ -362,7 +407,7 @@ public class ShadowMediaCodec {
     outputBuffersPendingDequeue.add(index);
 
     if (isAsync) {
-      // Dequeue the buffer to signal its availablility to the client.
+      // Dequeue the buffer to signal its availability to the client.
       outputBuffersPendingDequeue.remove(Integer.valueOf(index));
       // Signal output buffer availability.
       postFakeNativeEvent(EVENT_CALLBACK, CB_OUTPUT_AVAILABLE, index, outputBufferInfos[index]);
@@ -389,42 +434,64 @@ public class ShadowMediaCodec {
   }
 
   /** Prevents calling Android-only methods on basic ByteBuffer objects. */
-  @Implementation(minSdk = LOLLIPOP)
+  @Implementation(maxSdk = TIRAMISU)
   protected void invalidateByteBuffer(@Nullable ByteBuffer[] buffers, int index) {}
 
-  /** Prevents calling Android-only methods on basic ByteBuffer objects. */
-  @Implementation(minSdk = LOLLIPOP)
-  protected void validateInputByteBuffer(@Nullable ByteBuffer[] buffers, int index) {}
+  @Implementation(minSdk = U.SDK_INT)
+  protected void invalidateByteBufferLocked(
+      @Nullable ByteBuffer[] buffers, int index, boolean input) {}
 
   /** Prevents calling Android-only methods on basic ByteBuffer objects. */
-  @Implementation(minSdk = LOLLIPOP)
+  @Implementation(maxSdk = TIRAMISU)
+  protected void validateInputByteBuffer(@Nullable ByteBuffer[] buffers, int index) {}
+
+  @Implementation(minSdk = U.SDK_INT)
+  protected void validateInputByteBufferLocked(@Nullable ByteBuffer[] buffers, int index) {}
+
+  /** Prevents calling Android-only methods on basic ByteBuffer objects. */
+  @Implementation(maxSdk = TIRAMISU)
   protected void revalidateByteBuffer(@Nullable ByteBuffer[] buffers, int index) {}
+
+  @Implementation(minSdk = U.SDK_INT)
+  protected void revalidateByteBuffer(@Nullable ByteBuffer[] buffers, int index, boolean input) {}
 
   /**
    * Prevents calling Android-only methods on basic ByteBuffer objects. Replicates existing behavior
    * adjusting buffer positions and limits.
    */
-  @Implementation(minSdk = LOLLIPOP)
+  @Implementation(maxSdk = TIRAMISU)
   protected void validateOutputByteBuffer(
-      @Nullable ByteBuffer[] buffers, int index, @NonNull BufferInfo info) {
+      @Nullable ByteBuffer[] buffers, int index, @Nonnull BufferInfo info) {
     if (buffers != null && index >= 0 && index < buffers.length) {
-      Buffer buffer = (Buffer) buffers[index];
+      Buffer buffer = buffers[index];
       if (buffer != null) {
         buffer.limit(info.offset + info.size).position(info.offset);
       }
     }
   }
 
+  @Implementation(minSdk = U.SDK_INT)
+  protected void validateOutputByteBufferLocked(
+      @Nullable ByteBuffer[] buffers, int index, @Nonnull BufferInfo info) {
+    validateOutputByteBuffer(buffers, index, info);
+  }
+
   /** Prevents calling Android-only methods on basic ByteBuffer objects. */
-  @Implementation(minSdk = LOLLIPOP)
+  @Implementation(maxSdk = TIRAMISU)
   protected void invalidateByteBuffers(@Nullable ByteBuffer[] buffers) {}
 
+  @Implementation(minSdk = U.SDK_INT)
+  protected void invalidateByteBuffersLocked(@Nullable ByteBuffer[] buffers) {}
+
   /** Prevents attempting to free non-direct ByteBuffer objects. */
-  @Implementation(minSdk = LOLLIPOP)
+  @Implementation(maxSdk = TIRAMISU)
   protected void freeByteBuffer(@Nullable ByteBuffer buffer) {}
 
+  @Implementation(minSdk = U.SDK_INT)
+  protected void freeByteBufferLocked(@Nullable ByteBuffer buffer) {}
+
   /** Shadows CodecBuffer to prevent attempting to free non-direct ByteBuffer objects. */
-  @Implements(className = "android.media.MediaCodec$BufferMap$CodecBuffer", minSdk = LOLLIPOP)
+  @Implements(className = "android.media.MediaCodec$BufferMap$CodecBuffer")
   protected static class ShadowCodecBuffer {
 
     // Seems to be required to work.
@@ -439,13 +506,26 @@ public class ShadowMediaCodec {
     protected void free() {}
   }
 
-  /** Returns a default {@link MediaFormat} if not set via {@link #getOutputFormat()}. */
+  /**
+   * Returns {@link MediaFormat} set as output format via {@link MediaCodec#configure}.
+   *
+   * @throws IllegalStateException if not in configured state.
+   */
   @Implementation
   protected MediaFormat getOutputFormat() {
-    if (outputFormat == null) {
-      return new MediaFormat();
-    }
-    return outputFormat;
+    checkState(pendingOutputFormat != null || outputFormat != null, "Codec is not configured.");
+    return pendingOutputFormat != null ? pendingOutputFormat : outputFormat;
+  }
+
+  /**
+   * Returns {@link MediaFormat} set as input format via {@link MediaCodec#configure}.
+   *
+   * @throws IllegalStateException if not in configured state.
+   */
+  @Implementation
+  protected MediaFormat getInputFormat() {
+    checkState(inputFormat != null, "Codec is not configured.");
+    return inputFormat;
   }
 
   private static void copyBufferInfo(BufferInfo from, BufferInfo to) {
@@ -506,6 +586,7 @@ public class ShadowMediaCodec {
 
       /** Move the bytes on the in buffer to the out buffer */
       void process(ByteBuffer in, ByteBuffer out);
+
       /** Called when the codec is configured. @see MediaCodec#configure */
       default void onConfigured(
           MediaFormat format, @Nullable Surface surface, @Nullable MediaCrypto crypto, int flags) {}

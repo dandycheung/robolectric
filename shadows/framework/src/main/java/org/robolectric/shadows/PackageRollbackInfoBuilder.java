@@ -9,9 +9,9 @@ import android.content.rollback.PackageRollbackInfo.RestoreInfo;
 import android.os.Build.VERSION_CODES;
 import android.util.IntArray;
 import android.util.SparseLongArray;
-import androidx.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
+import javax.annotation.Nullable;
 import org.robolectric.RuntimeEnvironment;
 import org.robolectric.util.ReflectionHelpers;
 

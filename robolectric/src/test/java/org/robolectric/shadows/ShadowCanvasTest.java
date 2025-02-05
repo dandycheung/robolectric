@@ -2,6 +2,7 @@ package org.robolectric.shadows;
 
 import static com.google.common.truth.Truth.assertThat;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertThrows;
 import static org.robolectric.Shadows.shadowOf;
 import static org.robolectric.shadows.ShadowPath.Point.Type.LINE_TO;
 
@@ -18,10 +19,13 @@ import androidx.test.ext.junit.runners.AndroidJUnit4;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.robolectric.annotation.GraphicsMode;
+import org.robolectric.annotation.GraphicsMode.Mode;
 import org.robolectric.shadow.api.Shadow;
 import org.robolectric.shadows.ShadowCanvas.RoundRectPaintHistoryEvent;
 
 @RunWith(AndroidJUnit4.class)
+@GraphicsMode(Mode.LEGACY)
 public class ShadowCanvasTest {
   private Bitmap targetBitmap;
   private Bitmap imageBitmap;
@@ -33,75 +37,87 @@ public class ShadowCanvasTest {
   }
 
   @Test
-  public void shouldDescribeBitmapDrawing() throws Exception {
+  public void shouldDescribeBitmapDrawing() {
     Canvas canvas = new Canvas(targetBitmap);
     canvas.drawBitmap(imageBitmap, 1, 2, new Paint());
     canvas.drawBitmap(imageBitmap, 100, 200, new Paint());
 
-    assertEquals("Bitmap for file:/an/image.jpg at (1,2)\n" +
-        "Bitmap for file:/an/image.jpg at (100,200)", shadowOf(canvas).getDescription());
+    assertEquals(
+        "Bitmap for file:/an/image.jpg at (1,2)\n" + "Bitmap for file:/an/image.jpg at (100,200)",
+        shadowOf(canvas).getDescription());
 
-    assertEquals("Bitmap for file:/an/image.jpg at (1,2)\n" +
-        "Bitmap for file:/an/image.jpg at (100,200)", shadowOf(targetBitmap).getDescription());
+    assertEquals(
+        "Bitmap for file:/an/image.jpg at (1,2)\n" + "Bitmap for file:/an/image.jpg at (100,200)",
+        shadowOf(targetBitmap).getDescription());
   }
 
   @Test
-  public void shouldDescribeBitmapDrawing_withDestinationRect() throws Exception {
+  public void shouldDescribeBitmapDrawing_withDestinationRect() {
     Canvas canvas = new Canvas(targetBitmap);
-    canvas.drawBitmap(imageBitmap, new Rect(1,2,3,4), new Rect(5,6,7,8), new Paint());
+    canvas.drawBitmap(imageBitmap, new Rect(1, 2, 3, 4), new Rect(5, 6, 7, 8), new Paint());
 
-    assertEquals("Bitmap for file:/an/image.jpg at (5,6) with height=2 and width=2 taken from"
-                     + " Rect(1, 2 - 3, 4)", shadowOf(canvas).getDescription());
-  }
-
-  @Test
-  public void shouldDescribeBitmapDrawing_withDestinationRectF() throws Exception {
-    Canvas canvas = new Canvas(targetBitmap);
-    canvas.drawBitmap(imageBitmap, new Rect(1,2,3,4), new RectF(5.0f,6.0f,7.5f,8.5f), new Paint());
-
-    assertEquals("Bitmap for file:/an/image.jpg at (5.0,6.0) with height=2.5 and width=2.5 taken"
-                     + " from Rect(1, 2 - 3, 4)", shadowOf(canvas).getDescription());
-  }
-
-  @Test
-  public void shouldDescribeBitmapDrawing_WithMatrix() throws Exception {
-    Canvas canvas = new Canvas(targetBitmap);
-    canvas.drawBitmap(imageBitmap, new Matrix(), new Paint());
-    canvas.drawBitmap(imageBitmap, new Matrix(), new Paint());
-
-    assertEquals("Bitmap for file:/an/image.jpg transformed by Matrix[pre=[], set={}, post=[]]\n"
-                     + "Bitmap for file:/an/image.jpg transformed by Matrix[pre=[], set={},"
-                     + " post=[]]", shadowOf(canvas).getDescription());
-
-    assertEquals("Bitmap for file:/an/image.jpg transformed by Matrix[pre=[], set={}, post=[]]\n"
-                     + "Bitmap for file:/an/image.jpg transformed by Matrix[pre=[], set={},"
-                     + " post=[]]", shadowOf(targetBitmap).getDescription());
-  }
-
-  @Test
-  public void visualize_shouldReturnDescription() throws Exception {
-    Canvas canvas = new Canvas(targetBitmap);
-    canvas.drawBitmap(imageBitmap, new Matrix(), new Paint());
-    canvas.drawBitmap(imageBitmap, new Matrix(), new Paint());
-
-    assertEquals("Bitmap for file:/an/image.jpg transformed by Matrix[pre=[], set={}, post=[]]\n"
-                     + "Bitmap for file:/an/image.jpg transformed by Matrix[pre=[], set={},"
-                     + " post=[]]", ShadowCanvas.visualize(canvas));
-
-  }
-
-  @Test
-  public void drawColor_shouldReturnDescription() throws Exception {
-    Canvas canvas = new Canvas(targetBitmap);
-    canvas.drawColor(Color.WHITE);
-    canvas.drawColor(Color.GREEN);
-    canvas.drawColor(Color.TRANSPARENT);
-    assertEquals("draw color -1draw color -16711936draw color 0",
+    assertEquals(
+        "Bitmap for file:/an/image.jpg at (5,6) with height=2 and width=2 taken from"
+            + " Rect(1, 2 - 3, 4)",
         shadowOf(canvas).getDescription());
   }
 
   @Test
-  public void drawPath_shouldRecordThePathAndThePaint() throws Exception {
+  public void shouldDescribeBitmapDrawing_withDestinationRectF() {
+    Canvas canvas = new Canvas(targetBitmap);
+    canvas.drawBitmap(
+        imageBitmap, new Rect(1, 2, 3, 4), new RectF(5.0f, 6.0f, 7.5f, 8.5f), new Paint());
+
+    assertEquals(
+        "Bitmap for file:/an/image.jpg at (5.0,6.0) with height=2.5 and width=2.5 taken"
+            + " from Rect(1, 2 - 3, 4)",
+        shadowOf(canvas).getDescription());
+  }
+
+  @Test
+  public void shouldDescribeBitmapDrawing_WithMatrix() {
+    Canvas canvas = new Canvas(targetBitmap);
+    canvas.drawBitmap(imageBitmap, new Matrix(), new Paint());
+    canvas.drawBitmap(imageBitmap, new Matrix(), new Paint());
+
+    assertEquals(
+        "Bitmap for file:/an/image.jpg transformed by Matrix[pre=[], set={}, post=[]]\n"
+            + "Bitmap for file:/an/image.jpg transformed by Matrix[pre=[], set={},"
+            + " post=[]]",
+        shadowOf(canvas).getDescription());
+
+    assertEquals(
+        "Bitmap for file:/an/image.jpg transformed by Matrix[pre=[], set={}, post=[]]\n"
+            + "Bitmap for file:/an/image.jpg transformed by Matrix[pre=[], set={},"
+            + " post=[]]",
+        shadowOf(targetBitmap).getDescription());
+  }
+
+  @Test
+  public void visualize_shouldReturnDescription() {
+    Canvas canvas = new Canvas(targetBitmap);
+    canvas.drawBitmap(imageBitmap, new Matrix(), new Paint());
+    canvas.drawBitmap(imageBitmap, new Matrix(), new Paint());
+
+    assertEquals(
+        "Bitmap for file:/an/image.jpg transformed by Matrix[pre=[], set={}, post=[]]\n"
+            + "Bitmap for file:/an/image.jpg transformed by Matrix[pre=[], set={},"
+            + " post=[]]",
+        ShadowCanvas.visualize(canvas));
+  }
+
+  @Test
+  public void drawColor_shouldReturnDescription() {
+    Canvas canvas = new Canvas(targetBitmap);
+    canvas.drawColor(Color.WHITE);
+    canvas.drawColor(Color.GREEN);
+    canvas.drawColor(Color.TRANSPARENT);
+    assertEquals(
+        "draw color -1draw color -16711936draw color 0", shadowOf(canvas).getDescription());
+  }
+
+  @Test
+  public void drawPath_shouldRecordThePathAndThePaint() {
     Canvas canvas = new Canvas(targetBitmap);
     Path path = new Path();
     path.lineTo(10, 10);
@@ -118,14 +134,14 @@ public class ShadowCanvasTest {
     ShadowCanvas shadow = shadowOf(canvas);
     assertThat(shadow.getPathPaintHistoryCount()).isEqualTo(1);
     ShadowPath drawnPath = shadowOf(shadow.getDrawnPath(0));
-    assertEquals(drawnPath.getPoints().get(0), new ShadowPath.Point(10, 10, LINE_TO));
+    assertEquals(new ShadowPath.Point(10, 10, LINE_TO), drawnPath.getPoints().get(0));
     Paint drawnPathPaint = shadow.getDrawnPathPaint(0);
     assertThat(drawnPathPaint.getColor()).isEqualTo(Color.RED);
     assertThat(drawnPathPaint.getAlpha()).isEqualTo(7);
   }
 
   @Test
-  public void drawPath_shouldRecordThePointsOfEachPathEvenWhenItIsTheSameInstance() throws Exception {
+  public void drawPath_shouldRecordThePointsOfEachPathEvenWhenItIsTheSameInstance() {
     Canvas canvas = new Canvas(targetBitmap);
     Paint paint = new Paint();
     Path path = new Path();
@@ -139,12 +155,14 @@ public class ShadowCanvasTest {
 
     ShadowCanvas shadow = shadowOf(canvas);
     assertThat(shadow.getPathPaintHistoryCount()).isEqualTo(2);
-    assertEquals(shadowOf(shadow.getDrawnPath(0)).getPoints().get(0), new ShadowPath.Point(10, 10, LINE_TO));
-    assertEquals(shadowOf(shadow.getDrawnPath(1)).getPoints().get(0), new ShadowPath.Point(20, 20, LINE_TO));
+    assertEquals(
+        new ShadowPath.Point(10, 10, LINE_TO), shadowOf(shadow.getDrawnPath(0)).getPoints().get(0));
+    assertEquals(
+        new ShadowPath.Point(20, 20, LINE_TO), shadowOf(shadow.getDrawnPath(1)).getPoints().get(0));
   }
 
   @Test
-  public void drawPath_shouldAppendDescriptionToBitmap() throws Exception {
+  public void drawPath_shouldAppendDescriptionToBitmap() {
     Canvas canvas = new Canvas(targetBitmap);
     Path path1 = new Path();
     path1.lineTo(10, 10);
@@ -157,8 +175,13 @@ public class ShadowCanvasTest {
     canvas.drawPath(path1, paint);
     canvas.drawPath(path2, paint);
 
-    assertEquals("Path " + shadowOf(path1).getPoints().toString() + "\n"
-        + "Path " + shadowOf(path2).getPoints().toString(), shadowOf(canvas).getDescription());
+    assertEquals(
+        "Path "
+            + shadowOf(path1).getPoints().toString()
+            + "\n"
+            + "Path "
+            + shadowOf(path2).getPoints().toString(),
+        shadowOf(canvas).getDescription());
 
     assertEquals(
         "Path "
@@ -170,7 +193,7 @@ public class ShadowCanvasTest {
   }
 
   @Test
-  public void resetCanvasHistory_shouldClearTheHistoryAndDescription() throws Exception {
+  public void resetCanvasHistory_shouldClearTheHistoryAndDescription() {
     Canvas canvas = new Canvas();
     canvas.drawPath(new Path(), new Paint());
     canvas.drawText("hi", 1, 2, new Paint());
@@ -184,7 +207,7 @@ public class ShadowCanvasTest {
   }
 
   @Test
-  public void shouldGetAndSetHeightAndWidth() throws Exception {
+  public void shouldGetAndSetHeightAndWidth() {
     Canvas canvas = new Canvas();
     shadowOf(canvas).setWidth(99);
     shadowOf(canvas).setHeight(42);
@@ -194,7 +217,7 @@ public class ShadowCanvasTest {
   }
 
   @Test
-  public void shouldRecordText() throws Exception {
+  public void shouldRecordText() {
     Canvas canvas = new Canvas();
     Paint paint = new Paint();
     Paint paint2 = new Paint();
@@ -219,11 +242,11 @@ public class ShadowCanvasTest {
   }
 
   @Test
-  public void shouldRecordText_charArrayOverload() throws Exception {
+  public void shouldRecordText_charArrayOverload() {
     Canvas canvas = new Canvas();
     Paint paint = new Paint();
     paint.setColor(1);
-    canvas.drawText(new char[]{'h', 'e', 'l', 'l', 'o'}, 2, 3, 1f, 2f, paint);
+    canvas.drawText(new char[] {'h', 'e', 'l', 'l', 'o'}, 2, 3, 1f, 2f, paint);
     ShadowCanvas shadowCanvas = shadowOf(canvas);
 
     assertThat(shadowCanvas.getTextHistoryCount()).isEqualTo(1);
@@ -237,7 +260,7 @@ public class ShadowCanvasTest {
   }
 
   @Test
-  public void shouldRecordText_stringWithRangeOverload() throws Exception {
+  public void shouldRecordText_stringWithRangeOverload() {
     Canvas canvas = new Canvas();
     Paint paint = new Paint();
     paint.setColor(1);
@@ -255,7 +278,7 @@ public class ShadowCanvasTest {
   }
 
   @Test
-  public void shouldRecordText_charSequenceOverload() throws Exception {
+  public void shouldRecordText_charSequenceOverload() {
     Canvas canvas = new Canvas();
     Paint paint = new Paint();
     paint.setColor(1);
@@ -274,7 +297,7 @@ public class ShadowCanvasTest {
   }
 
   @Test
-  public void drawCircle_shouldRecordCirclePaintHistoryEvents() throws Exception {
+  public void drawCircle_shouldRecordCirclePaintHistoryEvents() {
     Canvas canvas = new Canvas();
     Paint paint0 = new Paint();
     Paint paint1 = new Paint();
@@ -294,7 +317,7 @@ public class ShadowCanvasTest {
   }
 
   @Test
-  public void drawArc_shouldRecordArcHistoryEvents() throws Exception {
+  public void drawArc_shouldRecordArcHistoryEvents() {
     Canvas canvas = new Canvas();
     RectF oval0 = new RectF();
     RectF oval1 = new RectF();
@@ -318,7 +341,7 @@ public class ShadowCanvasTest {
   }
 
   @Test
-  public void getArcHistoryCount_shouldReturnTotalNumberOfDrawArcEvents() throws Exception {
+  public void getArcHistoryCount_shouldReturnTotalNumberOfDrawArcEvents() {
     Canvas canvas = new Canvas();
     canvas.drawArc(new RectF(), 0f, 0f, true, new Paint());
     canvas.drawArc(new RectF(), 0f, 0f, true, new Paint());
@@ -327,7 +350,7 @@ public class ShadowCanvasTest {
   }
 
   @Test
-  public void getRectHistoryCount_shouldReturnTotalNumberOfDrawRectEvents() throws Exception {
+  public void getRectHistoryCount_shouldReturnTotalNumberOfDrawRectEvents() {
     Canvas canvas = new Canvas();
     canvas.drawRect(1f, 2f, 3f, 4f, new Paint());
     canvas.drawRect(1f, 2f, 3f, 4f, new Paint());
@@ -345,7 +368,7 @@ public class ShadowCanvasTest {
   }
 
   @Test
-  public void getOvalHistoryCount_shouldReturnTotalNumberOfDrawOvalEvents() throws Exception {
+  public void getOvalHistoryCount_shouldReturnTotalNumberOfDrawOvalEvents() {
     Canvas canvas = new Canvas();
     canvas.drawOval(new RectF(), new Paint());
     canvas.drawOval(new RectF(), new Paint());
@@ -354,7 +377,7 @@ public class ShadowCanvasTest {
   }
 
   @Test
-  public void getLineHistoryCount_shouldReturnTotalNumberOfDrawLineEvents() throws Exception {
+  public void getLineHistoryCount_shouldReturnTotalNumberOfDrawLineEvents() {
     Canvas canvas = new Canvas();
     canvas.drawLine(0f, 1f, 2f, 3f, new Paint());
     canvas.drawLine(0f, 1f, 2f, 3f, new Paint());
@@ -363,7 +386,7 @@ public class ShadowCanvasTest {
   }
 
   @Test
-  public void drawLine_shouldRecordLineHistoryEvents() throws Exception {
+  public void drawLine_shouldRecordLineHistoryEvents() {
     Canvas canvas = new Canvas();
     Paint paint0 = new Paint();
     paint0.setColor(Color.RED);
@@ -392,7 +415,7 @@ public class ShadowCanvasTest {
   }
 
   @Test
-  public void drawOval_shouldRecordOvalHistoryEvents() throws Exception {
+  public void drawOval_shouldRecordOvalHistoryEvents() {
     Canvas canvas = new Canvas();
     RectF oval0 = new RectF();
     RectF oval1 = new RectF();
@@ -413,7 +436,7 @@ public class ShadowCanvasTest {
   }
 
   @Test
-  public void drawRect_shouldRecordRectHistoryEvents() throws Exception {
+  public void drawRect_shouldRecordRectHistoryEvents() {
     Canvas canvas = new Canvas();
     Paint paint0 = new Paint();
     paint0.setColor(Color.WHITE);
@@ -495,5 +518,76 @@ public class ShadowCanvasTest {
     assertThat(roundRectPaintHistoryEvent.ry).isEqualTo(2f);
     assertThat(roundRectPaintHistoryEvent.rect).isEqualTo(rect0);
     assertThat(roundRectPaintHistoryEvent.paint.getColor()).isEqualTo(Color.WHITE);
+  }
+
+  @Test
+  public void save() {
+    Canvas canvas = new Canvas();
+
+    int save1 = canvas.save();
+    int save2 = canvas.save();
+
+    assertThat(save2).isGreaterThan(save1);
+    assertThat(canvas.getSaveCount()).isGreaterThan(save2);
+  }
+
+  @Test
+  public void restore() {
+    Canvas canvas = new Canvas();
+
+    int save1 = canvas.save();
+    canvas.restore();
+
+    assertThat(canvas.getSaveCount()).isEqualTo(save1);
+  }
+
+  @Test
+  public void restoreToCount() {
+    Canvas canvas = new Canvas();
+
+    int save1 = canvas.save();
+    canvas.save();
+    canvas.save();
+    canvas.restoreToCount(save1);
+
+    assertThat(canvas.getSaveCount()).isEqualTo(save1);
+  }
+
+  @Test
+  public void drawRect_withPureFloatPosition() {
+    Bitmap bitmap = Bitmap.createBitmap(10, 10, Bitmap.Config.ARGB_8888);
+    bitmap.eraseColor(Color.BLACK);
+    assertThat(bitmap.getPixel(0, 0)).isEqualTo(Color.BLACK);
+
+    Canvas canvas = new Canvas(bitmap);
+    Paint paint = new Paint();
+    paint.setStyle(Paint.Style.FILL);
+    paint.setAntiAlias(true);
+    paint.setColor(Color.WHITE);
+    canvas.drawRect(0, 0, 10, 10, paint);
+    assertThat(bitmap.getPixel(0, 0)).isEqualTo(Color.WHITE);
+  }
+
+  @Test
+  public void drawRect_withRectF() {
+    Canvas canvas = new Canvas();
+    Paint paint = new Paint();
+    paint.setColor(Color.WHITE);
+    RectF rect = new RectF(2f, 4f, 10f, 10f);
+    canvas.drawRect(2f, 4f, 10f, 10f, paint);
+    ShadowCanvas shadowCanvas = shadowOf(canvas);
+
+    ShadowCanvas.RectPaintHistoryEvent drawRect = shadowCanvas.getDrawnRect(0);
+    assertThat(drawRect.left).isEqualTo(2f);
+    assertThat(drawRect.top).isEqualTo(4f);
+    assertThat(drawRect.right).isEqualTo(10f);
+    assertThat(drawRect.bottom).isEqualTo(10f);
+    assertThat(drawRect.rect).isEqualTo(rect);
+    assertThat(drawRect.paint.getColor()).isEqualTo(Color.WHITE);
+  }
+
+  @Test
+  public void getClipBounds_nullBounds_throwsNPE() {
+    assertThrows(NullPointerException.class, () -> new Canvas().getClipBounds(null));
   }
 }

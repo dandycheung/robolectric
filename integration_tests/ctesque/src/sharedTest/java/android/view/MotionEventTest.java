@@ -1,10 +1,12 @@
 package android.view;
 
+import static android.os.Build.VERSION_CODES.N;
 import static androidx.test.ext.truth.view.MotionEventSubject.assertThat;
 import static androidx.test.ext.truth.view.PointerCoordsSubject.assertThat;
 import static androidx.test.ext.truth.view.PointerPropertiesSubject.assertThat;
 import static com.google.common.truth.Truth.assertThat;
 import static org.junit.Assert.fail;
+import static org.junit.Assume.assumeTrue;
 
 import android.graphics.Matrix;
 import android.os.Build;
@@ -16,23 +18,21 @@ import android.view.MotionEvent.PointerCoords;
 import android.view.MotionEvent.PointerProperties;
 import androidx.test.core.view.PointerCoordsBuilder;
 import androidx.test.core.view.PointerPropertiesBuilder;
-import androidx.test.runner.AndroidJUnit4;
+import androidx.test.ext.junit.runners.AndroidJUnit4;
+import androidx.test.filters.SdkSuppress;
 import com.google.common.truth.FailureMetadata;
 import com.google.common.truth.Subject;
 import com.google.common.truth.Truth;
 import org.junit.After;
 import org.junit.Before;
-import org.junit.Ignore;
 import org.junit.Test;
 import org.junit.runner.RunWith;
-import org.robolectric.annotation.internal.DoNotInstrument;
 
 /**
  * Test {@link android.view.MotionEvent}.
  *
  * <p>Baselined from Android cts/tests/tests/view/src/android/view/cts/MotionEventTest.java
  */
-@DoNotInstrument
 @RunWith(AndroidJUnit4.class)
 public class MotionEventTest {
   private MotionEvent motionEvent1;
@@ -163,6 +163,73 @@ public class MotionEventTest {
     } else {
       assertThat(event).hasActionButton(0);
     }
+  }
+
+  @Test
+  public void testObtainFromRecycledEvent() {
+    PointerCoords coords0 =
+        PointerCoordsBuilder.newBuilder()
+            .setCoords(X_3F, Y_4F)
+            .setPressure(PRESSURE_1F)
+            .setSize(SIZE_1F)
+            .setTool(1.2f, 1.4f)
+            .build();
+    PointerProperties properties0 =
+        PointerPropertiesBuilder.newBuilder()
+            .setId(0)
+            .setToolType(MotionEvent.TOOL_TYPE_FINGER)
+            .build();
+    motionEventDynamic =
+        MotionEvent.obtain(
+            downTime,
+            eventTime,
+            MotionEvent.ACTION_MOVE,
+            1,
+            new PointerProperties[] {properties0},
+            new PointerCoords[] {coords0},
+            META_STATE,
+            0,
+            X_PRECISION_3F,
+            Y_PRECISION_4F,
+            DEVICE_ID_1,
+            EDGE_FLAGS,
+            InputDevice.SOURCE_TOUCHSCREEN,
+            0);
+    MotionEvent motionEventDynamicCopy = MotionEvent.obtain(motionEventDynamic);
+    assertThat(motionEventDynamic.getToolType(0)).isEqualTo(MotionEvent.TOOL_TYPE_FINGER);
+    assertThat(motionEventDynamicCopy.getToolType(0)).isEqualTo(MotionEvent.TOOL_TYPE_FINGER);
+    motionEventDynamic.recycle();
+
+    PointerCoords coords1 =
+        PointerCoordsBuilder.newBuilder()
+            .setCoords(X_3F + 1.0f, Y_4F - 2.0f)
+            .setPressure(PRESSURE_1F + 0.2f)
+            .setSize(SIZE_1F + 0.5f)
+            .setTouch(2.2f, 0.6f)
+            .build();
+    PointerProperties properties1 =
+        PointerPropertiesBuilder.newBuilder()
+            .setId(0)
+            .setToolType(MotionEvent.TOOL_TYPE_MOUSE)
+            .build();
+    motionEventDynamic =
+        MotionEvent.obtain(
+            downTime,
+            eventTime,
+            MotionEvent.ACTION_MOVE,
+            1,
+            new PointerProperties[] {properties1},
+            new PointerCoords[] {coords1},
+            META_STATE,
+            0,
+            X_PRECISION_3F,
+            Y_PRECISION_4F,
+            DEVICE_ID_1,
+            EDGE_FLAGS,
+            InputDevice.SOURCE_TOUCHSCREEN,
+            0);
+    assertThat(motionEventDynamicCopy.getToolType(0)).isEqualTo(MotionEvent.TOOL_TYPE_FINGER);
+    assertThat(motionEventDynamic.getToolType(0)).isEqualTo(MotionEvent.TOOL_TYPE_MOUSE);
   }
 
   @Test
@@ -322,7 +389,7 @@ public class MotionEventTest {
   }
 
   @Test
-  @Ignore // doesn't actually fail when expected on emulator API 23
+  @SdkSuppress(minSdkVersion = N)
   public void testReadFromParcelWithInvalidSampleSize() {
     Parcel parcel = Parcel.obtain();
     motionEvent2.writeToParcel(parcel, Parcelable.PARCELABLE_WRITE_RETURN_VALUE);
@@ -340,6 +407,7 @@ public class MotionEventTest {
     }
   }
 
+  @SuppressWarnings("ReturnValueIgnored")
   @Test
   public void testToString() {
     // make sure this method never throw exception.
@@ -347,9 +415,10 @@ public class MotionEventTest {
   }
 
   @Test
-  public void testOffsetLocation() {
+  public void testOffsetLocationForPointerSource() {
     assertThat(motionEvent2).x().isWithin(TOLERANCE).of(X_3F);
     assertThat(motionEvent2).y().isWithin(TOLERANCE).of(Y_4F);
+    motionEvent2.setSource(InputDevice.SOURCE_TOUCHSCREEN);
 
     float offsetX = 1.0f;
     float offsetY = 1.0f;
@@ -360,9 +429,29 @@ public class MotionEventTest {
   }
 
   @Test
-  public void testSetLocation() {
+  public void testNoLocationOffsetForNonPointerSource() {
+    assumeTrue(
+        "NoLocationOffset for non PointerSource only work from API 32",
+        Build.VERSION.SDK_INT >= VERSION_CODES.S_V2);
     assertThat(motionEvent2).x().isWithin(TOLERANCE).of(X_3F);
     assertThat(motionEvent2).y().isWithin(TOLERANCE).of(Y_4F);
+    motionEvent2.setSource(InputDevice.SOURCE_TOUCHPAD);
+
+    float offsetX = 1.0f;
+    float offsetY = 1.0f;
+    motionEvent2.offsetLocation(offsetX, offsetY);
+
+    assertThat(motionEvent2).x().isWithin(TOLERANCE).of(X_3F);
+    assertThat(motionEvent2).y().isWithin(TOLERANCE).of(Y_4F);
+    assertThat(motionEvent2).pressure().isWithin(TOLERANCE).of(PRESSURE_1F);
+    assertThat(motionEvent2).size().isWithin(TOLERANCE).of(SIZE_1F);
+  }
+
+  @Test
+  public void testSetLocationForPointerSource() {
+    assertThat(motionEvent2).x().isWithin(TOLERANCE).of(X_3F);
+    assertThat(motionEvent2).y().isWithin(TOLERANCE).of(Y_4F);
+    motionEvent2.setSource(InputDevice.SOURCE_TOUCHSCREEN);
 
     motionEvent2.setLocation(2.0f, 2.0f);
 
@@ -632,7 +721,7 @@ public class MotionEventTest {
             0,
             0,
             0,
-            0,
+            InputDevice.SOURCE_TOUCHSCREEN,
             0);
     final float originalRawX = 0 + 3;
     final float originalRawY = -radius + 2;
@@ -915,10 +1004,6 @@ public class MotionEventTest {
     private PointerCoordsEqualitySubject(FailureMetadata metadata, PointerCoords actual) {
       super(metadata, actual);
       this.actual = actual;
-    }
-
-    public static PointerCoordsEqualitySubject assertThat(PointerCoords coords) {
-      return Truth.assertAbout(pointerCoords()).that(coords);
     }
 
     public static Subject.Factory<PointerCoordsEqualitySubject, PointerCoords> pointerCoords() {

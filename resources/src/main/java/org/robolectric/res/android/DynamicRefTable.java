@@ -1,7 +1,9 @@
 package org.robolectric.res.android;
 
-// transliterated from https://android.googlesource.com/platform/frameworks/base/+/android-9.0.0_r12/include/androidfw/ResourceTypes.h
+// transliterated from
+// https://android.googlesource.com/platform/frameworks/base/+/android-9.0.0_r12/include/androidfw/ResourceTypes.h
 
+import static org.robolectric.res.android.Errors.BAD_TYPE;
 import static org.robolectric.res.android.Errors.NO_ERROR;
 import static org.robolectric.res.android.Errors.UNKNOWN_ERROR;
 import static org.robolectric.res.android.ResTable.APP_PACKAGE_ID;
@@ -16,15 +18,14 @@ import java.util.Objects;
 import org.robolectric.res.android.ResourceTypes.Res_value;
 
 /**
- * Holds the shared library ID table. Shared libraries are assigned package IDs at
- * build time, but they may be loaded in a different order, so we need to maintain
- * a mapping of build-time package ID to run-time assigned package ID.
+ * Holds the shared library ID table. Shared libraries are assigned package IDs at build time, but
+ * they may be loaded in a different order, so we need to maintain a mapping of build-time package
+ * ID to run-time assigned package ID.
  *
- * Dynamic references are not currently supported in overlays. Only the base package
- * may have dynamic references.
+ * <p>Dynamic references are not currently supported in overlays. Only the base package may have
+ * dynamic references.
  */
-public class DynamicRefTable
-{
+public class DynamicRefTable {
   DynamicRefTable(byte packageId, boolean appAsLib) {
     this.mAssignedPackageId = packageId;
     this.mAppAsLib = appAsLib;
@@ -33,10 +34,10 @@ public class DynamicRefTable
     mLookupTable[SYS_PACKAGE_ID] = SYS_PACKAGE_ID;
   }
 
-//  // Loads an unmapped reference table from the package.
-//  Errors load(final ResTable_lib_header header) {
-//    return null;
-//  }
+  //  // Loads an unmapped reference table from the package.
+  //  Errors load(final ResTable_lib_header header) {
+  //    return null;
+  //  }
 
   // Adds mappings from the other DynamicRefTable
   int addMappings(final DynamicRefTable other) {
@@ -44,17 +45,17 @@ public class DynamicRefTable
       return UNKNOWN_ERROR;
     }
 
-//    final int entryCount = other.mEntries.size();
-//    for (size_t i = 0; i < entryCount; i++) {
-//      ssize_t index = mEntries.indexOfKey(other.mEntries.keyAt(i));
-//      if (index < 0) {
-//        mEntries.add(other.mEntries.keyAt(i), other.mEntries[i]);
-//      } else {
-//        if (other.mEntries[i] != mEntries[index]) {
-//          return UNKNOWN_ERROR;
-//        }
-//      }
-//    }
+    //    final int entryCount = other.mEntries.size();
+    //    for (size_t i = 0; i < entryCount; i++) {
+    //      ssize_t index = mEntries.indexOfKey(other.mEntries.keyAt(i));
+    //      if (index < 0) {
+    //        mEntries.add(other.mEntries.keyAt(i), other.mEntries[i]);
+    //      } else {
+    //        if (other.mEntries[i] != mEntries[index]) {
+    //          return UNKNOWN_ERROR;
+    //        }
+    //      }
+    //    }
     for (Entry<String, Byte> otherEntry : other.mEntries.entrySet()) {
       String key = otherEntry.getKey();
       Byte curValue = mEntries.get(key);
@@ -92,14 +93,26 @@ public class DynamicRefTable
     return NO_ERROR;
   }
 
-//  // Performs the actual conversion of build-time resource ID to run-time
-//  // resource ID.
+  void addAlias(int stagedId, int finalizedId) {
+    mAliasId.put(stagedId, finalizedId);
+  }
+
+  //  // Performs the actual conversion of build-time resource ID to run-time
+  //  // resource ID.
   int lookupResourceId(Ref<Integer> resId) {
     int res = resId.get();
     int packageId = Res_GETPACKAGE(res) + 1;
 
-    if (packageId == APP_PACKAGE_ID && !mAppAsLib) {
-      // No lookup needs to be done, app package IDs are absolute.
+    Integer aliasId = mAliasId.get(res);
+    if (aliasId != null) {
+      // Rewrite the resource id to its alias resource id. Since the alias resource id is a
+      // compile-time id, it still needs to be resolved further.
+      res = aliasId;
+    }
+
+    if (packageId == SYS_PACKAGE_ID || (packageId == APP_PACKAGE_ID && !mAppAsLib)) {
+      // No lookup needs to be done, app and framework package IDs are absolute.
+      resId.set(res);
       return NO_ERROR;
     }
 
@@ -109,14 +122,15 @@ public class DynamicRefTable
       // Or if app resource is loaded as shared library, the resource which has
       // app package Id is local resources.
       // so we fix up those resources with the calling package ID.
-      resId.set((0xFFFFFF & (resId.get())) | (((int) mAssignedPackageId) << 24));
+      resId.set((0xFFFFFF & resId.get()) | (((int) mAssignedPackageId) << 24));
       return NO_ERROR;
     }
 
     // Do a proper lookup.
     int translatedId = mLookupTable[packageId];
     if (translatedId == 0) {
-      ALOGW("DynamicRefTable(0x%02x): No mapping for build-time package ID 0x%02x.",
+      ALOGW(
+          "DynamicRefTable(0x%02x): No mapping for build-time package ID 0x%02x.",
           mAssignedPackageId, packageId);
       for (int i = 0; i < 256; i++) {
         if (mLookupTable[i] != 0) {
@@ -126,17 +140,26 @@ public class DynamicRefTable
       return UNKNOWN_ERROR;
     }
 
-    resId.set((res & 0x00ffffff) | (((int) translatedId) << 24));
+    resId.set((res & 0x00ffffff) | (translatedId << 24));
     return NO_ERROR;
   }
-//
+
+  //
   int lookupResourceValue(Ref<Res_value> value) {
     byte resolvedType = DataType.REFERENCE.code();
     Res_value inValue = value.get();
-    switch (DataType.fromCode(inValue.dataType)) {
+
+    DataType dataType;
+    try {
+      dataType = DataType.fromCode(inValue.dataType);
+    } catch (IllegalArgumentException e) {
+      return BAD_TYPE;
+    }
+
+    switch (dataType) {
       case ATTRIBUTE:
         resolvedType = DataType.ATTRIBUTE.code();
-        // fallthrough
+      // fallthrough
       case REFERENCE:
         if (!mAppAsLib) {
           return NO_ERROR;
@@ -147,7 +170,7 @@ public class DynamicRefTable
         break;
       case DYNAMIC_ATTRIBUTE:
         resolvedType = DataType.ATTRIBUTE.code();
-        // fallthrough
+      // fallthrough
       case DYNAMIC_REFERENCE:
         break;
       default:
@@ -163,20 +186,21 @@ public class DynamicRefTable
 
     value.set(new Res_value(resolvedType, resIdRef.get()));
     return NO_ERROR;
- }
+  }
 
   public Map<String, Byte> entries() {
     return mEntries;
   }
 
   //
-//  final KeyedVector<String16, uint8_t>& entries() final {
-//  return mEntries;
-//}
-//
-//  private:
-    final byte                   mAssignedPackageId;
-  final byte[]                         mLookupTable = new byte[256];
+  //  final KeyedVector<String16, uint8_t>& entries() final {
+  //  return mEntries;
+  // }
+  //
+  //  private:
+  final byte mAssignedPackageId;
+  final byte[] mLookupTable = new byte[256];
   final Map<String, Byte> mEntries = new HashMap<>();
-  boolean                            mAppAsLib;
-};
+  boolean mAppAsLib;
+  final Map<Integer, Integer> mAliasId = new HashMap<>();
+}

@@ -3,6 +3,7 @@ package org.robolectric.shadows;
 import static android.os.Build.VERSION_CODES.M;
 import static android.os.Build.VERSION_CODES.N;
 import static android.os.Build.VERSION_CODES.N_MR1;
+import static android.os.Build.VERSION_CODES.O;
 import static android.os.Build.VERSION_CODES.P;
 import static android.os.Build.VERSION_CODES.Q;
 import static com.google.common.truth.Truth.assertThat;
@@ -11,24 +12,31 @@ import static org.robolectric.Shadows.shadowOf;
 import static org.robolectric.util.ReflectionHelpers.getStaticField;
 import static org.robolectric.util.reflector.Reflector.reflector;
 
+import android.app.Activity;
 import android.content.Context;
 import android.hardware.usb.UsbAccessory;
 import android.hardware.usb.UsbDevice;
+import android.hardware.usb.UsbDeviceConnection;
 import android.hardware.usb.UsbManager;
 import android.hardware.usb.UsbPort;
 import android.hardware.usb.UsbPortStatus;
 import android.os.Build;
+import android.os.ParcelFileDescriptor;
 import androidx.test.core.app.ApplicationProvider;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
 import java.util.stream.Collectors;
+import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
+import org.robolectric.Robolectric;
 import org.robolectric.RuntimeEnvironment;
+import org.robolectric.android.controller.ActivityController;
 import org.robolectric.annotation.Config;
 import org.robolectric.shadows.ShadowUsbManager._UsbManagerQ_;
 import org.robolectric.shadows.ShadowUsbManager._UsbManager_;
@@ -41,19 +49,26 @@ public class ShadowUsbManagerTest {
 
   private UsbManager usbManager;
 
+  private AutoCloseable mock;
+
   @Mock UsbDevice usbDevice1;
   @Mock UsbDevice usbDevice2;
   @Mock UsbAccessory usbAccessory;
 
   @Before
   public void setUp() {
-    MockitoAnnotations.initMocks(this);
+    mock = MockitoAnnotations.openMocks(this);
     usbManager =
         (UsbManager)
             ApplicationProvider.getApplicationContext().getSystemService(Context.USB_SERVICE);
 
     when(usbDevice1.getDeviceName()).thenReturn(DEVICE_NAME_1);
     when(usbDevice2.getDeviceName()).thenReturn(DEVICE_NAME_2);
+  }
+
+  @After
+  public void tearDown() throws Exception {
+    mock.close();
   }
 
   @Test
@@ -65,7 +80,7 @@ public class ShadowUsbManagerTest {
   }
 
   @Test
-  public void hasPermission() {
+  public void hasPermission_device() {
     assertThat(usbManager.hasPermission(usbDevice1)).isFalse();
 
     shadowOf(usbManager).addOrUpdateUsbDevice(usbDevice1, false);
@@ -78,6 +93,18 @@ public class ShadowUsbManagerTest {
 
     assertThat(usbManager.hasPermission(usbDevice1)).isTrue();
     assertThat(usbManager.hasPermission(usbDevice2)).isFalse();
+  }
+
+  @Test
+  public void hasPermission_accessory() {
+    assertThat(usbManager.hasPermission(usbAccessory)).isFalse();
+    shadowOf(usbManager).setAttachedUsbAccessory(usbAccessory);
+    assertThat(usbManager.hasPermission(usbAccessory)).isFalse();
+    shadowOf(usbManager).grantPermission(usbAccessory);
+    assertThat(usbManager.hasPermission(usbAccessory)).isTrue();
+    shadowOf(usbManager)
+        .revokePermission(usbAccessory, RuntimeEnvironment.getApplication().getPackageName());
+    assertThat(usbManager.hasPermission(usbAccessory)).isFalse();
   }
 
   @Test
@@ -131,7 +158,7 @@ public class ShadowUsbManagerTest {
             UsbPortStatus.MODE_DUAL,
             UsbPortStatus.POWER_ROLE_SINK,
             UsbPortStatus.DATA_ROLE_DEVICE,
-            /*statusSupportedRoleCombinations=*/ 0);
+            /* statusSupportedRoleCombinations= */ 0);
 
     UsbPortStatus portStatus = (UsbPortStatus) shadowOf(usbManager).getPortStatus("port3");
     assertThat(portStatus.getCurrentMode()).isEqualTo(UsbPortStatus.MODE_DUAL);
@@ -194,8 +221,17 @@ public class ShadowUsbManagerTest {
   }
 
   @Test
-  public void openAccessory() {
-    assertThat(usbManager.openAccessory(usbAccessory)).isNotNull();
+  public void openDevice() {
+    shadowOf(usbManager).addOrUpdateUsbDevice(usbDevice1, true);
+    UsbDeviceConnection connection = usbManager.openDevice(usbDevice1);
+    assertThat(connection).isNotNull();
+  }
+
+  @Test
+  public void openAccessory() throws Exception {
+    try (ParcelFileDescriptor pfd = usbManager.openAccessory(usbAccessory)) {
+      assertThat(pfd).isNotNull();
+    }
   }
 
   @Test
@@ -218,5 +254,28 @@ public class ShadowUsbManagerTest {
 
   private _UsbManager_ _usbManager_() {
     return reflector(_UsbManager_.class, usbManager);
+  }
+
+  @Test
+  @Config(minSdk = O)
+  public void usbManager_activityContextEnabled_differentInstancesRetrieveSameUsbDevices() {
+    String originalProperty = System.getProperty("robolectric.createActivityContexts", "");
+    System.setProperty("robolectric.createActivityContexts", "true");
+    try (ActivityController<Activity> controller =
+        Robolectric.buildActivity(Activity.class).setup()) {
+      UsbManager applicationUsbManager =
+          ApplicationProvider.getApplicationContext().getSystemService(UsbManager.class);
+      Activity activity = controller.get();
+      UsbManager activityUsbManager = activity.getSystemService(UsbManager.class);
+
+      assertThat(applicationUsbManager).isNotSameInstanceAs(activityUsbManager);
+
+      HashMap<String, UsbDevice> applicationDevices = applicationUsbManager.getDeviceList();
+      HashMap<String, UsbDevice> activityDevices = activityUsbManager.getDeviceList();
+
+      assertThat(activityDevices).isEqualTo(applicationDevices);
+    } finally {
+      System.setProperty("robolectric.createActivityContexts", originalProperty);
+    }
   }
 }

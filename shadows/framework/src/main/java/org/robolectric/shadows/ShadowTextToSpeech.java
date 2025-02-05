@@ -1,7 +1,6 @@
 package org.robolectric.shadows;
 
-import static android.os.Build.VERSION_CODES.ICE_CREAM_SANDWICH_MR1;
-import static android.os.Build.VERSION_CODES.LOLLIPOP;
+import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.robolectric.util.reflector.Reflector.reflector;
 
 import android.content.Context;
@@ -9,23 +8,25 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.speech.tts.TextToSpeech;
-import android.speech.tts.TextToSpeech.Engine;
 import android.speech.tts.UtteranceProgressListener;
 import android.speech.tts.Voice;
 import com.google.common.collect.ImmutableList;
 import java.io.File;
+import java.io.IOException;
+import java.io.PrintWriter;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
-import org.robolectric.RuntimeEnvironment;
 import org.robolectric.annotation.Implementation;
 import org.robolectric.annotation.Implements;
 import org.robolectric.annotation.RealObject;
 import org.robolectric.annotation.Resetter;
 import org.robolectric.shadow.api.Shadow;
+import org.robolectric.shadows.ShadowMediaPlayer.MediaInfo;
+import org.robolectric.shadows.util.DataSource;
 import org.robolectric.util.ReflectionHelpers;
 import org.robolectric.util.ReflectionHelpers.ClassParameter;
 import org.robolectric.util.reflector.Direct;
@@ -47,8 +48,16 @@ public class ShadowTextToSpeech {
   private boolean stopped = true;
   private int queueMode = -1;
   private Locale language = null;
+  private File lastSynthesizeToFile;
   private String lastSynthesizeToFileText;
   private Voice currentVoice = null;
+
+  // This is not the value returned by synthesizeToFile, but rather controls the callbacks.
+  // See
+  // http://cs/android/frameworks/base/core/java/android/speech/tts/TextToSpeech.java?rcl=db6d9c1ced6b9af1de8f12e912a223f3c7f42ecd&l=1874.
+  private int synthesizeToFileResult = TextToSpeech.SUCCESS;
+
+  private boolean completeSynthesis = false;
 
   private final List<String> spokenTextList = new ArrayList<>();
 
@@ -72,6 +81,19 @@ public class ShadowTextToSpeech {
         ClassParameter.from(boolean.class, useFallback));
   }
 
+  /**
+   * Sets up synthesizeToFile to succeed or fail in the synthesis operation.
+   *
+   * <p>This controls calls the relevant callbacks but does not set the return value of
+   * synthesizeToFile.
+   *
+   * @param result TextToSpeech enum (SUCCESS, ERROR, or one of the ERROR_ codes from TextToSpeech)
+   */
+  public void simulateSynthesizeToFileResult(int result) {
+    this.synthesizeToFileResult = result;
+    this.completeSynthesis = true;
+  }
+
   @Implementation
   protected int initTts() {
     // Has to be overridden because the real code attempts to connect to a non-existent TTS
@@ -88,14 +110,10 @@ public class ShadowTextToSpeech {
   @Implementation
   protected int speak(
       final String text, final int queueMode, final HashMap<String, String> params) {
-    if (RuntimeEnvironment.getApiLevel() >= LOLLIPOP) {
-      return reflector(TextToSpeechReflector.class, tts).speak(text, queueMode, params);
-    }
-    return speak(
-        text, queueMode, null, params == null ? null : params.get(Engine.KEY_PARAM_UTTERANCE_ID));
+    return reflector(TextToSpeechReflector.class, tts).speak(text, queueMode, params);
   }
 
-  @Implementation(minSdk = LOLLIPOP)
+  @Implementation
   protected int speak(
       final CharSequence text, final int queueMode, final Bundle params, final String utteranceId) {
     stopped = false;
@@ -103,31 +121,29 @@ public class ShadowTextToSpeech {
     spokenTextList.add(text.toString());
     this.queueMode = queueMode;
 
-    if (RuntimeEnvironment.getApiLevel() >= ICE_CREAM_SANDWICH_MR1) {
-      if (utteranceId != null) {
-        // The onStart and onDone callbacks are normally delivered asynchronously. Since in
-        // Robolectric we don't need the wait for TTS package, the asynchronous callbacks are
-        // simulated by posting it on a handler. The behavior of the callback can be changed for
-        // each individual test by changing the idling mode of the foreground scheduler.
-        Handler handler = new Handler(Looper.getMainLooper());
-        handler.post(
-            () -> {
-              UtteranceProgressListener utteranceProgressListener = getUtteranceProgressListener();
-              if (utteranceProgressListener != null) {
-                utteranceProgressListener.onStart(utteranceId);
-              }
-              // The onDone callback is posted in a separate run-loop from onStart, so that tests
-              // can pause the scheduler and test the behavior between these two callbacks.
-              handler.post(
-                  () -> {
-                    UtteranceProgressListener utteranceProgressListener2 =
-                        getUtteranceProgressListener();
-                    if (utteranceProgressListener2 != null) {
-                      utteranceProgressListener2.onDone(utteranceId);
-                    }
-                  });
-            });
-      }
+    if (utteranceId != null) {
+      // The onStart and onDone callbacks are normally delivered asynchronously. Since in
+      // Robolectric we don't need the wait for TTS package, the asynchronous callbacks are
+      // simulated by posting it on a handler. The behavior of the callback can be changed for
+      // each individual test by changing the idling mode of the foreground scheduler.
+      Handler handler = new Handler(Looper.getMainLooper());
+      handler.post(
+          () -> {
+            UtteranceProgressListener utteranceProgressListener = getUtteranceProgressListener();
+            if (utteranceProgressListener != null) {
+              utteranceProgressListener.onStart(utteranceId);
+            }
+            // The onDone callback is posted in a separate run-loop from onStart, so that tests
+            // can pause the scheduler and test the behavior between these two callbacks.
+            handler.post(
+                () -> {
+                  UtteranceProgressListener utteranceProgressListener2 =
+                      getUtteranceProgressListener();
+                  if (utteranceProgressListener2 != null) {
+                    utteranceProgressListener2.onDone(utteranceId);
+                  }
+                });
+          });
     }
     return TextToSpeech.SUCCESS;
   }
@@ -159,10 +175,30 @@ public class ShadowTextToSpeech {
     return TextToSpeech.LANG_NOT_SUPPORTED;
   }
 
+  /**
+   * Sets the text-to-speech language.
+   *
+   * <p>This method sets the current voice to the default one for the given Locale; getVoice() can
+   * be used to retrieve it.
+   */
   @Implementation
   protected int setLanguage(Locale locale) {
     this.language = locale;
-    return isLanguageAvailable(locale);
+    int languageAvailability = isLanguageAvailable(locale);
+
+    // Set to default voice (locale voice) if no voice is set.
+    if (languageAvailability >= TextToSpeech.LANG_AVAILABLE && this.currentVoice == null) {
+      setVoice(
+          new Voice(
+              locale.toLanguageTag(),
+              locale,
+              Voice.QUALITY_NORMAL,
+              Voice.LATENCY_NORMAL,
+              /* requiresNetworkConnection= */ false,
+              new HashSet<>()));
+    }
+
+    return languageAvailability;
   }
 
   /**
@@ -170,19 +206,65 @@ public class ShadowTextToSpeech {
    *
    * @see #getLastSynthesizeToFileText()
    */
-  @Implementation(minSdk = LOLLIPOP)
-  protected int synthesizeToFile(CharSequence text, Bundle params, File file, String utteranceId) {
+  @Implementation
+  protected int synthesizeToFile(CharSequence text, Bundle params, File file, String utteranceId)
+      throws IOException {
     this.lastSynthesizeToFileText = text.toString();
+
+    if (!Boolean.getBoolean("robolectric.enableShadowTtsSynthesisToFileWriteToFileSuppression")) {
+      this.lastSynthesizeToFile = file;
+      try (PrintWriter writer = new PrintWriter(file, UTF_8.name())) {
+        writer.println(text);
+      }
+
+      ShadowMediaPlayer.addMediaInfo(
+          DataSource.toDataSource(file.getAbsolutePath()), new MediaInfo());
+    }
+
+    UtteranceProgressListener utteranceProgressListener = getUtteranceProgressListener();
+
+    /*
+     * The Java system property robolectric.shadowTtsEnableSynthesisToFileCallbackSuppression can be
+     * used by test targets that fail due to tests relying on previous behavior of this fake, where
+     * the listeners were not called.
+     */
+    if (completeSynthesis
+        && utteranceProgressListener != null
+        && !Boolean.getBoolean("robolectric.enableShadowTtsSynthesisToFileCallbackSuppression")) {
+      switch (synthesizeToFileResult) {
+        // Right now this only supports success an error though there are other possible
+        // situations.
+        case TextToSpeech.SUCCESS:
+          utteranceProgressListener.onStart(utteranceId);
+          utteranceProgressListener.onDone(utteranceId);
+          break;
+        default:
+          utteranceProgressListener.onError(utteranceId, synthesizeToFileResult);
+          break;
+      }
+    }
+
+    // This refers to the result of the queueing operation.
+    // See
+    // http://cs/android/frameworks/base/core/java/android/speech/tts/TextToSpeech.java?rcl=db6d9c1ced6b9af1de8f12e912a223f3c7f42ecd&l=1890.
     return TextToSpeech.SUCCESS;
   }
 
-  @Implementation(minSdk = LOLLIPOP)
+  @Implementation
   protected int setVoice(Voice voice) {
     this.currentVoice = voice;
     return TextToSpeech.SUCCESS;
   }
 
-  @Implementation(minSdk = LOLLIPOP)
+  /**
+   * Returns the Voice instance describing the voice currently being used for synthesis requests.
+   */
+  @Implementation
+  protected Voice getVoice() {
+    return this.currentVoice;
+  }
+
+  @Implementation
   protected Set<Voice> getVoices() {
     return voices;
   }
@@ -211,7 +293,9 @@ public class ShadowTextToSpeech {
     return shutdown;
   }
 
-  /** @return {@code true} if the TTS is stopped. */
+  /**
+   * @return {@code true} if the TTS is stopped.
+   */
   public boolean isStopped() {
     return stopped;
   }
@@ -233,6 +317,14 @@ public class ShadowTextToSpeech {
    */
   public String getLastSynthesizeToFileText() {
     return lastSynthesizeToFileText;
+  }
+
+  /**
+   * Returns last file {@link File} written to by {@link TextToSpeech#synthesizeToFile(CharSequence,
+   * Bundle, File, String)}.
+   */
+  public File getLastSynthesizeToFile() {
+    return lastSynthesizeToFile;
   }
 
   /** Returns list of all the text spoken by {@link #speak}. */

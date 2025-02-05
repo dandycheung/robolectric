@@ -1,13 +1,12 @@
 package org.robolectric.android.internal;
 
-import static android.os.Build.VERSION_CODES.KITKAT;
-import static android.os.Build.VERSION_CODES.LOLLIPOP;
 import static android.os.Build.VERSION_CODES.LOLLIPOP_MR1;
 import static android.os.Build.VERSION_CODES.M;
 import static android.os.Build.VERSION_CODES.N;
 import static android.os.Build.VERSION_CODES.N_MR1;
 import static android.os.Build.VERSION_CODES.O;
 import static android.os.Build.VERSION_CODES.Q;
+import static android.os.Build.VERSION_CODES.UPSIDE_DOWN_CAKE;
 
 import android.view.Display;
 import android.view.DisplayCutout;
@@ -121,6 +120,13 @@ public final class DisplayConfig {
   /** The display's HDR capabilities */
   public Display.HdrCapabilities hdrCapabilities;
 
+  /**
+   * The current hdr/sdr ratio expressed as the ratio of targetHdrPeakBrightnessInNits /
+   * targetSdrWhitePointInNits. A setting of {@code NaN} corresponds to {@link
+   * Display#isHdrSdrRatioAvailable} as false.
+   */
+  public float hdrSdrRatio = Float.NaN;
+
   /** The logical display density which is the basis for density-independent pixels. */
   public int logicalDensityDpi;
 
@@ -219,18 +225,17 @@ public final class DisplayConfig {
     if (RuntimeEnvironment.getApiLevel() >= N) {
       hdrCapabilities = other.hdrCapabilities;
     }
+    if (RuntimeEnvironment.getApiLevel() >= UPSIDE_DOWN_CAKE) {
+      hdrSdrRatio = other.hdrSdrRatio;
+    }
     logicalDensityDpi = other.logicalDensityDpi;
     physicalXDpi = other.physicalXDpi;
     physicalYDpi = other.physicalYDpi;
-    if (RuntimeEnvironment.getApiLevel() >= LOLLIPOP) {
-      appVsyncOffsetNanos = other.appVsyncOffsetNanos;
-      presentationDeadlineNanos = other.presentationDeadlineNanos;
-      state = other.state;
-    }
-    if (RuntimeEnvironment.getApiLevel() >= KITKAT) {
-      ownerUid = other.ownerUid;
-      ownerPackageName = other.ownerPackageName;
-    }
+    appVsyncOffsetNanos = other.appVsyncOffsetNanos;
+    presentationDeadlineNanos = other.presentationDeadlineNanos;
+    state = other.state;
+    ownerUid = other.ownerUid;
+    ownerPackageName = other.ownerPackageName;
     if (RuntimeEnvironment.getApiLevel() >= O) {
       removeMode = other.removeMode;
     }
@@ -275,7 +280,8 @@ public final class DisplayConfig {
         && ownerUid == other.ownerUid
         && Objects.equals(ownerPackageName, other.ownerPackageName)
         && removeMode == other.removeMode
-        && Objects.equals(displayCutout, other.displayCutout);
+        && Objects.equals(displayCutout, other.displayCutout)
+        && hdrSdrRatio == other.hdrSdrRatio;
   }
 
   @Override
@@ -306,6 +312,7 @@ public final class DisplayConfig {
     supportedColorModes =
         Arrays.copyOf(other.supportedColorModes, other.supportedColorModes.length);
     hdrCapabilities = other.hdrCapabilities;
+    hdrSdrRatio = other.hdrSdrRatio;
     logicalDensityDpi = other.logicalDensityDpi;
     physicalXDpi = other.physicalXDpi;
     physicalYDpi = other.physicalYDpi;
@@ -348,18 +355,17 @@ public final class DisplayConfig {
     if (RuntimeEnvironment.getApiLevel() >= N) {
       other.hdrCapabilities = hdrCapabilities;
     }
+    if (RuntimeEnvironment.getApiLevel() >= UPSIDE_DOWN_CAKE) {
+      other.hdrSdrRatio = hdrSdrRatio;
+    }
     other.logicalDensityDpi = logicalDensityDpi;
     other.physicalXDpi = physicalXDpi;
     other.physicalYDpi = physicalYDpi;
-    if (RuntimeEnvironment.getApiLevel() >= LOLLIPOP) {
-      other.appVsyncOffsetNanos = appVsyncOffsetNanos;
-      other.presentationDeadlineNanos = presentationDeadlineNanos;
-      other.state = state;
-    }
-    if (RuntimeEnvironment.getApiLevel() >= KITKAT) {
-      other.ownerUid = ownerUid;
-      other.ownerPackageName = ownerPackageName;
-    }
+    other.appVsyncOffsetNanos = appVsyncOffsetNanos;
+    other.presentationDeadlineNanos = presentationDeadlineNanos;
+    other.state = state;
+    other.ownerUid = ownerUid;
+    other.ownerPackageName = ownerPackageName;
     if (RuntimeEnvironment.getApiLevel() >= O) {
       other.removeMode = removeMode;
     }
@@ -404,6 +410,8 @@ public final class DisplayConfig {
     sb.append(Arrays.toString(supportedColorModes));
     sb.append(", hdrCapabilities ");
     sb.append(hdrCapabilities);
+    sb.append(", hdrSdrRatio ");
+    sb.append(hdrSdrRatio);
     sb.append(", rotation ");
     sb.append(rotation);
     sb.append(", density ");

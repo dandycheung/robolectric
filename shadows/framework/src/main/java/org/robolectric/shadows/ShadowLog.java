@@ -1,6 +1,10 @@
 package org.robolectric.shadows;
 
+import static org.robolectric.util.reflector.Reflector.reflector;
+
 import android.util.Log;
+import android.util.Log.TerribleFailure;
+import android.util.Log.TerribleFailureHandler;
 import com.google.common.base.Ascii;
 import com.google.common.base.Throwables;
 import com.google.common.collect.ImmutableList;
@@ -13,9 +17,16 @@ import java.util.Map;
 import java.util.Queue;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.function.Supplier;
+import org.robolectric.RuntimeEnvironment;
 import org.robolectric.annotation.Implementation;
 import org.robolectric.annotation.Implements;
 import org.robolectric.annotation.Resetter;
+import org.robolectric.util.Util;
+import org.robolectric.util.reflector.Accessor;
+import org.robolectric.util.reflector.Constructor;
+import org.robolectric.util.reflector.ForType;
+import org.robolectric.util.reflector.Static;
+import org.robolectric.versioning.AndroidVersions.L;
 
 /** Controls the behavior of {@link android.util.Log} and provides access to log messages. */
 @Implements(Log.class)
@@ -24,11 +35,11 @@ public class ShadowLog {
 
   private static final int EXTRA_LOG_LENGTH = "l/: \n".length();
 
-  private static final Map<String, Queue<LogItem>> logsByTag = Collections.synchronizedMap(new
-      HashMap<String, Queue<LogItem>>());
+  private static final Map<String, Queue<LogItem>> logsByTag =
+      Collections.synchronizedMap(new HashMap<>());
   private static final Queue<LogItem> logs = new ConcurrentLinkedQueue<>();
-  private static final Map<String, Integer> tagToLevel = Collections.synchronizedMap(new
-      HashMap<String, Integer>());
+  private static final Map<String, Integer> tagToLevel =
+      Collections.synchronizedMap(new HashMap<>());
 
   /**
    * Whether calling {@link Log#wtf} will throw {@link TerribleFailure}. This is analogous to
@@ -103,8 +114,18 @@ public class ShadowLog {
   @Implementation
   protected static int wtf(String tag, String msg, Throwable throwable) {
     addLog(Log.ASSERT, tag, msg, throwable);
+    // invoking the wtfHandler
+    Throwable terribleFailure =
+        reflector(TerribleFailureReflector.class).newTerribleFailure(msg, throwable);
     if (wtfIsFatal) {
-      throw new TerribleFailure(msg, throwable);
+      Util.sneakyThrow(terribleFailure);
+    }
+    TerribleFailureHandler terribleFailureHandler = reflector(LogReflector.class).getWtfHandler();
+    if (RuntimeEnvironment.getApiLevel() >= L.SDK_INT) {
+      terribleFailureHandler.onTerribleFailure(tag, (TerribleFailure) terribleFailure, false);
+    } else {
+      reflector(TerribleFailureHandlerReflector.class, terribleFailureHandler)
+          .onTerribleFailure(tag, (TerribleFailure) terribleFailure);
     }
     return 0;
   }
@@ -139,6 +160,7 @@ public class ShadowLog {
 
   /**
    * Sets the log level of a given tag, that {@link #isLoggable} will follow.
+   *
    * @param tag A log tag
    * @param level A log level, from {@link android.util.Log}
    */
@@ -177,13 +199,26 @@ public class ShadowLog {
   protected static char levelToChar(int level) {
     final char c;
     switch (level) {
-      case Log.ASSERT: c = 'A'; break;
-      case Log.DEBUG:  c = 'D'; break;
-      case Log.ERROR:  c = 'E'; break;
-      case Log.WARN:   c = 'W'; break;
-      case Log.INFO:   c = 'I'; break;
-      case Log.VERBOSE:c = 'V'; break;
-      default:         c = '?';
+      case Log.ASSERT:
+        c = 'A';
+        break;
+      case Log.DEBUG:
+        c = 'D';
+        break;
+      case Log.ERROR:
+        c = 'E';
+        break;
+      case Log.WARN:
+        c = 'W';
+        break;
+      case Log.INFO:
+        c = 'I';
+        break;
+      case Log.VERBOSE:
+        c = 'V';
+        break;
+      default:
+        c = '?';
     }
     return c;
   }
@@ -192,7 +227,7 @@ public class ShadowLog {
       PrintStream ps, String timeString, int level, String tag, String msg, Throwable throwable) {
 
     String outputString;
-    if (timeString != null && timeString.length() > 0) {
+    if (timeString != null && !timeString.isEmpty()) {
       outputString = timeString + " " + levelToChar(level) + "/" + tag + ": " + msg;
     } else {
       outputString = levelToChar(level) + "/" + tag + ": " + msg;
@@ -235,6 +270,7 @@ public class ShadowLog {
     logsByTag.clear();
     tagToLevel.clear();
     wtfIsFatal = false;
+    timeSupplier = null;
   }
 
   @SuppressWarnings("CatchAndPrintStackTrace")
@@ -250,14 +286,7 @@ public class ShadowLog {
         try {
           final PrintStream file = new PrintStream(new FileOutputStream(logging), true);
           stream = file;
-          Runtime.getRuntime()
-              .addShutdownHook(
-                  new Thread() {
-                    @Override
-                    public void run() {
-                      file.close();
-                    }
-                  });
+          Runtime.getRuntime().addShutdownHook(new Thread(file::close));
         } catch (IOException e) {
           e.printStackTrace();
         }
@@ -338,14 +367,22 @@ public class ShadowLog {
     }
   }
 
-  /**
-   * Failure thrown when wtf_is_fatal is true and Log.wtf is called. This is a parallel
-   * implementation of framework's hidden API {@link android.util.Log#TerribleFailure}, to allow
-   * tests to catch / expect these exceptions.
-   */
-  public static final class TerribleFailure extends RuntimeException {
-    TerribleFailure(String msg, Throwable cause) {
-      super(msg, cause);
-    }
+  @ForType(Log.class)
+  interface LogReflector {
+    @Static
+    @Accessor("sWtfHandler")
+    TerribleFailureHandler getWtfHandler();
+  }
+
+  @ForType(TerribleFailureHandler.class)
+  interface TerribleFailureHandlerReflector {
+    void onTerribleFailure(String tag, TerribleFailure what);
+  }
+
+  @ForType(TerribleFailure.class)
+  interface TerribleFailureReflector {
+    // The return value should be generic because TerribleFailure is a hidden class.
+    @Constructor
+    Throwable newTerribleFailure(String msg, Throwable cause);
   }
 }

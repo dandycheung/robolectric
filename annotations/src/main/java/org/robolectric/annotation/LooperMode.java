@@ -14,17 +14,16 @@ import java.lang.annotation.Target;
  * overridden by applying a @LooperMode(NewMode) annotation to a test package, test class, or test
  * method, or via the 'robolectric.looperMode' system property.
  *
- * @see {@link org.robolectric.plugins.LooperModeConfigurer}, {@link
- *     org.robolectric.util.Scheduler}, {@link org.robolectric.shadows.ShadowLooper}
+ * @see org.robolectric.plugins.LooperModeConfigurer
+ * @see org.robolectric.util.Scheduler
+ * @see org.robolectric.shadows.ShadowLooper
  */
 @Documented
 @Retention(RetentionPolicy.RUNTIME)
 @Target({ElementType.PACKAGE, ElementType.TYPE, ElementType.METHOD})
 public @interface LooperMode {
 
-  /**
-   * Specifies the different supported Looper modes.
-   */
+  /** Specifies the different supported Looper modes. */
   enum Mode {
     /**
      * Robolectric's default threading model prior to 4.4.
@@ -92,7 +91,7 @@ public @interface LooperMode {
      *   <li>{@link android.os.Looper} use the real {@link android.os.MessageQueue} to store their
      *       queue of pending tasks
      *   <li>There is only a single clock value, managed via {@link
-     *       org.robolectric.shadows.ShadowSystemClock}. This can be explictly incremented via
+     *       org.robolectric.shadows.ShadowSystemClock}. This can be explicitly incremented via
      *       {@link android.os.SystemClock#setCurrentTimeMillis(long)}, or {@link
      *       org.robolectric.shadows.ShadowLooper#idleFor(Duration)}.
      * </ul>
@@ -119,6 +118,20 @@ public @interface LooperMode {
     PAUSED,
 
     /**
+     * A mode that simulates an android instrumentation test threading model, which has a separate
+     * test thread distinct from the main looper thread.
+     *
+     * <p>Otherwise it is quite similar to PAUSED mode. The clock time is still fixed, and you can
+     * use shadowLooper methods to pause, unpause, and wait for any looper to be idle.
+     *
+     * <p>It is recommended to use this mode in tests that mostly use androidx.test APIs, which will
+     * support being called directly on the main thread or on the test thread. Most org.robolectric
+     * APIs that interact with the android UI (e.g. ActivityController) will raise an exception if
+     * called off the main thread.
+     */
+    INSTRUMENTATION_TEST,
+
+    /**
      * Currently not supported.
      *
      * <p>In future, will have free running threads with an automatically increasing clock.
@@ -126,8 +139,6 @@ public @interface LooperMode {
     // RUNNING
   }
 
-  /**
-   * Set the Looper mode.
-   */
+  /** Set the Looper mode. */
   Mode value();
 }

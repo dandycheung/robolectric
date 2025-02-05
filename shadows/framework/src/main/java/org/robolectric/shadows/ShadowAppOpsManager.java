@@ -1,16 +1,16 @@
 package org.robolectric.shadows;
 
-import static android.os.Build.VERSION_CODES.KITKAT;
-import static android.os.Build.VERSION_CODES.LOLLIPOP;
 import static android.os.Build.VERSION_CODES.M;
 import static android.os.Build.VERSION_CODES.P;
 import static android.os.Build.VERSION_CODES.Q;
 import static android.os.Build.VERSION_CODES.R;
+import static android.os.Build.VERSION_CODES.S;
+import static android.os.Build.VERSION_CODES.TIRAMISU;
 import static java.util.stream.Collectors.toSet;
 import static org.robolectric.shadow.api.Shadow.invokeConstructor;
+import static org.robolectric.util.reflector.Reflector.reflector;
 
-import android.annotation.NonNull;
-import android.annotation.Nullable;
+import android.annotation.RequiresApi;
 import android.annotation.RequiresPermission;
 import android.annotation.SystemApi;
 import android.app.AppOpsManager;
@@ -32,6 +32,7 @@ import android.util.LongSparseArray;
 import android.util.LongSparseLongArray;
 import com.android.internal.app.IAppOpsService;
 import com.google.auto.value.AutoValue;
+import com.google.common.base.Preconditions;
 import com.google.common.collect.HashMultimap;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Multimap;
@@ -47,7 +48,10 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.stream.IntStream;
+import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
 import org.robolectric.RuntimeEnvironment;
+import org.robolectric.annotation.ClassName;
 import org.robolectric.annotation.HiddenApi;
 import org.robolectric.annotation.Implementation;
 import org.robolectric.annotation.Implements;
@@ -56,7 +60,10 @@ import org.robolectric.annotation.Resetter;
 import org.robolectric.shadow.api.Shadow;
 import org.robolectric.util.ReflectionHelpers;
 import org.robolectric.util.ReflectionHelpers.ClassParameter;
+import org.robolectric.util.reflector.Accessor;
+import org.robolectric.util.reflector.ForType;
 
+/** Shadow for {@link AppOpsManager}. */
 @Implements(value = AppOpsManager.class)
 public class ShadowAppOpsManager {
 
@@ -69,24 +76,24 @@ public class ShadowAppOpsManager {
 
   @RealObject private AppOpsManager realObject;
 
-  private static boolean staticallyInitialized = false;
+  private static boolean staticallyInitialized;
 
   // Recorded operations, keyed by (uid, packageName)
-  private final Multimap<Key, Integer> storedOps = HashMultimap.create();
+  private static final Multimap<Key, Integer> storedOps = HashMultimap.create();
   // (uid, packageName, opCode) => opMode
-  private final Map<Key, Integer> appModeMap = new HashMap<>();
+  private static final Map<Key, Integer> appModeMap = new HashMap<>();
 
   // (uid, packageName, opCode)
-  private final Set<Key> longRunningOp = new HashSet<>();
+  private static final Set<Key> longRunningOp = new HashSet<>();
 
-  private final Map<OnOpChangedListener, Key> appOpListeners = new ArrayMap<>();
+  private static final Map<OnOpChangedListener, Set<Key>> appOpListeners = new ArrayMap<>();
 
-  // op | (usage << 8) => ModeAndExcpetion
-  private final Map<Integer, ModeAndException> audioRestrictions = new HashMap<>();
+  // op | (usage << 8) => ModeAndException
+  private static final Map<Integer, ModeAndException> audioRestrictions = new HashMap<>();
 
   private Context context;
 
-  @Implementation(minSdk = KITKAT)
+  @Implementation
   protected void __constructor__(Context context, IAppOpsService service) {
     this.context = context;
     invokeConstructor(
@@ -96,7 +103,7 @@ public class ShadowAppOpsManager {
         ClassParameter.from(IAppOpsService.class, service));
   }
 
-  @Implementation(minSdk = KITKAT)
+  @Implementation
   protected static void __staticInitializer__() {
     staticallyInitialized = true;
     Shadow.directInitialize(AppOpsManager.class);
@@ -105,11 +112,14 @@ public class ShadowAppOpsManager {
   /**
    * Change the operating mode for the given op in the given app package. You must pass in both the
    * uid and name of the application whose mode is being modified; if these do not match, the
-   * modification will not be applied.
+   * modification will still be applied.
    *
    * <p>This method is public for testing {@link #checkOpNoThrow}. If {@link #checkOpNoThrow} is
-   * called afterwards with the {@code op}, {@code ui}, and {@code packageName} provided, it will
+   * called afterwards with the {@code op}, {@code uid}, and {@code packageName} provided, it will
    * return the {@code mode} set here.
+   *
+   * <p>The mode set by this method takes precedence over the mode set by {@link #setMode(String,
+   * int, String, int)}. This may not reflect the true implementation.
    *
    * @param op The operation to modify. One of the OPSTR_* constants.
    * @param uid The user id of the application whose mode will be changed.
@@ -126,11 +136,11 @@ public class ShadowAppOpsManager {
   /**
    * Int version of {@link #setMode(String, int, String, int)}.
    *
-   * <p>This method is public for testing {@link #checkOpNoThrow}. If {@link #checkOpNoThrow} is *
-   * called afterwards with the {@code op}, {@code ui}, and {@code packageName} provided, it will *
+   * <p>This method is public for testing {@link #checkOpNoThrow}. If {@link #checkOpNoThrow} is
+   * called afterwards with the {@code op}, {@code uid}, and {@code packageName} provided, it will
    * return the {@code mode} set here.
    */
-  @Implementation(minSdk = KITKAT)
+  @Implementation
   @HiddenApi
   public void setMode(int op, int uid, String packageName, int mode) {
     Integer oldMode = appModeMap.put(Key.create(uid, packageName, op), mode);
@@ -138,13 +148,68 @@ public class ShadowAppOpsManager {
       return;
     }
 
-    for (Map.Entry<OnOpChangedListener, Key> entry : appOpListeners.entrySet()) {
-      if (op == entry.getValue().getOpCode()
-          && (entry.getValue().getPackageName() == null
-              || entry.getValue().getPackageName().equals(packageName))) {
-        String[] sOpToString = ReflectionHelpers.getStaticField(AppOpsManager.class, "sOpToString");
-        entry.getKey().onOpChanged(sOpToString[op], packageName);
+    for (Map.Entry<OnOpChangedListener, Set<Key>> entry : appOpListeners.entrySet()) {
+      for (Key key : entry.getValue()) {
+        if (op == key.getOpCode()
+            && (key.getPackageName() == null || key.getPackageName().equals(packageName))) {
+          entry.getKey().onOpChanged(getOpString(op), packageName);
+        }
       }
+    }
+  }
+
+  /**
+   * Change the operating mode for the given op in the given uid space.
+   *
+   * <p>This method is public for testing {@link #checkOpNoThrow}. If {@link #checkOpNoThrow} is
+   * called afterwards with the {@code op} and {@code uid} provided, and any {@code packageName}, it
+   * will return the {@code mode} set here.
+   *
+   * <p>The mode set by {@link #setMode(String, int, String, int)} takes precedence over the mode
+   * set by this method. This may not reflect the true implementation.
+   *
+   * @param op The operation to modify. One of the OPSTR_* constants.
+   * @param uid The user id of the application whose mode will be changed.
+   */
+  @Implementation(minSdk = P)
+  @HiddenApi
+  @SystemApi
+  @RequiresPermission(android.Manifest.permission.MANAGE_APP_OPS_MODES)
+  protected void setUidMode(String op, int uid, int mode) {
+    setUidMode(AppOpsManager.strOpToOp(op), uid, mode);
+  }
+
+  /**
+   * Int version of {@link #setUidMode(String, int, int)}.
+   *
+   * <p>This method is public for testing {@link #checkOpNoThrow}. If {@link #checkOpNoThrow} is
+   * called afterwards with the {@code op}, {@code ui}, and {@code packageName} provided, it will
+   * return the {@code mode} set here.
+   */
+  @Implementation(minSdk = M)
+  @HiddenApi
+  protected void setUidMode(int op, int uid, int mode) {
+    Integer oldMode = appModeMap.put(Key.create(uid, null, op), mode);
+    if (Objects.equals(oldMode, mode)) {
+      return;
+    }
+
+    for (Map.Entry<OnOpChangedListener, Set<Key>> entry : appOpListeners.entrySet()) {
+      for (Key key : entry.getValue()) {
+        if (op == key.getOpCode()) {
+          entry.getKey().onOpChanged(getOpString(op), null);
+        }
+      }
+    }
+  }
+
+  protected String getOpString(int opCode) {
+    if (RuntimeEnvironment.getApiLevel() <= TIRAMISU) {
+      String[] sOpToString = ReflectionHelpers.getStaticField(AppOpsManager.class, "sOpToString");
+      return sOpToString[opCode];
+    } else {
+      Object[] sAppOpInfos = ReflectionHelpers.getStaticField(AppOpsManager.class, "sAppOpInfos");
+      return reflector(AppOpInfoReflector.class, sAppOpInfos[opCode]).getName();
     }
   }
 
@@ -161,9 +226,9 @@ public class ShadowAppOpsManager {
   @Implementation(minSdk = Q)
   @HiddenApi
   @SystemApi
-  @NonNull
+  @Nonnull
   protected List<PackageOps> getPackagesForOps(@Nullable String[] ops) {
-    List<PackageOps> result = null;
+    List<PackageOps> result;
 
     if (ops == null) {
       int[] intOps = null;
@@ -189,7 +254,7 @@ public class ShadowAppOpsManager {
    * @return app ops information about each package, containing only ops that were specified as an
    *     argument
    */
-  @Implementation(minSdk = KITKAT) // to be consistent with setMode() shadow implementations
+  @Implementation
   @HiddenApi
   protected List<PackageOps> getPackagesForOps(int[] ops) {
     Set<Integer> relevantOps;
@@ -228,12 +293,27 @@ public class ShadowAppOpsManager {
     return checkOpNoThrow(AppOpsManager.strOpToOp(op), uid, packageName);
   }
 
-  private int unsafeCheckOpRawNoThrow(int op, int uid, String packageName) {
+  @Implementation(minSdk = R)
+  protected int unsafeCheckOpRawNoThrow(int op, int uid, String packageName) {
     Integer mode = appModeMap.get(Key.create(uid, packageName, op));
-    if (mode == null) {
-      return AppOpsManager.MODE_ALLOWED;
+    if (mode != null) {
+      return mode;
     }
-    return mode;
+    mode = appModeMap.get(Key.create(uid, null, op));
+    if (mode != null) {
+      return mode;
+    }
+    return AppOpsManager.MODE_ALLOWED;
+  }
+
+  /**
+   * Like {@link #unsafeCheckOpNoThrow(String, int, String)} but returns the <em>raw</em> mode
+   * associated with the op. Does not throw a security exception, does not translate {@link
+   * AppOpsManager#MODE_FOREGROUND}.
+   */
+  @Implementation(minSdk = Q)
+  public int unsafeCheckOpRawNoThrow(String op, int uid, String packageName) {
+    return unsafeCheckOpRawNoThrow(AppOpsManager.strOpToOp(op), uid, packageName);
   }
 
   /** Stores a fake long-running operation. It does not throw if a wrong uid is passed. */
@@ -248,7 +328,7 @@ public class ShadowAppOpsManager {
   }
 
   /** Stores a fake long-running operation. It does not throw if a wrong uid is passed. */
-  @Implementation(minSdk = KITKAT, maxSdk = Q)
+  @Implementation(maxSdk = Q)
   protected int startOpNoThrow(int op, int uid, String packageName) {
     int mode = unsafeCheckOpRawNoThrow(op, uid, packageName);
     if (mode == AppOpsManager.MODE_ALLOWED) {
@@ -269,7 +349,7 @@ public class ShadowAppOpsManager {
   }
 
   /** Removes a fake long-running operation from the set. */
-  @Implementation(minSdk = KITKAT, maxSdk = Q)
+  @Implementation(maxSdk = Q)
   protected void finishOp(int op, int uid, String packageName) {
     longRunningOp.remove(Key.create(uid, packageName, op));
   }
@@ -295,16 +375,6 @@ public class ShadowAppOpsManager {
     return longRunningOp.contains(Key.create(uid, packageName, AppOpsManager.strOpToOp(op)));
   }
 
-  /**
-   * Like {@link #unsafeCheckOpNoThrow(String, int, String)} but returns the <em>raw</em> mode
-   * associated with the op. Does not throw a security exception, does not translate {@link
-   * AppOpsManager#MODE_FOREGROUND}.
-   */
-  @Implementation(minSdk = Q)
-  public int unsafeCheckOpRawNoThrow(String op, int uid, String packageName) {
-    return unsafeCheckOpRawNoThrow(AppOpsManager.strOpToOp(op), uid, packageName);
-  }
-
   @Implementation(minSdk = P)
   @Deprecated // renamed to unsafeCheckOpNoThrow
   protected int checkOpNoThrow(String op, int uid, String packageName) {
@@ -315,16 +385,16 @@ public class ShadowAppOpsManager {
    * Like {@link AppOpsManager#checkOp} but instead of throwing a {@link SecurityException} it
    * returns {@link AppOpsManager#MODE_ERRORED}.
    *
-   * <p>Made public for testing {@link #setMode} as the method is {@coe @hide}.
+   * <p>Made public for testing {@link #setMode} as the method is {@code @hide}.
    */
-  @Implementation(minSdk = KITKAT)
+  @Implementation
   @HiddenApi
   public int checkOpNoThrow(int op, int uid, String packageName) {
     int mode = unsafeCheckOpRawNoThrow(op, uid, packageName);
     return mode == AppOpsManager.MODE_FOREGROUND ? AppOpsManager.MODE_ALLOWED : mode;
   }
 
-  @Implementation(minSdk = KITKAT)
+  @Implementation
   public int noteOp(int op, int uid, String packageName) {
     return noteOpInternal(op, uid, packageName, "", "");
   }
@@ -352,7 +422,7 @@ public class ShadowAppOpsManager {
     return noteOpInternal(op, uid, packageName, attributionTag, message);
   }
 
-  @Implementation(minSdk = KITKAT)
+  @Implementation
   protected int noteOpNoThrow(int op, int uid, String packageName) {
     storedOps.put(Key.create(uid, packageName, null), op);
     return checkOpNoThrow(op, uid, packageName);
@@ -394,21 +464,24 @@ public class ShadowAppOpsManager {
     return checkOpNoThrow(op, proxiedUid, proxiedPackageName);
   }
 
-  @Implementation(minSdk = Build.VERSION_CODES.S)
+  @RequiresApi(api = S)
+  @Implementation(minSdk = S)
   protected int noteProxyOpNoThrow(
       int op,
-      AttributionSource attributionSource,
+      @ClassName("android.content.AttributionSource") Object attributionSource,
       String message,
-      boolean ignoredSkipProxyOperation) {
+      boolean skipProxyOperation) {
+    Preconditions.checkArgument(attributionSource instanceof AttributionSource);
+    AttributionSource castedAttributionSource = (AttributionSource) attributionSource;
     return noteProxyOpNoThrow(
         op,
-        attributionSource.getNextPackageName(),
-        attributionSource.getNextUid(),
-        attributionSource.getNextAttributionTag(),
+        castedAttributionSource.getNextPackageName(),
+        castedAttributionSource.getNextUid(),
+        castedAttributionSource.getNextAttributionTag(),
         message);
   }
 
-  @Implementation(minSdk = KITKAT)
+  @Implementation
   @HiddenApi
   public List<PackageOps> getOpsForPackage(int uid, String packageName, int[] ops) {
     Set<Integer> opFilter = new HashSet<>();
@@ -450,7 +523,7 @@ public class ShadowAppOpsManager {
     return getOpsForPackage(uid, packageName, intOpsList.stream().mapToInt(i -> i).toArray());
   }
 
-  @Implementation(minSdk = KITKAT)
+  @Implementation
   protected void checkPackage(int uid, String packageName) {
     try {
       // getPackageUid was introduced in API 24, so we call it on the shadow class
@@ -471,7 +544,7 @@ public class ShadowAppOpsManager {
    *
    * <p>This method is public for testing, as the original method is {@code @hide}.
    */
-  @Implementation(minSdk = LOLLIPOP)
+  @Implementation
   @HiddenApi
   public void setRestriction(
       int code, @AttributeUsage int usage, int mode, String[] exceptionPackages) {
@@ -485,18 +558,28 @@ public class ShadowAppOpsManager {
     return audioRestrictions.get(getAudioRestrictionKey(code, usage));
   }
 
-  @Implementation(minSdk = KITKAT)
+  @Implementation
   protected void startWatchingMode(int op, String packageName, OnOpChangedListener callback) {
-    appOpListeners.put(callback, Key.create(null, packageName, op));
+    startWatchingModeImpl(op, packageName, 0, callback);
   }
 
   @Implementation(minSdk = Q)
   protected void startWatchingMode(
       int op, String packageName, int flags, OnOpChangedListener callback) {
-    appOpListeners.put(callback, Key.create(null, packageName, op));
+    startWatchingModeImpl(op, packageName, flags, callback);
   }
 
-  @Implementation(minSdk = KITKAT)
+  private void startWatchingModeImpl(
+      int op, String packageName, int flags, OnOpChangedListener callback) {
+    Set<Key> keys = appOpListeners.get(callback);
+    if (keys == null) {
+      keys = new HashSet<>();
+      appOpListeners.put(callback, keys);
+    }
+    keys.add(Key.create(null, packageName, op));
+  }
+
+  @Implementation
   protected void stopWatchingMode(OnOpChangedListener callback) {
     appOpListeners.remove(callback);
   }
@@ -589,7 +672,7 @@ public class ShadowAppOpsManager {
     }
   }
 
-  /** Class holding usage mode and excpetion packages. */
+  /** Class holding usage mode and exception packages. */
   public static class ModeAndException {
     public final int mode;
     public final List<String> exceptionPackages;
@@ -612,5 +695,16 @@ public class ShadowAppOpsManager {
     if (RuntimeEnvironment.getApiLevel() >= R && staticallyInitialized) {
       ReflectionHelpers.setStaticField(AppOpsManager.class, "sOnOpNotedCallback", null);
     }
+    storedOps.clear();
+    appModeMap.clear();
+    longRunningOp.clear();
+    appOpListeners.clear();
+    audioRestrictions.clear();
+  }
+
+  @ForType(className = "android.app.AppOpInfo")
+  interface AppOpInfoReflector {
+    @Accessor("name")
+    String getName();
   }
 }

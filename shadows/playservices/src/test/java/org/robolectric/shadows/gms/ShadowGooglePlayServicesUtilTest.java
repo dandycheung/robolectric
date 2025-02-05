@@ -11,6 +11,7 @@ import android.app.Activity;
 import android.content.Context;
 import com.google.android.gms.common.ConnectionResult;
 import com.google.android.gms.common.GooglePlayServicesUtil;
+import org.junit.After;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
@@ -24,18 +25,25 @@ import org.robolectric.annotation.Config;
 import org.robolectric.shadows.gms.ShadowGooglePlayServicesUtil.GooglePlayServicesUtilImpl;
 
 @RunWith(RobolectricTestRunner.class)
-@Config(manifest = Config.NONE, shadows = {ShadowGooglePlayServicesUtil.class})
+@Config(
+    manifest = Config.NONE,
+    shadows = {ShadowGooglePlayServicesUtil.class})
 public class ShadowGooglePlayServicesUtilTest {
 
-  @Mock
-  private GooglePlayServicesUtilImpl mockGooglePlayServicesUtil;
+  @Mock private GooglePlayServicesUtilImpl mockGooglePlayServicesUtil;
 
-  @Rule
-  public ExpectedException thrown = ExpectedException.none();
+  @Rule public ExpectedException thrown = ExpectedException.none();
+
+  private AutoCloseable mock;
 
   @Before
   public void setup() {
-    MockitoAnnotations.initMocks(this);
+    mock = MockitoAnnotations.openMocks(this);
+  }
+
+  @After
+  public void tearDown() throws Exception {
+    mock.close();
   }
 
   @Test
@@ -60,8 +68,8 @@ public class ShadowGooglePlayServicesUtilTest {
   @Test
   public void canRedirectStaticMethodToImplementation() {
     ShadowGooglePlayServicesUtil.provideImpl(mockGooglePlayServicesUtil);
-    when(mockGooglePlayServicesUtil.isGooglePlayServicesAvailable(
-        any(Context.class))).thenReturn(ConnectionResult.INTERNAL_ERROR);
+    when(mockGooglePlayServicesUtil.isGooglePlayServicesAvailable(any(Context.class)))
+        .thenReturn(ConnectionResult.INTERNAL_ERROR);
     assertEquals(
         ConnectionResult.INTERNAL_ERROR,
         GooglePlayServicesUtil.isGooglePlayServicesAvailable(RuntimeEnvironment.getApplication()));
@@ -70,8 +78,8 @@ public class ShadowGooglePlayServicesUtilTest {
   @Test
   public void getErrorString_goesToRealImpl() {
     assertEquals("SUCCESS", GooglePlayServicesUtil.getErrorString(ConnectionResult.SUCCESS));
-    assertEquals("SERVICE_MISSING", GooglePlayServicesUtil
-        .getErrorString(ConnectionResult.SERVICE_MISSING));
+    assertEquals(
+        "SERVICE_MISSING", GooglePlayServicesUtil.getErrorString(ConnectionResult.SERVICE_MISSING));
   }
 
   @Test
@@ -86,14 +94,14 @@ public class ShadowGooglePlayServicesUtilTest {
 
   @Test
   public void getErrorDialog() {
-    assertNotNull(GooglePlayServicesUtil.getErrorDialog(
-        ConnectionResult.SERVICE_MISSING, new Activity(), 0));
-    assertNull(GooglePlayServicesUtil.getErrorDialog(
-        ConnectionResult.SUCCESS, new Activity(), 0));
-    assertNotNull(GooglePlayServicesUtil.getErrorDialog(
-        ConnectionResult.SERVICE_MISSING, new Activity(), 0, null));
-    assertNull(GooglePlayServicesUtil.getErrorDialog(
-        ConnectionResult.SUCCESS, new Activity(), 0, null));
+    assertNotNull(
+        GooglePlayServicesUtil.getErrorDialog(ConnectionResult.SERVICE_MISSING, new Activity(), 0));
+    assertNull(GooglePlayServicesUtil.getErrorDialog(ConnectionResult.SUCCESS, new Activity(), 0));
+    assertNotNull(
+        GooglePlayServicesUtil.getErrorDialog(
+            ConnectionResult.SERVICE_MISSING, new Activity(), 0, null));
+    assertNull(
+        GooglePlayServicesUtil.getErrorDialog(ConnectionResult.SUCCESS, new Activity(), 0, null));
   }
 
   @Test
@@ -104,13 +112,6 @@ public class ShadowGooglePlayServicesUtilTest {
     assertNull(
         GooglePlayServicesUtil.getErrorPendingIntent(
             ConnectionResult.SUCCESS, RuntimeEnvironment.getApplication(), 0));
-  }
-
-  @Test
-  public void getOpenSourceSoftwareLicenseInfo_defaultNotNull() {
-    assertNotNull(
-        GooglePlayServicesUtil.getOpenSourceSoftwareLicenseInfo(
-            RuntimeEnvironment.getApplication()));
   }
 
   @Test

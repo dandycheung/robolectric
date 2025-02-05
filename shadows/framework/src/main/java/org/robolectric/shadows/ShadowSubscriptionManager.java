@@ -6,6 +6,9 @@ import static android.os.Build.VERSION_CODES.N;
 import static android.os.Build.VERSION_CODES.O_MR1;
 import static android.os.Build.VERSION_CODES.P;
 import static android.os.Build.VERSION_CODES.Q;
+import static android.os.Build.VERSION_CODES.R;
+import static android.os.Build.VERSION_CODES.TIRAMISU;
+import static android.os.Build.VERSION_CODES.UPSIDE_DOWN_CAKE;
 
 import android.os.Build.VERSION;
 import android.telephony.SubscriptionInfo;
@@ -19,6 +22,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.Executor;
 import org.robolectric.annotation.HiddenApi;
 import org.robolectric.annotation.Implementation;
 import org.robolectric.annotation.Implements;
@@ -28,13 +32,24 @@ import org.robolectric.util.ReflectionHelpers;
 @Implements(value = SubscriptionManager.class, minSdk = LOLLIPOP_MR1)
 public class ShadowSubscriptionManager {
 
+  private static boolean readPhoneStatePermission = true;
+  private static boolean readPhoneNumbersPermission = true;
   public static final int INVALID_PHONE_INDEX =
       ReflectionHelpers.getStaticField(SubscriptionManager.class, "INVALID_PHONE_INDEX");
 
+  private static int activeDataSubscriptionId = SubscriptionManager.INVALID_SUBSCRIPTION_ID;
   private static int defaultSubscriptionId = SubscriptionManager.INVALID_SUBSCRIPTION_ID;
   private static int defaultDataSubscriptionId = SubscriptionManager.INVALID_SUBSCRIPTION_ID;
   private static int defaultSmsSubscriptionId = SubscriptionManager.INVALID_SUBSCRIPTION_ID;
   private static int defaultVoiceSubscriptionId = SubscriptionManager.INVALID_SUBSCRIPTION_ID;
+
+  private static final Map<Integer, String> phoneNumberMap = new HashMap<>();
+
+  /** Returns value set with {@link #setActiveDataSubscriptionId(int)}. */
+  @Implementation(minSdk = R)
+  protected static int getActiveDataSubscriptionId() {
+    return activeDataSubscriptionId;
+  }
 
   /** Returns value set with {@link #setDefaultSubscriptionId(int)}. */
   @Implementation(minSdk = N)
@@ -84,6 +99,11 @@ public class ShadowSubscriptionManager {
     return defaultDataSubscriptionId;
   }
 
+  /** Sets the value that will be returned by {@link #getActiveDataSubscriptionId()}. */
+  public static void setActiveDataSubscriptionId(int activeDataSubscriptionId) {
+    ShadowSubscriptionManager.activeDataSubscriptionId = activeDataSubscriptionId;
+  }
+
   /** Sets the value that will be returned by {@link #getDefaultSubscriptionId()}. */
   public static void setDefaultSubscriptionId(int defaultSubscriptionId) {
     ShadowSubscriptionManager.defaultSubscriptionId = defaultSubscriptionId;
@@ -102,31 +122,40 @@ public class ShadowSubscriptionManager {
   }
 
   /**
-   * Cache of phone IDs used by {@link getPhoneId}. Managed by {@link putPhoneId} and {@link
-   * removePhoneId}.
+   * Cache of phone IDs used by {@link #getPhoneId}. Managed by {@link #putPhoneId} and {@link
+   * #removePhoneId}.
    */
-  private static Map<Integer, Integer> phoneIds = new HashMap<>();
+  private static final Map<Integer, Integer> phoneIds = new HashMap<>();
 
   /**
-   * Cache of {@link SubscriptionInfo} used by {@link #getActiveSubscriptionInfoList}.
-   * Managed by {@link #setActiveSubscriptionInfoList}.
+   * Cache of {@link SubscriptionInfo} used by {@link #getActiveSubscriptionInfoList}. Managed by
+   * {@link #setActiveSubscriptionInfoList}. May be {@code null}.
    */
-  private List<SubscriptionInfo> subscriptionList = new ArrayList<>();
+  private static List<SubscriptionInfo> subscriptionList = new ArrayList<>();
+
+  /**
+   * Cache of {@link SubscriptionInfo} used by {@link #getAccessibleSubscriptionInfoList}. Managed
+   * by {@link #setAccessibleSubscriptionInfos}. May be {@code null}.
+   */
+  private List<SubscriptionInfo> accessibleSubscriptionList = new ArrayList<>();
+
   /**
    * Cache of {@link SubscriptionInfo} used by {@link #getAvailableSubscriptionInfoList}. Managed by
-   * {@link #setAvailableSubscriptionInfos}.
+   * {@link #setAvailableSubscriptionInfos}. May be {@code null}.
    */
   private List<SubscriptionInfo> availableSubscriptionList = new ArrayList<>();
+
   /**
    * List of listeners to be notified if the list of {@link SubscriptionInfo} changes. Managed by
-   * {@link #addOnSubscriptionsChangedListener} and {@link removeOnSubscriptionsChangedListener}.
+   * {@link #addOnSubscriptionsChangedListener} and {@link #removeOnSubscriptionsChangedListener}.
    */
-  private List<OnSubscriptionsChangedListener> listeners = new ArrayList<>();
+  private final List<OnSubscriptionsChangedListener> listeners = new ArrayList<>();
+
   /**
    * Cache of subscription ids used by {@link #isNetworkRoaming}. Managed by {@link
    * #setNetworkRoamingStatus} and {@link #clearNetworkRoamingStatus}.
    */
-  private Set<Integer> roamingSimSubscriptionIds = new HashSet<>();
+  private final Set<Integer> roamingSimSubscriptionIds = new HashSet<>();
 
   /**
    * Returns the active list of {@link SubscriptionInfo} that were set via {@link
@@ -134,7 +163,17 @@ public class ShadowSubscriptionManager {
    */
   @Implementation(minSdk = LOLLIPOP_MR1)
   protected List<SubscriptionInfo> getActiveSubscriptionInfoList() {
+    checkReadPhoneStatePermission();
     return subscriptionList;
+  }
+
+  /**
+   * Returns the accessible list of {@link SubscriptionInfo} that were set via {@link
+   * #setAccessibleSubscriptionInfoList}.
+   */
+  @Implementation(minSdk = O_MR1)
+  protected List<SubscriptionInfo> getAccessibleSubscriptionInfoList() {
+    return accessibleSubscriptionList;
   }
 
   /**
@@ -152,15 +191,19 @@ public class ShadowSubscriptionManager {
    */
   @Implementation(minSdk = LOLLIPOP_MR1)
   protected int getActiveSubscriptionInfoCount() {
+    checkReadPhoneStatePermission();
     return subscriptionList == null ? 0 : subscriptionList.size();
   }
 
   /**
    * Returns subscription that were set via {@link #setActiveSubscriptionInfoList} if it can find
    * one with the specified id or null if none found.
+   *
+   * <p>An exception will be thrown if the READ_PHONE_STATE permission has not been granted.
    */
   @Implementation(minSdk = LOLLIPOP_MR1)
   protected SubscriptionInfo getActiveSubscriptionInfo(int subId) {
+    checkReadPhoneStatePermission();
     if (subscriptionList == null) {
       return null;
     }
@@ -194,6 +237,7 @@ public class ShadowSubscriptionManager {
    */
   @Implementation(minSdk = N)
   protected SubscriptionInfo getActiveSubscriptionInfoForSimSlotIndex(int slotIndex) {
+    checkReadPhoneStatePermission();
     if (subscriptionList == null) {
       return null;
     }
@@ -208,6 +252,13 @@ public class ShadowSubscriptionManager {
   /**
    * Sets the active list of {@link SubscriptionInfo}. This call internally triggers {@link
    * OnSubscriptionsChangedListener#onSubscriptionsChanged()} to all the listeners.
+   *
+   * <p>"Active" here means subscriptions which are currently mapped to a live modem stack in the
+   * device (i.e. the modem will attempt to use them to connect to nearby towers), and they are
+   * expected to have {@link SubscriptionInfo#getSimSlotIndex()} >= 0. A subscription being "active"
+   * in the device does NOT have any relation to a carrier's "activation" process for subscribers'
+   * SIMs.
+   *
    * @param list - The subscription info list, can be null.
    */
   public void setActiveSubscriptionInfoList(List<SubscriptionInfo> list) {
@@ -216,8 +267,33 @@ public class ShadowSubscriptionManager {
   }
 
   /**
-   * Sets the active list of {@link SubscriptionInfo}. This call internally triggers {@link
+   * Sets the accessible list of {@link SubscriptionInfo}. This call internally triggers {@link
    * OnSubscriptionsChangedListener#onSubscriptionsChanged()} to all the listeners.
+   *
+   * <p>"Accessible" here means subscriptions which are eSIM ({@link SubscriptionInfo#isEmbedded})
+   * and "owned" by the calling app, i.e. by {@link
+   * SubscriptionManager#canManageSubscription(SubscriptionInfo)}. They may be active, or
+   * installed-but-inactive. This is generally intended to be called by carrier apps that directly
+   * manage their own eSIM profiles on the device in concert with {@link
+   * android.telephony.euicc.EuiccManager}.
+   *
+   * @param list - The subscription info list, can be null.
+   */
+  public void setAccessibleSubscriptionInfoList(List<SubscriptionInfo> list) {
+    accessibleSubscriptionList = list;
+    dispatchOnSubscriptionsChanged();
+  }
+
+  /**
+   * Sets the available list of {@link SubscriptionInfo}. This call internally triggers {@link
+   * OnSubscriptionsChangedListener#onSubscriptionsChanged()} to all the listeners.
+   *
+   * <p>"Available" here means all active subscriptions (see {@link #setActiveSubscriptionInfoList})
+   * combined with all installed-but-inactive eSIM subscriptions (similar to {@link
+   * #setAccessibleSubscriptionInfoList}, but not filtered to one particular app's "ownership"
+   * rights for subscriptions). This is generally intended to be called by system components such as
+   * the eSIM LPA or Settings that allow the user to manage all subscriptions on the device through
+   * some system-provided user interface.
    *
    * @param list - The subscription info list, can be null.
    */
@@ -239,7 +315,19 @@ public class ShadowSubscriptionManager {
   }
 
   /**
-   * Sets the active list of {@link SubscriptionInfo}. This call internally triggers {@link
+   * Sets the accessible list of {@link SubscriptionInfo}. This call internally triggers {@link
+   * OnSubscriptionsChangedListener#onSubscriptionsChanged()} to all the listeners.
+   */
+  public void setAccessibleSubscriptionInfos(SubscriptionInfo... infos) {
+    if (infos == null) {
+      setAccessibleSubscriptionInfoList(ImmutableList.of());
+    } else {
+      setAccessibleSubscriptionInfoList(Arrays.asList(infos));
+    }
+  }
+
+  /**
+   * Sets the available list of {@link SubscriptionInfo}. This call internally triggers {@link
    * OnSubscriptionsChangedListener#onSubscriptionsChanged()} to all the listeners.
    */
   public void setAvailableSubscriptionInfos(SubscriptionInfo... infos) {
@@ -261,12 +349,33 @@ public class ShadowSubscriptionManager {
   }
 
   /**
+   * Adds a listener to a local list of listeners. Will be triggered by {@link
+   * #setActiveSubscriptionInfoList} when the local list of {@link SubscriptionInfo} is updated.
+   */
+  @Implementation(minSdk = R)
+  protected void addOnSubscriptionsChangedListener(
+      Executor executor, OnSubscriptionsChangedListener listener) {
+    listeners.add(listener);
+    listener.onSubscriptionsChanged();
+  }
+
+  /**
    * Removes a listener from a local list of listeners. Will be triggered by {@link
    * #setActiveSubscriptionInfoList} when the local list of {@link SubscriptionInfo} is updated.
    */
   @Implementation(minSdk = LOLLIPOP_MR1)
   protected void removeOnSubscriptionsChangedListener(OnSubscriptionsChangedListener listener) {
     listeners.remove(listener);
+  }
+
+  /**
+   * Check if a listener exists in the {@link ShadowSubscriptionManager#listeners}.
+   *
+   * @param listener The listener to check.
+   * @return boolean True if the listener already added, otherwise false.
+   */
+  public boolean hasOnSubscriptionsChangedListener(OnSubscriptionsChangedListener listener) {
+    return listeners.contains(listener);
   }
 
   /** Returns subscription Ids that were set via {@link #setActiveSubscriptionInfoList}. */
@@ -295,7 +404,7 @@ public class ShadowSubscriptionManager {
   }
 
   /** Clears the local cache of roaming subscription Ids used by {@link #isNetworkRoaming}. */
-  public void clearNetworkRoamingStatus(){
+  public void clearNetworkRoamingStatus() {
     roamingSimSubscriptionIds.clear();
   }
 
@@ -322,13 +431,13 @@ public class ShadowSubscriptionManager {
     return roamingSimSubscriptionIds.contains(simSubscriptionId);
   }
 
-  /** Adds a subscription ID-phone ID mapping to the map used by {@link getPhoneId}. */
+  /** Adds a subscription ID-phone ID mapping to the map used by {@link #getPhoneId}. */
   public static void putPhoneId(int subId, int phoneId) {
     phoneIds.put(subId, phoneId);
   }
 
   /**
-   * Removes a subscription ID-phone ID mapping from the map used by {@link getPhoneId}.
+   * Removes a subscription ID-phone ID mapping from the map used by {@link #getPhoneId}.
    *
    * @return the previous phone ID associated with the subscription ID, or null if there was no
    *     mapping for the subscription ID
@@ -339,15 +448,15 @@ public class ShadowSubscriptionManager {
 
   /**
    * Removes all mappings between subscription IDs and phone IDs from the map used by {@link
-   * getPhoneId}.
+   * #getPhoneId}.
    */
   public static void clearPhoneIds() {
     phoneIds.clear();
   }
 
   /**
-   * Uses the map of subscription IDs to phone IDs managed by {@link putPhoneId} and {@link
-   * removePhoneId} to return the phone ID for a given subscription ID.
+   * Uses the map of subscription IDs to phone IDs managed by {@link #putPhoneId} and {@link
+   * #removePhoneId} to return the phone ID for a given subscription ID.
    */
   @Implementation(minSdk = LOLLIPOP_MR1, maxSdk = P)
   @HiddenApi
@@ -358,13 +467,119 @@ public class ShadowSubscriptionManager {
     return INVALID_PHONE_INDEX;
   }
 
+  /**
+   * Older form of {@link #getSubscriptionId} that was designed prior to mainstream multi-SIM
+   * support, so its {@code int[]} return type ended up being an unused vestige from that older
+   * design.
+   */
+  @Implementation(minSdk = LOLLIPOP_MR1)
+  @HiddenApi
+  protected static int[] getSubId(int slotIndex) {
+    int subId = getSubscriptionId(slotIndex);
+    return subId == SubscriptionManager.INVALID_SUBSCRIPTION_ID ? null : new int[] {subId};
+  }
+
+  /**
+   * Older form of {@link #getSubscriptionId} that was designed prior to mainstream multi-SIM
+   * support, so its {@code int[]} return type ended up being an unused vestige from that older
+   * design.
+   */
+  @Implementation(minSdk = Q)
+  protected int[] getSubscriptionIds(int slotIndex) {
+    return getSubId(slotIndex);
+  }
+
+  /**
+   * Derives the subscription ID corresponding to an "active" {@link SubscriptionInfo} for the given
+   * SIM slot index.
+   */
+  @Implementation(minSdk = UPSIDE_DOWN_CAKE)
+  protected static int getSubscriptionId(int slotIndex) {
+    // Intentionally not re-calling getActiveSubscriptionInfoForSimSlotIndex since this API does not
+    // require any permissions (and this is static).
+    if (subscriptionList == null) {
+      return SubscriptionManager.INVALID_SUBSCRIPTION_ID;
+    }
+    for (SubscriptionInfo info : subscriptionList) {
+      if (info.getSimSlotIndex() == slotIndex) {
+        return info.getSubscriptionId();
+      }
+    }
+    return SubscriptionManager.INVALID_SUBSCRIPTION_ID;
+  }
+
+  /**
+   * When set to false methods requiring {@link android.Manifest.permission#READ_PHONE_STATE}
+   * permission will throw a {@link SecurityException}. By default it's set to true for backwards
+   * compatibility.
+   */
+  public void setReadPhoneStatePermission(boolean readPhoneStatePermission) {
+    ShadowSubscriptionManager.readPhoneStatePermission = readPhoneStatePermission;
+  }
+
+  private void checkReadPhoneStatePermission() {
+    if (!readPhoneStatePermission) {
+      throw new SecurityException();
+    }
+  }
+
+  /**
+   * When set to false methods requiring {@link android.Manifest.permission#READ_PHONE_NUMBERS}
+   * permission will throw a {@link SecurityException}. By default it's set to true for backwards
+   * compatibility.
+   */
+  public void setReadPhoneNumbersPermission(boolean readPhoneNumbersPermission) {
+    ShadowSubscriptionManager.readPhoneNumbersPermission = readPhoneNumbersPermission;
+  }
+
+  private void checkReadPhoneNumbersPermission() {
+    if (!readPhoneNumbersPermission) {
+      throw new SecurityException();
+    }
+  }
+
+  /**
+   * Returns the phone number for the given {@code subscriptionId}, or an empty string if not
+   * available.
+   *
+   * <p>The phone number can be set by {@link #setPhoneNumber(int, String)}
+   *
+   * <p>An exception will be thrown if the READ_PHONE_NUMBERS permission has not been granted.
+   */
+  @Implementation(minSdk = TIRAMISU)
+  protected String getPhoneNumber(int subscriptionId) {
+    checkReadPhoneNumbersPermission();
+    return phoneNumberMap.getOrDefault(subscriptionId, "");
+  }
+
+  /**
+   * Returns the phone number for the given {@code subscriptionId}, or an empty string if not
+   * available. {@code source} is ignored and will return the same as {@link #getPhoneNumber(int)}.
+   *
+   * <p>The phone number can be set by {@link #setPhoneNumber(int, String)}
+   */
+  @Implementation(minSdk = TIRAMISU)
+  protected String getPhoneNumber(int subscriptionId, int source) {
+    return getPhoneNumber(subscriptionId);
+  }
+
+  /** Sets the phone number returned by {@link #getPhoneNumber(int)}. */
+  public void setPhoneNumber(int subscriptionId, String phoneNumber) {
+    phoneNumberMap.put(subscriptionId, phoneNumber);
+  }
+
   @Resetter
   public static void reset() {
+    activeDataSubscriptionId = SubscriptionManager.INVALID_SUBSCRIPTION_ID;
     defaultDataSubscriptionId = SubscriptionManager.INVALID_SUBSCRIPTION_ID;
     defaultSmsSubscriptionId = SubscriptionManager.INVALID_SUBSCRIPTION_ID;
     defaultVoiceSubscriptionId = SubscriptionManager.INVALID_SUBSCRIPTION_ID;
     defaultSubscriptionId = SubscriptionManager.INVALID_SUBSCRIPTION_ID;
+    subscriptionList = new ArrayList<>();
     phoneIds.clear();
+    phoneNumberMap.clear();
+    readPhoneStatePermission = true;
+    readPhoneNumbersPermission = true;
   }
 
   /** Builder class to create instance of {@link SubscriptionInfo}. */
@@ -432,6 +647,11 @@ public class ShadowSubscriptionManager {
 
     public SubscriptionInfoBuilder setIsEmbedded(boolean isEmbedded) {
       ReflectionHelpers.setField(subscriptionInfo, "mIsEmbedded", isEmbedded);
+      return this;
+    }
+
+    public SubscriptionInfoBuilder setIsOpportunistic(boolean isOpportunistic) {
+      ReflectionHelpers.setField(subscriptionInfo, "mIsOpportunistic", isOpportunistic);
       return this;
     }
 

@@ -1,17 +1,17 @@
 package org.robolectric.shadows;
 
-import static android.os.Build.VERSION_CODES.LOLLIPOP;
 import static android.os.Build.VERSION_CODES.M;
 import static android.os.Build.VERSION_CODES.O;
 import static android.os.Build.VERSION_CODES.S;
 import static org.robolectric.util.reflector.Reflector.reflector;
 
-import android.annotation.TargetApi;
+import android.annotation.RequiresApi;
 import android.os.Build;
 import org.robolectric.annotation.Implementation;
 import org.robolectric.annotation.Implements;
 import org.robolectric.annotation.Resetter;
 import org.robolectric.util.ReflectionHelpers;
+import org.robolectric.util.reflector.Accessor;
 import org.robolectric.util.reflector.Direct;
 import org.robolectric.util.reflector.ForType;
 import org.robolectric.util.reflector.Static;
@@ -20,6 +20,16 @@ import org.robolectric.util.reflector.Static;
 public class ShadowBuild {
 
   private static String radioVersionOverride = null;
+  private static String serialOverride = Build.UNKNOWN;
+
+  /**
+   * Sets the value of the {@link Build#BOARD} field.
+   *
+   * <p>It will be reset for the next test.
+   */
+  public static void setBoard(String board) {
+    ReflectionHelpers.setStaticField(Build.class, "BOARD", board);
+  }
 
   /**
    * Sets the value of the {@link Build#DEVICE} field.
@@ -58,6 +68,15 @@ public class ShadowBuild {
   }
 
   /**
+   * Sets the value of the {@link Build#IS_DEBUGGABLE} field.
+   *
+   * <p>It will be reset for the next test.
+   */
+  public static void setDebuggable(Boolean isDebuggable) {
+    ReflectionHelpers.setStaticField(Build.class, "IS_DEBUGGABLE", isDebuggable);
+  }
+
+  /**
    * Sets the value of the {@link Build#MODEL} field.
    *
    * <p>It will be reset for the next test.
@@ -93,6 +112,11 @@ public class ShadowBuild {
     ReflectionHelpers.setStaticField(Build.class, "HARDWARE", hardware);
   }
 
+  /** Override return value from {@link Build#getSerial()}. */
+  public static void setSerial(String serial) {
+    serialOverride = serial;
+  }
+
   /**
    * Sets the value of the {@link Build.VERSION#CODENAME} field.
    *
@@ -117,7 +141,7 @@ public class ShadowBuild {
    *
    * <p>It will be reset for the next test.
    */
-  @TargetApi(S)
+  @RequiresApi(S)
   public static void setVersionMediaPerformanceClass(int performanceClass) {
     ReflectionHelpers.setStaticField(
         Build.VERSION.class, "MEDIA_PERFORMANCE_CLASS", performanceClass);
@@ -137,7 +161,7 @@ public class ShadowBuild {
    *
    * <p>It will be reset for the next test.
    */
-  @TargetApi(M)
+  @RequiresApi(M)
   public static void setVersionSecurityPatch(String securityPatch) {
     ReflectionHelpers.setStaticField(Build.VERSION.class, "SECURITY_PATCH", securityPatch);
   }
@@ -161,13 +185,30 @@ public class ShadowBuild {
   }
 
   /**
-   * Sets the value of the {@link Build#SUPPORTED_64_BIT_ABIS} field. Available in Android L+.
+   * Sets the value of the {@link Build#SUPPORTED_32_BIT_ABIS} field.
    *
    * <p>It will be reset for the next test.
    */
-  @TargetApi(LOLLIPOP)
+  public static void setSupported32BitAbis(String[] supported32BitAbis) {
+    ReflectionHelpers.setStaticField(Build.class, "SUPPORTED_32_BIT_ABIS", supported32BitAbis);
+  }
+
+  /**
+   * Sets the value of the {@link Build#SUPPORTED_64_BIT_ABIS} field.
+   *
+   * <p>It will be reset for the next test.
+   */
   public static void setSupported64BitAbis(String[] supported64BitAbis) {
     ReflectionHelpers.setStaticField(Build.class, "SUPPORTED_64_BIT_ABIS", supported64BitAbis);
+  }
+
+  /**
+   * Sets the value of the {@link Build#SUPPORTED_ABIS} field.
+   *
+   * <p>It will be reset for the next test.
+   */
+  public static void setSupportedAbis(String[] supportedAbis) {
+    ReflectionHelpers.setStaticField(Build.class, "SUPPORTED_ABIS", supportedAbis);
   }
 
   /**
@@ -177,6 +218,39 @@ public class ShadowBuild {
    */
   public static void setRadioVersion(String radioVersion) {
     radioVersionOverride = radioVersion;
+  }
+
+  /**
+   * Sets the value of the {@link Build#SOC_MANUFACTURER} field.
+   *
+   * <p>It will be reset for the next test.
+   *
+   * <p>Added in API level 31.
+   */
+  public static void setSystemOnChipManufacturer(String systemOnChipManufacturer) {
+    ReflectionHelpers.setStaticField(Build.class, "SOC_MANUFACTURER", systemOnChipManufacturer);
+  }
+
+  /**
+   * Sets the value of the {@link Build#SOC_MODEL} field.
+   *
+   * <p>It will be reset for the next test.
+   *
+   * <p>Added in API level 31.
+   */
+  public static void setSystemOnChipModel(String systemOnChipModel) {
+    ReflectionHelpers.setStaticField(Build.class, "SOC_MODEL", systemOnChipModel);
+  }
+
+  /**
+   * Sets the value of the {@link Build#ODM_SKU} field.
+   *
+   * <p>It will be reset for the next test.
+   *
+   * <p>Added in API level 31.
+   */
+  public static void setOdmSku(String odmSku) {
+    reflector(_Build_.class).setOdmSku(odmSku);
   }
 
   @Implementation
@@ -189,12 +263,13 @@ public class ShadowBuild {
 
   @Implementation(minSdk = O)
   protected static String getSerial() {
-    return Build.UNKNOWN;
+    return serialOverride;
   }
 
   @Resetter
   public static synchronized void reset() {
     radioVersionOverride = null;
+    serialOverride = Build.UNKNOWN;
     reflector(_Build_.class).__staticInitializer__();
     reflector(_VERSION_.class).__staticInitializer__();
   }
@@ -205,6 +280,10 @@ public class ShadowBuild {
 
     @Static
     void __staticInitializer__();
+
+    @Static
+    @Accessor("ODM_SKU")
+    void setOdmSku(String odmSku);
 
     @Static
     @Direct

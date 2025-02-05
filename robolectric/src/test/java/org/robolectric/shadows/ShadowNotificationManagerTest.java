@@ -2,14 +2,15 @@ package org.robolectric.shadows;
 
 import static android.app.NotificationManager.INTERRUPTION_FILTER_ALL;
 import static android.app.NotificationManager.INTERRUPTION_FILTER_PRIORITY;
+import static android.os.Build.VERSION_CODES.O;
 import static android.os.Build.VERSION_CODES.R;
 import static com.google.common.truth.Truth.assertThat;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.fail;
 import static org.robolectric.Shadows.shadowOf;
-import static org.robolectric.annotation.LooperMode.Mode.PAUSED;
 
+import android.app.Activity;
 import android.app.AutomaticZenRule;
 import android.app.Notification;
 import android.app.NotificationChannel;
@@ -22,6 +23,7 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Build.VERSION_CODES;
 import android.service.notification.StatusBarNotification;
+import android.service.notification.ZenPolicy;
 import androidx.test.core.app.ApplicationProvider;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import com.google.common.collect.ImmutableList;
@@ -31,15 +33,15 @@ import java.util.List;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.robolectric.Robolectric;
+import org.robolectric.android.controller.ActivityController;
 import org.robolectric.annotation.Config;
-import org.robolectric.annotation.LooperMode;
 
 @RunWith(AndroidJUnit4.class)
-@LooperMode(PAUSED)
 public class ShadowNotificationManagerTest {
   private NotificationManager notificationManager;
-  private Notification notification1 = new Notification();
-  private Notification notification2 = new Notification();
+  private final Notification notification1 = new Notification();
+  private final Notification notification2 = new Notification();
 
   @Before
   public void setUp() {
@@ -72,15 +74,32 @@ public class ShadowNotificationManagerTest {
   }
 
   @Test
+  @Config(minSdk = Build.VERSION_CODES.R)
+  public void getConsolidatedNotificationPolicy() {
+    assertThat(notificationManager.getConsolidatedNotificationPolicy()).isNull();
+
+    final Policy policy = new Policy(0, 0, 0);
+    shadowOf(notificationManager).setConsolidatedNotificationPolicy(policy);
+    assertThat(notificationManager.getConsolidatedNotificationPolicy()).isEqualTo(policy);
+  }
+
+  @Test
   @Config(minSdk = Build.VERSION_CODES.O)
   public void createNotificationChannel() {
     notificationManager.createNotificationChannel(new NotificationChannel("id", "name", 1));
 
     assertThat(shadowOf(notificationManager).getNotificationChannels()).hasSize(1);
-    NotificationChannel channel =
-        (NotificationChannel) shadowOf(notificationManager).getNotificationChannel("id");
+    NotificationChannel channel = shadowOf(notificationManager).getNotificationChannel("id");
     assertThat(channel.getName().toString()).isEqualTo("name");
     assertThat(channel.getImportance()).isEqualTo(1);
+  }
+
+  @Test
+  @Config(minSdk = Build.VERSION_CODES.O)
+  public void getImportance_afterReset() {
+    assertThat(notificationManager.getImportance()).isEqualTo(NotificationManager.IMPORTANCE_NONE);
+    ShadowNotificationManager.reset();
+    assertThat(notificationManager.getImportance()).isEqualTo(NotificationManager.IMPORTANCE_NONE);
   }
 
   @Test
@@ -100,8 +119,7 @@ public class ShadowNotificationManagerTest {
     notificationManager.createNotificationChannel(channelUpdate);
 
     assertThat(shadowOf(notificationManager).getNotificationChannels()).hasSize(1);
-    NotificationChannel resultChannel =
-        (NotificationChannel) shadowOf(notificationManager).getNotificationChannel("id");
+    NotificationChannel resultChannel = shadowOf(notificationManager).getNotificationChannel("id");
     assertThat(resultChannel.getName().toString()).isEqualTo("newName");
     assertThat(resultChannel.getDescription()).isEqualTo("newDescription");
     // No importance upgrade.
@@ -126,8 +144,7 @@ public class ShadowNotificationManagerTest {
     notificationManager.createNotificationChannel(channelUpdate);
 
     assertThat(shadowOf(notificationManager).getNotificationChannels()).hasSize(1);
-    NotificationChannel resultChannel =
-        (NotificationChannel) shadowOf(notificationManager).getNotificationChannel("id");
+    NotificationChannel resultChannel = shadowOf(notificationManager).getNotificationChannel("id");
     assertThat(resultChannel.getName().toString()).isEqualTo("newName");
     assertThat(resultChannel.getDescription()).isEqualTo("newDescription");
     assertThat(resultChannel.getImportance()).isEqualTo(0);
@@ -141,7 +158,7 @@ public class ShadowNotificationManagerTest {
 
     assertThat(shadowOf(notificationManager).getNotificationChannelGroups()).hasSize(1);
     NotificationChannelGroup group =
-        (NotificationChannelGroup) shadowOf(notificationManager).getNotificationChannelGroup("id");
+        shadowOf(notificationManager).getNotificationChannelGroup("id");
     assertThat(group.getName().toString()).isEqualTo("name");
   }
 
@@ -154,11 +171,10 @@ public class ShadowNotificationManagerTest {
     notificationManager.createNotificationChannels(ImmutableList.of(channel1, channel2));
 
     assertThat(shadowOf(notificationManager).getNotificationChannels()).hasSize(2);
-    NotificationChannel channel =
-        (NotificationChannel) shadowOf(notificationManager).getNotificationChannel("id");
+    NotificationChannel channel = shadowOf(notificationManager).getNotificationChannel("id");
     assertThat(channel.getName().toString()).isEqualTo("name");
     assertThat(channel.getImportance()).isEqualTo(1);
-    channel = (NotificationChannel) shadowOf(notificationManager).getNotificationChannel("id2");
+    channel = shadowOf(notificationManager).getNotificationChannel("id2");
     assertThat(channel.getName().toString()).isEqualTo("name2");
     assertThat(channel.getImportance()).isEqualTo(1);
   }
@@ -325,6 +341,27 @@ public class ShadowNotificationManagerTest {
   }
 
   @Test
+  @Config(minSdk = VERSION_CODES.Q)
+  public void addAutomaticZenRule_oneRuleWithConfigurationActivity_shouldAddRuleAndReturnId() {
+    shadowOf(notificationManager).setNotificationPolicyAccessGranted(true);
+
+    AutomaticZenRule rule =
+        new AutomaticZenRule(
+            "name",
+            /* owner= */ null,
+            new ComponentName("pkg", "cls"),
+            Uri.parse("condition://id"),
+            new ZenPolicy.Builder().build(),
+            NotificationManager.INTERRUPTION_FILTER_PRIORITY,
+            /* enabled= */ true);
+    String id = notificationManager.addAutomaticZenRule(rule);
+
+    assertThat(id).isNotEmpty();
+    assertThat(notificationManager.getAutomaticZenRule(id)).isEqualTo(rule);
+    assertThat(notificationManager.getAutomaticZenRules()).containsExactly(id, rule);
+  }
+
+  @Test
   @Config(minSdk = Build.VERSION_CODES.N)
   public void addAutomaticZenRule_oneRule_shouldAddRuleAndReturnId() {
     shadowOf(notificationManager).setNotificationPolicyAccessGranted(true);
@@ -410,7 +447,7 @@ public class ShadowNotificationManagerTest {
             NotificationManager.INTERRUPTION_FILTER_ALL,
             /* enabled= */ false);
     try {
-      assertThat(notificationManager.updateAutomaticZenRule(nonexistentId, updatedRule));
+      assertThat(notificationManager.updateAutomaticZenRule(nonexistentId, updatedRule)).isTrue();
       fail("Should have thrown SecurityException");
     } catch (SecurityException expected) {
     }
@@ -446,6 +483,48 @@ public class ShadowNotificationManagerTest {
             "updated_name",
             new ComponentName("updated_pkg", "updated_cls"),
             Uri.parse("condition://updated_id"),
+            NotificationManager.INTERRUPTION_FILTER_ALL,
+            /* enabled= */ false);
+    assertThat(notificationManager.updateAutomaticZenRule(id2, updatedRule)).isTrue();
+
+    assertThat(notificationManager.getAutomaticZenRule(id1)).isEqualTo(rule1);
+    assertThat(notificationManager.getAutomaticZenRule(id2)).isEqualTo(updatedRule);
+    assertThat(notificationManager.getAutomaticZenRules())
+        .containsExactly(id1, rule1, id2, updatedRule);
+  }
+
+  @Test
+  @Config(minSdk = Build.VERSION_CODES.Q)
+  public void updateAutomaticZenRule_nullOwnerWithConfigurationActivity_updateRuleAndReturnTrue() {
+    shadowOf(notificationManager).setNotificationPolicyAccessGranted(true);
+    AutomaticZenRule rule1 =
+        new AutomaticZenRule(
+            "name1",
+            /* owner= */ null,
+            new ComponentName("pkg1", "cls1"),
+            Uri.parse("condition://id1"),
+            new ZenPolicy.Builder().build(),
+            NotificationManager.INTERRUPTION_FILTER_PRIORITY,
+            /* enabled= */ true);
+    AutomaticZenRule rule2 =
+        new AutomaticZenRule(
+            "name2",
+            /* owner= */ null,
+            new ComponentName("pkg2", "cls2"),
+            Uri.parse("condition://id2"),
+            new ZenPolicy.Builder().build(),
+            NotificationManager.INTERRUPTION_FILTER_ALARMS,
+            /* enabled= */ false);
+    String id1 = notificationManager.addAutomaticZenRule(rule1);
+    String id2 = notificationManager.addAutomaticZenRule(rule2);
+
+    AutomaticZenRule updatedRule =
+        new AutomaticZenRule(
+            "updated_name",
+            /* owner= */ null,
+            new ComponentName("updated_pkg", "updated_cls"),
+            Uri.parse("condition://updated_id"),
+            new ZenPolicy.Builder().build(),
             NotificationManager.INTERRUPTION_FILTER_ALL,
             /* enabled= */ false);
     assertThat(notificationManager.updateAutomaticZenRule(id2, updatedRule)).isTrue();
@@ -739,5 +818,37 @@ public class ShadowNotificationManagerTest {
       }
     }
     return null;
+  }
+
+  @Test
+  @Config(minSdk = O)
+  public void notificationManager_activityContext_enabled_differentInstancesRetrieveChannels() {
+    String originalProperty = System.getProperty("robolectric.createActivityContexts", "");
+    System.setProperty("robolectric.createActivityContexts", "true");
+    try (ActivityController<Activity> controller =
+        Robolectric.buildActivity(Activity.class).setup()) {
+      NotificationManager applicationNotificationManager =
+          (NotificationManager)
+              ApplicationProvider.getApplicationContext()
+                  .getSystemService(Context.NOTIFICATION_SERVICE);
+
+      NotificationChannel testChannel =
+          new NotificationChannel(
+              "test_channel_id", "Test Channel", NotificationManager.IMPORTANCE_DEFAULT);
+      applicationNotificationManager.createNotificationChannel(testChannel);
+
+      Activity activity = controller.get();
+      NotificationManager activityNotificationManager =
+          (NotificationManager) activity.getSystemService(Context.NOTIFICATION_SERVICE);
+
+      NotificationChannel applicationChannel =
+          applicationNotificationManager.getNotificationChannel("test_channel_id");
+      NotificationChannel activityChannel =
+          activityNotificationManager.getNotificationChannel("test_channel_id");
+
+      assertThat(activityChannel).isEqualTo(applicationChannel);
+    } finally {
+      System.setProperty("robolectric.createActivityContexts", originalProperty);
+    }
   }
 }

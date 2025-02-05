@@ -1,63 +1,67 @@
 package org.robolectric;
 
-import static android.os.Build.VERSION_CODES.LOLLIPOP;
+import static android.os.Build.VERSION_CODES.Q;
 import static org.robolectric.annotation.LooperMode.Mode.LEGACY;
 import static org.robolectric.shadows.ShadowLooper.assertLooperMode;
+import static org.robolectric.util.reflector.Reflector.reflector;
 
 import android.app.Application;
+import android.app.ResourcesManager;
 import android.content.Context;
+import android.content.res.CompatibilityInfo;
 import android.content.res.Configuration;
 import android.content.res.Resources;
+import android.graphics.Bitmap;
 import android.util.DisplayMetrics;
+import android.view.Display;
 import com.google.common.base.Supplier;
 import java.nio.file.Path;
 import org.robolectric.android.Bootstrap;
 import org.robolectric.android.ConfigurationV25;
-import org.robolectric.res.ResourceTable;
+import org.robolectric.shadows.ShadowDisplayManager;
+import org.robolectric.shadows.ShadowInstrumentation;
+import org.robolectric.shadows.ShadowView;
 import org.robolectric.util.Scheduler;
 import org.robolectric.util.TempDirectory;
+import org.robolectric.util.reflector.ForType;
 
 public class RuntimeEnvironment {
   /**
-   * @deprecated Use {@link #getApplication} or {@link
-   *     androidx.test.core.app.ApplicationProvider#getApplicationContext} instead. Note that unlike
-   *     the alternatives, this field is inherently incompatible with {@link
+   * @deprecated Use {@link #getApplication} instead. Note that unlike the alternative, this field
+   *     is inherently incompatible with {@link
    *     org.robolectric.annotation.experimental.LazyApplication}. This field may be removed in a
    *     later release
    */
   @Deprecated public static Context systemContext;
 
   /**
-   * @deprecated Please migrate to {@link
-   *     androidx.test.core.app.ApplicationProvider#getApplicationContext}
+   * @deprecated Please use {#getApplication} instead. Accessing this field directly is inherently
+   *     incompatible with {@link org.robolectric.annotation.experimental.LazyApplication} and
+   *     Robolectric makes no guarantees if a test *modifies* this field during execution.
    */
-  @Deprecated public static Application application;
+  @Deprecated public static volatile Application application;
 
   private static volatile Thread mainThread;
-  private static Object activityThread;
+  private static volatile Object activityThread;
   private static int apiLevel;
   private static Scheduler masterScheduler;
-  private static ResourceTable systemResourceTable;
-  private static ResourceTable appResourceTable;
-  private static ResourceTable compileTimeResourceTable;
   private static TempDirectory tempDirectory = new TempDirectory("no-test-yet");
   private static Path androidFrameworkJar;
-  public static Path compileTimeSystemResourcesFile;
 
-  private static boolean useLegacyResources;
   private static Supplier<Application> applicationSupplier;
   private static final Object supplierLock = new Object();
+  private static Supplier<Path> compileTimeSystemResourcesSupplier;
 
   /**
    * Get a reference to the {@link Application} under test.
    *
-   * The Application may be created a test setup time or created lazily at call time, based on the
-   * test's {@link LazyApplication) setting. If lazy loading is enabled, this method must be
-   * called on the main/test thread.
+   * <p>The Application may be created a test setup time or created lazily at call time, based on
+   * the test's {@link org.robolectric.annotation.experimental.LazyApplication} setting. If lazy
+   * loading is enabled, this method must be called on the main/test thread.
    *
-   * An alternate API is
-   * {@link androidx.test.core.app.ApplicationProvider#getApplicationContext()}, which is
-   * preferable if you desire cross platform tests that work on the JVM and real Android devices.
+   * <p>An alternate API outside of Robolectric is {@link
+   * androidx.test.core.app.ApplicationProvider#getApplicationContext()}, which is preferable if you
+   * desire cross platform tests that work on the JVM and real Android devices.
    */
   public static Application getApplication() {
     // IMPORTANT NOTE: Given the order in which these are nulled out when cleaning up in
@@ -68,7 +72,7 @@ public class RuntimeEnvironment {
     if (application == null) {
       synchronized (supplierLock) {
         if (applicationSupplier != null) {
-          application = applicationSupplier.get();
+          ShadowInstrumentation.runOnMainSyncNoIdle(() -> application = applicationSupplier.get());
         }
       }
     }
@@ -189,6 +193,8 @@ public class RuntimeEnvironment {
    * @param newQualifiers the qualifiers to apply
    */
   public static void setQualifiers(String newQualifiers) {
+    ShadowDisplayManager.changeDisplay(Display.DEFAULT_DISPLAY, newQualifiers);
+
     Configuration configuration;
     DisplayMetrics displayMetrics = new DisplayMetrics();
 
@@ -199,9 +205,45 @@ public class RuntimeEnvironment {
       configuration = new Configuration();
     }
     Bootstrap.applyQualifiers(newQualifiers, getApiLevel(), configuration, displayMetrics);
+    if (ShadowView.useRealGraphics()) {
+      Bitmap.setDefaultDensity(displayMetrics.densityDpi);
+    }
 
-    Resources systemResources = Resources.getSystem();
-    systemResources.updateConfiguration(configuration, displayMetrics);
+    updateConfiguration(configuration, displayMetrics);
+  }
+
+  public static void setFontScale(float fontScale) {
+    Resources systemResources = getApplication().getResources();
+    DisplayMetrics displayMetrics = systemResources.getDisplayMetrics();
+    Configuration configuration = systemResources.getConfiguration();
+
+    displayMetrics.scaledDensity = displayMetrics.density * fontScale;
+    configuration.fontScale = fontScale;
+
+    updateConfiguration(configuration, displayMetrics);
+  }
+
+  public static float getFontScale() {
+    Resources systemResources = getApplication().getResources();
+    return systemResources.getConfiguration().fontScale;
+  }
+
+  private static void updateConfiguration(
+      Configuration configuration, DisplayMetrics displayMetrics) {
+    // Update the resources last so that listeners will have a consistent environment.
+    if (ResourcesManager.getInstance().getConfiguration() != null) {
+      if (System.getProperty("robolectric.configurationChangeFix", "true").equals("true")) {
+        if (getApiLevel() <= Q) {
+          reflector(ResourcesManagerReflector.class, ResourcesManager.getInstance())
+              .applyConfigurationToResourcesLocked(configuration, null);
+        } else {
+          ResourcesManager.getInstance().applyConfigurationToResources(configuration, null);
+        }
+      } else {
+        ResourcesManager.getInstance().getConfiguration().updateFrom(configuration);
+      }
+    }
+    Resources.getSystem().updateConfiguration(configuration, displayMetrics);
     if (RuntimeEnvironment.application != null) {
       getApplication().getResources().updateConfiguration(configuration, displayMetrics);
     } else {
@@ -213,16 +255,6 @@ public class RuntimeEnvironment {
 
   public static int getApiLevel() {
     return apiLevel;
-  }
-
-  public static Number castNativePtr(long ptr) {
-    // Weird, using a ternary here doesn't work, there's some auto promotion of boxed types
-    // happening.
-    if (getApiLevel() >= LOLLIPOP) {
-      return ptr;
-    } else {
-      return (int) ptr;
-    }
   }
 
   /**
@@ -252,30 +284,6 @@ public class RuntimeEnvironment {
     RuntimeEnvironment.masterScheduler = masterScheduler;
   }
 
-  public static void setSystemResourceTable(ResourceTable systemResourceTable) {
-    RuntimeEnvironment.systemResourceTable = systemResourceTable;
-  }
-
-  public static void setAppResourceTable(ResourceTable appResourceTable) {
-    RuntimeEnvironment.appResourceTable = appResourceTable;
-  }
-
-  public static ResourceTable getSystemResourceTable() {
-    return systemResourceTable;
-  }
-
-  public static ResourceTable getAppResourceTable() {
-    return appResourceTable;
-  }
-
-  public static void setCompileTimeResourceTable(ResourceTable compileTimeResourceTable) {
-    RuntimeEnvironment.compileTimeResourceTable = compileTimeResourceTable;
-  }
-
-  public static ResourceTable getCompileTimeResourceTable() {
-    return compileTimeResourceTable;
-  }
-
   public static void setTempDirectory(TempDirectory tempDirectory) {
     RuntimeEnvironment.tempDirectory = tempDirectory;
   }
@@ -292,23 +300,23 @@ public class RuntimeEnvironment {
     return RuntimeEnvironment.androidFrameworkJar;
   }
 
-  /**
-   * Internal only.
-   *
-   * @deprecated Do not use.
-   */
-  @Deprecated
-  public static boolean useLegacyResources() {
-    return useLegacyResources;
+  /** internal use only */
+  public static void setCompileTimeSystemResources(
+      Supplier<Path> compileTimeSystemResourcesSupplier) {
+    RuntimeEnvironment.compileTimeSystemResourcesSupplier = compileTimeSystemResourcesSupplier;
   }
 
   /**
-   * Internal only.
-   *
-   * @deprecated Do not use.
+   * @deprecated obsolete do not use
    */
   @Deprecated
-  public static void setUseLegacyResources(boolean useLegacyResources) {
-    RuntimeEnvironment.useLegacyResources = useLegacyResources;
+  public static Path getCompileTimeSystemResourcesPath() {
+    return compileTimeSystemResourcesSupplier.get();
+  }
+
+  @ForType(ResourcesManager.class)
+  interface ResourcesManagerReflector {
+    boolean applyConfigurationToResourcesLocked(
+        Configuration configuration, CompatibilityInfo compatibilityInfo);
   }
 }

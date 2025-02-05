@@ -1,5 +1,7 @@
 package org.robolectric.shadows;
 
+import static android.os.Build.VERSION_CODES.TIRAMISU;
+
 import android.opengl.Matrix;
 import org.robolectric.annotation.Implementation;
 import org.robolectric.annotation.Implements;
@@ -25,7 +27,7 @@ public class ShadowOpenGLMatrix {
    * @throws IllegalArgumentException if result, lhs, or rhs are null, or if resultOffset + 16 >
    *     result.length or lhsOffset + 16 > lhs.length or rhsOffset + 16 > rhs.length.
    */
-  @Implementation
+  @Implementation(maxSdk = TIRAMISU)
   protected static void multiplyMM(
       float[] result, int resultOffset, float[] lhs, int lhsOffset, float[] rhs, int rhsOffset) {
     if (result == null) {
@@ -84,7 +86,7 @@ public class ShadowOpenGLMatrix {
    *     resultVecOffset + 4 > resultVec.length or lhsMatOffset + 16 > lhsMat.length or rhsVecOffset
    *     + 4 > rhsVec.length.
    */
-  @Implementation
+  @Implementation(maxSdk = TIRAMISU)
   protected static void multiplyMV(
       float[] resultVec,
       int resultVecOffset,
@@ -114,15 +116,30 @@ public class ShadowOpenGLMatrix {
     final float y = rhsVec[rhsVecOffset + 1];
     final float z = rhsVec[rhsVecOffset + 2];
     final float w = rhsVec[rhsVecOffset + 3];
-    resultVec[resultVecOffset + 0] = lhsMat[I(0, 0, lhsMatOffset)] * x + lhsMat[I(1, 0, lhsMatOffset)] * y + lhsMat[I(2, 0, lhsMatOffset)] * z + lhsMat[I(3, 0, lhsMatOffset)] * w;
-    resultVec[resultVecOffset + 1] = lhsMat[I(0, 1, lhsMatOffset)] * x + lhsMat[I(1, 1, lhsMatOffset)] * y + lhsMat[I(2, 1, lhsMatOffset)] * z + lhsMat[I(3, 1, lhsMatOffset)] * w;
-    resultVec[resultVecOffset + 2] = lhsMat[I(0, 2, lhsMatOffset)] * x + lhsMat[I(1, 2, lhsMatOffset)] * y + lhsMat[I(2, 2, lhsMatOffset)] * z + lhsMat[I(3, 2, lhsMatOffset)] * w;
-    resultVec[resultVecOffset + 3] = lhsMat[I(0, 3, lhsMatOffset)] * x + lhsMat[I(1, 3, lhsMatOffset)] * y + lhsMat[I(2, 3, lhsMatOffset)] * z + lhsMat[I(3, 3, lhsMatOffset)] * w;
+    resultVec[resultVecOffset + 0] =
+        lhsMat[I(0, 0, lhsMatOffset)] * x
+            + lhsMat[I(1, 0, lhsMatOffset)] * y
+            + lhsMat[I(2, 0, lhsMatOffset)] * z
+            + lhsMat[I(3, 0, lhsMatOffset)] * w;
+    resultVec[resultVecOffset + 1] =
+        lhsMat[I(0, 1, lhsMatOffset)] * x
+            + lhsMat[I(1, 1, lhsMatOffset)] * y
+            + lhsMat[I(2, 1, lhsMatOffset)] * z
+            + lhsMat[I(3, 1, lhsMatOffset)] * w;
+    resultVec[resultVecOffset + 2] =
+        lhsMat[I(0, 2, lhsMatOffset)] * x
+            + lhsMat[I(1, 2, lhsMatOffset)] * y
+            + lhsMat[I(2, 2, lhsMatOffset)] * z
+            + lhsMat[I(3, 2, lhsMatOffset)] * w;
+    resultVec[resultVecOffset + 3] =
+        lhsMat[I(0, 3, lhsMatOffset)] * x
+            + lhsMat[I(1, 3, lhsMatOffset)] * y
+            + lhsMat[I(2, 3, lhsMatOffset)] * z
+            + lhsMat[I(3, 3, lhsMatOffset)] * w;
   }
 
   private static int I(int i, int j, int offset) {
     // #define I(_i, _j) ((_j)+ 4*(_i))
     return offset + j + 4 * i;
   }
-
 }

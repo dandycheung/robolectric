@@ -4,6 +4,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 import javax.annotation.Nonnull;
 import org.robolectric.annotation.Config;
 
@@ -40,7 +41,9 @@ public class ManifestIdentifier {
     this.apkFile = apkFile;
   }
 
-  /** @deprecated Use {@link #ManifestIdentifier(String, Path, Path, Path, List)} instead. */
+  /**
+   * @deprecated Use {@link #ManifestIdentifier(String, Path, Path, Path, List)} instead.
+   */
   @Deprecated
   public ManifestIdentifier(
       Path manifestFile, Path resDir, Path assetDir, String packageName, List<Path> libraryDirs) {
@@ -101,23 +104,22 @@ public class ManifestIdentifier {
 
     ManifestIdentifier that = (ManifestIdentifier) o;
 
-    if (manifestFile != null ? !manifestFile.equals(that.manifestFile)
-        : that.manifestFile != null) {
+    if (!Objects.equals(manifestFile, that.manifestFile)) {
       return false;
     }
-    if (resDir != null ? !resDir.equals(that.resDir) : that.resDir != null) {
+    if (!Objects.equals(resDir, that.resDir)) {
       return false;
     }
-    if (assetDir != null ? !assetDir.equals(that.assetDir) : that.assetDir != null) {
+    if (!Objects.equals(assetDir, that.assetDir)) {
       return false;
     }
-    if (packageName != null ? !packageName.equals(that.packageName) : that.packageName != null) {
+    if (!Objects.equals(packageName, that.packageName)) {
       return false;
     }
-    if (libraries != null ? !libraries.equals(that.libraries) : that.libraries != null) {
+    if (!Objects.equals(libraries, that.libraries)) {
       return false;
     }
-    return apkFile != null ? apkFile.equals(that.apkFile) : that.apkFile == null;
+    return Objects.equals(apkFile, that.apkFile);
   }
 
   @Override
@@ -133,13 +135,20 @@ public class ManifestIdentifier {
 
   @Override
   public String toString() {
-    return "ManifestIdentifier{" +
-        "manifestFile=" + manifestFile +
-        ", resDir=" + resDir +
-        ", assetDir=" + assetDir +
-        ", packageName='" + packageName + '\'' +
-        ", libraries=" + libraries +
-        ", apkFile=" + apkFile +
-        '}';
+    return "ManifestIdentifier{"
+        + "manifestFile="
+        + manifestFile
+        + ", resDir="
+        + resDir
+        + ", assetDir="
+        + assetDir
+        + ", packageName='"
+        + packageName
+        + '\''
+        + ", libraries="
+        + libraries
+        + ", apkFile="
+        + apkFile
+        + '}';
   }
 }

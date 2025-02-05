@@ -40,7 +40,7 @@ import org.apache.http.client.methods.HttpRequestBase;
  */
 class HttpRedirect extends HttpRequestBase {
 
-  private String method;
+  private final String method;
 
   public HttpRedirect(final String method, final URI uri) {
     super();
@@ -56,5 +56,4 @@ class HttpRedirect extends HttpRequestBase {
   public String getMethod() {
     return this.method;
   }
-
 }

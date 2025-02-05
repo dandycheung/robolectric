@@ -1,7 +1,7 @@
 package org.robolectric.shadows;
 
-import static android.os.Build.VERSION_CODES.LOLLIPOP;
 import static android.os.Build.VERSION_CODES.Q;
+import static java.util.Arrays.asList;
 
 import android.media.MediaCodecInfo;
 import android.media.MediaCodecInfo.AudioCapabilities;
@@ -10,7 +10,9 @@ import android.media.MediaCodecInfo.CodecProfileLevel;
 import android.media.MediaCodecInfo.EncoderCapabilities;
 import android.media.MediaCodecInfo.VideoCapabilities;
 import android.media.MediaFormat;
+import android.util.Range;
 import com.google.common.base.Preconditions;
+import java.util.HashSet;
 import org.robolectric.RuntimeEnvironment;
 import org.robolectric.util.ReflectionHelpers;
 import org.robolectric.util.ReflectionHelpers.ClassParameter;
@@ -70,7 +72,7 @@ public class MediaCodecInfoBuilder {
   }
 
   /**
-   * Sets whether the codec is softwrare only or not.
+   * Sets whether the codec is software only or not.
    *
    * @param isSoftwareOnly a boolean to indicate whether the codec is software only {@code true} or
    *     not {@code false}. Default value is {@code false}.
@@ -116,14 +118,12 @@ public class MediaCodecInfoBuilder {
           ClassParameter.from(String.class, name), // canonicalName
           ClassParameter.from(int.class, flags),
           ClassParameter.from(CodecCapabilities[].class, capabilities));
-    } else if (RuntimeEnvironment.getApiLevel() >= LOLLIPOP) {
+    } else {
       return ReflectionHelpers.callConstructor(
           MediaCodecInfo.class,
           ClassParameter.from(String.class, name),
           ClassParameter.from(boolean.class, isEncoder),
           ClassParameter.from(CodecCapabilities[].class, capabilities));
-    } else {
-      throw new UnsupportedOperationException("Unable to create MediaCodecInfo");
     }
   }
 
@@ -177,6 +177,7 @@ public class MediaCodecInfoBuilder {
     private boolean isEncoder;
     private CodecProfileLevel[] profileLevels = new CodecProfileLevel[0];
     private int[] colorFormats;
+    private String[] requiredFeatures = new String[0];
 
     private CodecCapabilitiesBuilder() {}
 
@@ -189,10 +190,14 @@ public class MediaCodecInfoBuilder {
      * Sets media format.
      *
      * @param mediaFormat a {@link MediaFormat} supported by the codec. It is a requirement for
-     *     mediaFormat to have {@link MediaFormat.KEY_MIME} set. Other keys are optional.
-     * @throws {@link NullPointerException} if mediaFormat is null.
-     * @throws {@link IllegalArgumentException} if mediaFormat does not have {@link
-     *     MediaFormat.KEY_MIME}.
+     *     mediaFormat to have {@link MediaFormat#KEY_MIME} set. Other keys are optional. Setting
+     *     {@link MediaFormat#KEY_WIDTH}, {@link MediaFormat#KEY_MAX_WIDTH} and {@link
+     *     MediaFormat#KEY_HEIGHT}, {@link MediaFormat#KEY_MAX_HEIGHT} will set the minimum and
+     *     maximum width, height respectively. For backwards compatibility, setting only {@link
+     *     MediaFormat#KEY_WIDTH}, {@link MediaFormat#KEY_HEIGHT} will only set the maximum width,
+     *     height respectively.
+     * @throws NullPointerException if mediaFormat is null.
+     * @throws IllegalArgumentException if mediaFormat does not have {@link MediaFormat#KEY_MIME}.
      */
     public CodecCapabilitiesBuilder setMediaFormat(MediaFormat mediaFormat) {
       Preconditions.checkNotNull(mediaFormat);
@@ -200,6 +205,16 @@ public class MediaCodecInfoBuilder {
           mediaFormat.getString(MediaFormat.KEY_MIME) != null,
           "MIME type of the format is not set.");
       this.mediaFormat = mediaFormat;
+      return this;
+    }
+
+    /**
+     * Sets required features.
+     *
+     * @param requiredFeatures An array of {@link CodecCapabilities} FEATURE strings.
+     */
+    public CodecCapabilitiesBuilder setRequiredFeatures(String[] requiredFeatures) {
+      this.requiredFeatures = requiredFeatures;
       return this;
     }
 
@@ -219,7 +234,7 @@ public class MediaCodecInfoBuilder {
      *
      * @param profileLevels an array of {@link MediaCodecInfo.CodecProfileLevel} supported by the
      *     codec.
-     * @throws {@link NullPointerException} if profileLevels is null.
+     * @throws NullPointerException if profileLevels is null.
      */
     public CodecCapabilitiesBuilder setProfileLevels(CodecProfileLevel[] profileLevels) {
       this.profileLevels = Preconditions.checkNotNull(profileLevels);
@@ -264,6 +279,20 @@ public class MediaCodecInfoBuilder {
 
       @Accessor("mFlagsSupported")
       void setFlagsSupported(int flagsSupported);
+
+      @Accessor("mFlagsRequired")
+      void setFlagsRequired(int flagsRequired);
+    }
+
+    /** Accessor interface for {@link VideoCapabilities}'s internals. */
+    @ForType(VideoCapabilities.class)
+    interface VideoCapabilitiesReflector {
+
+      @Accessor("mWidthRange")
+      void setWidthRange(Range<Integer> range);
+
+      @Accessor("mHeightRange")
+      void setHeightRange(Range<Integer> range);
     }
 
     public CodecCapabilities build() {
@@ -285,7 +314,7 @@ public class MediaCodecInfoBuilder {
         Preconditions.checkArgument(
             colorFormats == null || colorFormats.length == 0,
             "colorFormats should not be set for audio codec");
-        caps.colorFormats = new int[0]; // To prevet crash in CodecCapabilities.dup().
+        caps.colorFormats = new int[0]; // To prevent crash in CodecCapabilities.dup().
       }
 
       capsReflector.setMime(mime);
@@ -298,6 +327,29 @@ public class MediaCodecInfoBuilder {
 
       if (isVideoCodec) {
         VideoCapabilities videoCaps = createDefaultVideoCapabilities(caps, mediaFormat);
+        VideoCapabilitiesReflector videoCapsReflector =
+            Reflector.reflector(VideoCapabilitiesReflector.class, videoCaps);
+        if (mediaFormat.containsKey(MediaFormat.KEY_MAX_WIDTH)
+            && mediaFormat.containsKey(MediaFormat.KEY_WIDTH)) {
+          videoCapsReflector.setWidthRange(
+              new Range<>(
+                  mediaFormat.getInteger(MediaFormat.KEY_WIDTH),
+                  mediaFormat.getInteger(MediaFormat.KEY_MAX_WIDTH)));
+        } else if (mediaFormat.containsKey(MediaFormat.KEY_WIDTH)) {
+          videoCapsReflector.setWidthRange(
+              new Range<>(1, mediaFormat.getInteger(MediaFormat.KEY_WIDTH)));
+        }
+        if (mediaFormat.containsKey(MediaFormat.KEY_MAX_HEIGHT)
+            && mediaFormat.containsKey(MediaFormat.KEY_HEIGHT)) {
+          videoCapsReflector.setHeightRange(
+              new Range<>(
+                  mediaFormat.getInteger(MediaFormat.KEY_HEIGHT),
+                  mediaFormat.getInteger(MediaFormat.KEY_MAX_HEIGHT)));
+        } else if (mediaFormat.containsKey(MediaFormat.KEY_HEIGHT)) {
+          videoCapsReflector.setHeightRange(
+              new Range<>(1, mediaFormat.getInteger(MediaFormat.KEY_HEIGHT)));
+        }
+
         capsReflector.setVideoCaps(videoCaps);
       } else {
         AudioCapabilities audioCaps = createDefaultAudioCapabilities(caps, mediaFormat);
@@ -312,6 +364,9 @@ public class MediaCodecInfoBuilder {
       if (RuntimeEnvironment.getApiLevel() >= Q) {
         int flagsSupported = getSupportedFeatures(caps, mediaFormat);
         capsReflector.setFlagsSupported(flagsSupported);
+
+        int flagsRequired = getRequiredFeatures(caps, requiredFeatures);
+        capsReflector.setFlagsRequired(flagsRequired);
       }
 
       return caps;
@@ -355,14 +410,32 @@ public class MediaCodecInfoBuilder {
       int flagsSupported = 0;
       Object[] validFeatures = ReflectionHelpers.callInstanceMethod(parent, "getValidFeatures");
       for (Object validFeature : validFeatures) {
-        String featureName = (String) ReflectionHelpers.getField(validFeature, "mName");
-        int featureValue = (int) ReflectionHelpers.getField(validFeature, "mValue");
+        String featureName = ReflectionHelpers.getField(validFeature, "mName");
+        int featureValue = ReflectionHelpers.getField(validFeature, "mValue");
         if (mediaFormat.containsFeature(featureName)
             && mediaFormat.getFeatureEnabled(featureName)) {
           flagsSupported |= featureValue;
         }
       }
       return flagsSupported;
+    }
+
+    /**
+     * Read codec features from a given array of feature strings and convert them to values
+     * recognized by {@link CodecCapabilities}.
+     */
+    private static int getRequiredFeatures(CodecCapabilities parent, String[] requiredFeatures) {
+      int flagsRequired = 0;
+      Object[] validFeatures = ReflectionHelpers.callInstanceMethod(parent, "getValidFeatures");
+      HashSet<String> requiredFeaturesSet = new HashSet<>(asList(requiredFeatures));
+      for (Object validFeature : validFeatures) {
+        String featureName = ReflectionHelpers.getField(validFeature, "mName");
+        int featureValue = ReflectionHelpers.getField(validFeature, "mValue");
+        if (requiredFeaturesSet.contains(featureName)) {
+          flagsRequired |= featureValue;
+        }
+      }
+      return flagsRequired;
     }
   }
 }

@@ -24,7 +24,8 @@ public class ShadowRemoteCallbackList<E extends IInterface> {
       this.cookie = cookie;
     }
 
-    @Override public void binderDied() {
+    @Override
+    public void binderDied() {
       synchronized (callbacks) {
         callbacks.remove(callback.asBinder());
       }
@@ -133,7 +134,7 @@ public class ShadowRemoteCallbackList<E extends IInterface> {
     broadcastCount = -1;
   }
 
-  @Implementation(minSdk = 17)
+  @Implementation
   protected int getRegisteredCallbackCount() {
     return callbacks.size();
   }

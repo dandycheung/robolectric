@@ -3,16 +3,14 @@ package org.robolectric.res;
 import java.util.HashMap;
 import java.util.Map;
 
-/**
- * Tracks resource ids and generates new unique values.
- */
+/** Tracks resource ids and generates new unique values. */
 public class ResourceIdGenerator {
 
   private final Map<String, TypeTracker> typeInfo = new HashMap<>();
-  private int packageIdentifier;
+  private final int packageIdentifier;
 
   private static class TypeTracker {
-    private int typeIdentifier;
+    private final int typeIdentifier;
     private int currentMaxEntry;
 
     TypeTracker(int typeIdentifier) {
@@ -51,7 +49,8 @@ public class ResourceIdGenerator {
       typeTracker = new TypeTracker(getNextFreeTypeIdentifier());
       typeInfo.put(type, typeTracker);
     }
-    return ResourceIds.makeIdentifer(packageIdentifier, typeTracker.getTypeIdentifier(), typeTracker.getFreeIdentifier());
+    return ResourceIds.makeIdentifier(
+        packageIdentifier, typeTracker.getTypeIdentifier(), typeTracker.getFreeIdentifier());
   }
 
   private int getNextFreeTypeIdentifier() {

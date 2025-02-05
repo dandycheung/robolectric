@@ -4,6 +4,7 @@ import static com.google.common.io.Resources.toByteArray;
 import static com.google.common.truth.Truth.assertThat;
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 import static org.robolectric.Shadows.shadowOf;
 
 import android.app.Application;
@@ -11,7 +12,6 @@ import android.content.res.Resources;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
-import android.graphics.Point;
 import android.net.Uri;
 import android.os.Build;
 import android.provider.MediaStore;
@@ -35,8 +35,11 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.robolectric.R;
 import org.robolectric.annotation.Config;
+import org.robolectric.annotation.GraphicsMode;
+import org.robolectric.annotation.GraphicsMode.Mode;
 
 @RunWith(AndroidJUnit4.class)
+@GraphicsMode(Mode.LEGACY)
 public class ShadowBitmapFactoryTest {
   private static final int TEST_JPEG_WIDTH = 50;
   private static final int TEST_JPEG_HEIGHT = 50;
@@ -132,11 +135,23 @@ public class ShadowBitmapFactoryTest {
   }
 
   @Test
-  public void decodeBytes_shouldSetDescriptionAndCreatedFrom() throws Exception {
-    byte[] yummyBites = "Hi!".getBytes("UTF-8");
+  public void decodeBytes_shouldSetDescriptionAndCreatedFrom() {
+    byte[] yummyBites = "Hi!".getBytes(UTF_8);
     Bitmap bitmap = BitmapFactory.decodeByteArray(yummyBites, 100, 100);
     ShadowBitmap shadowBitmap = shadowOf(bitmap);
-    assertEquals("Bitmap for Hi! bytes 100..100", shadowBitmap.getDescription());
+    assertEquals("Bitmap for 3 bytes 100..100", shadowBitmap.getDescription());
+    assertEquals(yummyBites, shadowBitmap.getCreatedFromBytes());
+    assertEquals(100, bitmap.getWidth());
+    assertEquals(100, bitmap.getHeight());
+  }
+
+  @Test
+  public void decodeBytes_shouldSetDescriptionAndCreatedFromWithOptions() {
+    byte[] yummyBites = "Hi!".getBytes(UTF_8);
+    BitmapFactory.Options options = new BitmapFactory.Options();
+    Bitmap bitmap = BitmapFactory.decodeByteArray(yummyBites, 100, 100, options);
+    ShadowBitmap shadowBitmap = shadowOf(bitmap);
+    assertEquals("Bitmap for 3 bytes 100..100", shadowBitmap.getDescription());
     assertEquals(yummyBites, shadowBitmap.getCreatedFromBytes());
     assertEquals(100, bitmap.getWidth());
     assertEquals(100, bitmap.getHeight());
@@ -169,7 +184,7 @@ public class ShadowBitmapFactoryTest {
     options.inSampleSize = 100;
     Bitmap bitmap =
         BitmapFactory.decodeResource(context.getResources(), R.drawable.an_image, options);
-    assertEquals(true, shadowOf(bitmap).getDescription().contains("inSampleSize=100"));
+    assertTrue(shadowOf(bitmap).getDescription().contains("inSampleSize=100"));
   }
 
   @Test
@@ -181,7 +196,7 @@ public class ShadowBitmapFactoryTest {
     Bitmap bitmap =
         BitmapFactory.decodeResourceStream(
             context.getResources(), null, inputStream, null, options);
-    assertEquals(true, shadowOf(bitmap).getDescription().contains("inSampleSize=100"));
+    assertTrue(shadowOf(bitmap).getDescription().contains("inSampleSize=100"));
   }
 
   @Test
@@ -251,7 +266,7 @@ public class ShadowBitmapFactoryTest {
 
     byte[] bytes = data.getBytes(UTF_8);
     Bitmap bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
-    assertEquals("Bitmap for " + data, shadowOf(bitmap).getDescription());
+    assertEquals("Bitmap for " + bytes.length + " bytes", shadowOf(bitmap).getDescription());
     assertEquals(123, bitmap.getWidth());
     assertEquals(456, bitmap.getHeight());
   }
@@ -263,7 +278,7 @@ public class ShadowBitmapFactoryTest {
 
     byte[] bytes = data.getBytes(UTF_8);
     Bitmap bitmap = BitmapFactory.decodeByteArray(bytes, 1, bytes.length - 2);
-    assertEquals("Bitmap for " + data + " bytes 1..13", shadowOf(bitmap).getDescription());
+    assertEquals("Bitmap for " + bytes.length + " bytes 1..13", shadowOf(bitmap).getDescription());
   }
 
   @Test
@@ -356,45 +371,19 @@ public class ShadowBitmapFactoryTest {
     BitmapFactory.Options options = new BitmapFactory.Options();
 
     options.inSampleSize = 0;
-    Bitmap bm = ShadowBitmapFactory.create(name, options);
+    Bitmap bm = ShadowBitmapFactory.create(name, options, null);
     assertThat(bm.getWidth()).isEqualTo(100);
     assertThat(bm.getHeight()).isEqualTo(100);
 
     options.inSampleSize = 2;
-    bm = ShadowBitmapFactory.create(name, options);
+    bm = ShadowBitmapFactory.create(name, options, null);
     assertThat(bm.getWidth()).isEqualTo(50);
     assertThat(bm.getHeight()).isEqualTo(50);
 
     options.inSampleSize = 101;
-    bm = ShadowBitmapFactory.create(name, options);
+    bm = ShadowBitmapFactory.create(name, options, null);
     assertThat(bm.getWidth()).isEqualTo(1);
     assertThat(bm.getHeight()).isEqualTo(1);
-  }
-
-  @Test
-  public void createShouldSetSizeToValueFromMapAsFirstPriority() {
-    ShadowBitmapFactory.provideWidthAndHeightHints("image.png", 111, 222);
-
-    final Bitmap bitmap = ShadowBitmapFactory.create("file:image.png", null, new Point(50, 60));
-
-    assertThat(bitmap.getWidth()).isEqualTo(111);
-    assertThat(bitmap.getHeight()).isEqualTo(222);
-  }
-
-  @Test
-  public void createShouldSetSizeToParameterAsSecondPriority() {
-    final Bitmap bitmap = ShadowBitmapFactory.create(null, null, new Point(70, 80));
-
-    assertThat(bitmap.getWidth()).isEqualTo(70);
-    assertThat(bitmap.getHeight()).isEqualTo(80);
-  }
-
-  @Test
-  public void createShouldSetSizeToHardcodedValueAsLastPriority() {
-    final Bitmap bitmap = ShadowBitmapFactory.create(null, null, null);
-
-    assertThat(bitmap.getWidth()).isEqualTo(100);
-    assertThat(bitmap.getHeight()).isEqualTo(100);
   }
 
   @Test
@@ -540,7 +529,7 @@ public class ShadowBitmapFactoryTest {
     InputStream inputStream = com.google.common.io.Resources.getResource(imagePath).openStream();
     File tempFile = Files.createTempFile("ShadowBitmapFactoryTest", null).toFile();
     tempFile.deleteOnExit();
-    ByteStreams.copy(inputStream, new FileOutputStream(tempFile));
+    ByteStreams.copy(inputStream, Files.newOutputStream(tempFile.toPath()));
     return tempFile;
   }
 

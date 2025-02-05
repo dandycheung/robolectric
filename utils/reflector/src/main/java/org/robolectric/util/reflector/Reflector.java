@@ -1,11 +1,11 @@
 package org.robolectric.util.reflector;
 
 import java.io.File;
-import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationTargetException;
+import java.nio.file.Files;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -38,6 +38,8 @@ public class Reflector {
   private static final boolean DEBUG = false;
   private static final AtomicInteger COUNTER = new AtomicInteger();
   private static final Map<Class<?>, Constructor<?>> cache = new ConcurrentHashMap<>();
+  private static final Map<Class<?>, Object> staticReflectorCache = new ConcurrentHashMap<>();
+
   /**
    * Returns an object which provides accessors for invoking otherwise inaccessible static methods
    * and fields.
@@ -56,11 +58,14 @@ public class Reflector {
    * @param target the target object
    */
   public static <T> T reflector(Class<T> iClass, Object target) {
-    Class<?> targetClass = determineTargetClass(iClass);
+    if (target == null && staticReflectorCache.containsKey(iClass)) {
+      return (T) staticReflectorCache.get(iClass);
+    }
 
     Constructor<? extends T> ctor = (Constructor<? extends T>) cache.get(iClass);
     try {
       if (ctor == null) {
+        Class<?> targetClass = determineTargetClass(iClass);
         Class<? extends T> reflectorClass =
             PerfStatsCollector.getInstance()
                 .measure(
@@ -68,11 +73,15 @@ public class Reflector {
                     () -> Reflector.<T>createReflectorClass(iClass, targetClass));
         ctor = reflectorClass.getConstructor(targetClass);
         ctor.setAccessible(true);
+        cache.put(iClass, ctor);
       }
 
-      cache.put(iClass, ctor);
+      T instance = ctor.newInstance(target);
+      if (target == null) {
+        staticReflectorCache.put(iClass, instance);
+      }
+      return instance;
 
-      return ctor.newInstance(target);
     } catch (NoSuchMethodException
         | InstantiationException
         | IllegalAccessException
@@ -111,7 +120,7 @@ public class Reflector {
     if (DEBUG) {
       File file = new File("/tmp", reflectorClassName + ".class");
       System.out.println("Generated reflector: " + file.getAbsolutePath());
-      try (OutputStream out = new FileOutputStream(file)) {
+      try (OutputStream out = Files.newOutputStream(file.toPath())) {
         out.write(bytecode);
       } catch (IOException e) {
         throw new RuntimeException(e);
@@ -137,7 +146,7 @@ public class Reflector {
     ClassLoader classLoader =
         new ClassLoader(iClass.getClassLoader()) {
           @Override
-          protected Class<?> findClass(String name) throws ClassNotFoundException {
+          protected Class<?> findClass(String name) {
             return defineClass(name, bytecode, 0, bytecode.length);
           }
         };

@@ -15,15 +15,17 @@ import org.robolectric.annotation.Implements;
 import org.robolectric.annotation.RealObject;
 import org.robolectric.annotation.Resetter;
 import org.robolectric.util.reflector.Accessor;
+import org.robolectric.util.reflector.Direct;
 import org.robolectric.util.reflector.ForType;
 import org.robolectric.util.reflector.Static;
 
-@Implements(value = RenderNodeAnimator.class, isInAndroidSdk = false, minSdk = LOLLIPOP, maxSdk = Q)
+/** Shadow for {@link RenderNodeAnimator}. */
+@Implements(value = RenderNodeAnimator.class, isInAndroidSdk = false, maxSdk = Q)
 public class ShadowRenderNodeAnimator {
   private static final int STATE_FINISHED = 3;
 
   @RealObject RenderNodeAnimator realObject;
-  private Choreographer choreographer = Choreographer.getInstance();
+  private final Choreographer choreographer = Choreographer.getInstance();
   private boolean scheduled = false;
   private long startTime = -1;
   private boolean isEnding = false;
@@ -53,7 +55,7 @@ public class ShadowRenderNodeAnimator {
   @Implementation
   public void doStart() {
     reflector(RenderNodeAnimatorReflector.class, realObject).doStart();
-    if (getApiLevel() <= LOLLIPOP) {
+    if (getApiLevel() == LOLLIPOP) {
       schedule();
     }
   }
@@ -63,7 +65,7 @@ public class ShadowRenderNodeAnimator {
     RenderNodeAnimatorReflector renderNodeReflector =
         reflector(RenderNodeAnimatorReflector.class, realObject);
     renderNodeReflector.cancel();
-    if (getApiLevel() <= LOLLIPOP) {
+    if (getApiLevel() == LOLLIPOP) {
       int state = renderNodeReflector.getState();
       if (state != STATE_FINISHED) {
         // In 21, RenderNodeAnimator only calls nEnd, it doesn't call the Java end method. Thus, it
@@ -127,7 +129,7 @@ public class ShadowRenderNodeAnimator {
         }
       };
 
-  @ForType(value = RenderNodeAnimator.class, direct = true)
+  @ForType(value = RenderNodeAnimator.class)
   interface RenderNodeAnimatorReflector {
 
     @Accessor("mState")
@@ -139,12 +141,16 @@ public class ShadowRenderNodeAnimator {
 
     void onFinished();
 
+    @Direct
     void doStart();
 
+    @Direct
     void cancel();
 
+    @Direct
     void moveToRunningState();
 
+    @Direct
     void end();
   }
 }

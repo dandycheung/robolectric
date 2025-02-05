@@ -10,15 +10,14 @@ import org.junit.runners.JUnit4;
 public class ResTable_configTest {
 
   @Test
-  public void testLocale() throws Exception {
+  public void testLocale() {
     ResTable_config resTable_config = new ResTable_config();
     resTable_config.language[0] = 'e';
     resTable_config.language[1] = 'n';
     resTable_config.country[0] = 'u';
     resTable_config.country[1] = 'k';
 
-    assertThat(resTable_config.locale())
-        .isEqualTo(('e' << 24) | ('n' << 16) | ('u' << 8) | 'k');
+    assertThat(resTable_config.locale()).isEqualTo(('e' << 24) | ('n' << 16) | ('u' << 8) | 'k');
   }
 
   @Test
