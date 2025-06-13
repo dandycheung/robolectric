@@ -263,9 +263,12 @@ public class ShadowAccountManager {
       @Nullable Handler handler,
       boolean updateImmediately,
       @Nullable String[] accountTypes) {
-    // TODO: Match real method behavior by throwing IllegalStateException.
+    if (listener == null) {
+      throw new IllegalArgumentException("the listener is null");
+    }
+
     if (listeners.containsKey(listener)) {
-      return;
+      throw new IllegalStateException("this listener is already added");
     }
 
     Set<String> types = null;
@@ -332,6 +335,15 @@ public class ShadowAccountManager {
     } else {
       passwords.put(account, password);
     }
+  }
+
+  @Implementation
+  protected void clearPassword(Account account) {
+    if (account == null) {
+      throw new IllegalArgumentException("account is null");
+    }
+
+    passwords.remove(account);
   }
 
   @Implementation
