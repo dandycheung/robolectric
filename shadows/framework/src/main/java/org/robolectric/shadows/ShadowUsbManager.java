@@ -36,7 +36,7 @@ import org.robolectric.annotation.Resetter;
 import org.robolectric.util.reflector.ForType;
 
 /** Robolectric implementation of {@link android.hardware.usb.UsbManager}. */
-@Implements(value = UsbManager.class)
+@Implements(UsbManager.class)
 public class ShadowUsbManager {
 
   @RealObject private UsbManager realUsbManager;
@@ -362,7 +362,7 @@ public class ShadowUsbManager {
 
   /** Accessor interface for {@link UsbManager}'s internals. */
   @ForType(UsbManager.class)
-  public interface _UsbManager_ {
+  public interface UsbManagerReflector {
 
     UsbPort[] getPorts();
 
@@ -373,7 +373,7 @@ public class ShadowUsbManager {
 
   /** Accessor interface for {@link UsbManager}'s internals (Q+). */
   @ForType(UsbManager.class)
-  public interface _UsbManagerQ_ {
+  public interface UsbManagerQReflector {
 
     List<UsbPort> getPorts();
   }
