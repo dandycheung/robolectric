@@ -54,7 +54,7 @@ import org.robolectric.shadow.api.Shadow;
 import org.robolectric.util.ReflectionHelpers;
 
 /** Shadow for {@link UiAutomation}. */
-@Implements(value = UiAutomation.class)
+@Implements(UiAutomation.class)
 public class ShadowUiAutomation {
 
   private static final Predicate<Root> IS_FOCUSABLE = hasLayoutFlag(FLAG_NOT_FOCUSABLE).negate();
@@ -76,7 +76,7 @@ public class ShadowUiAutomation {
   }
 
   @Implementation(minSdk = P)
-  protected void grantRuntimePermission(String permission, String packageName) {
+  protected void grantRuntimePermission(String packageName, String permission) {
     getShadowInstrumentation().grantPermissions(permission);
   }
 
